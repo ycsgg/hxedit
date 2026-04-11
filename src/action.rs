@@ -1,0 +1,21 @@
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    PageUp,
+    PageDown,
+    RowStart,
+    RowEnd,
+    EnterEdit,
+    EnterCommand,
+    LeaveMode,
+    DeleteByte,
+    EditHex(u8),
+    CommandChar(char),
+    CommandBackspace,
+    CommandSubmit,
+    CommandCancel,
+    ForceQuit,
+}
