@@ -21,6 +21,9 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         "wq" => Ok(Command::WriteQuit {
             path: opt_path(rest),
         }),
+        "u" | "undo" => Ok(Command::Undo {
+            steps: parse_undo_steps(rest)?,
+        }),
         "g" | "goto" => {
             let arg = rest.ok_or(HxError::MissingArgument("offset"))?;
             Ok(Command::Goto {
@@ -57,4 +60,20 @@ fn split_command(input: &str) -> (&str, Option<&str>) {
 
 fn opt_path(input: Option<&str>) -> Option<PathBuf> {
     input.filter(|s| !s.is_empty()).map(PathBuf::from)
+}
+
+fn parse_undo_steps(input: Option<&str>) -> HxResult<usize> {
+    match input {
+        None => Ok(1),
+        Some("") => Ok(1),
+        Some(value) => {
+            let steps = value
+                .parse::<usize>()
+                .map_err(|_| HxError::InvalidUndoCount(value.to_owned()))?;
+            if steps == 0 {
+                return Err(HxError::InvalidUndoCount(value.to_owned()));
+            }
+            Ok(steps)
+        }
+    }
 }

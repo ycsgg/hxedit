@@ -21,6 +21,7 @@ use crate::commands::parser::parse_command;
 use crate::commands::types::Command;
 use crate::config::Config;
 use crate::core::document::{ByteSlot, Document};
+use crate::core::patch::PatchState;
 use crate::error::{HxError, HxResult};
 use crate::input::keymap::map_key;
 use crate::input::mouse;
@@ -42,6 +43,15 @@ pub struct App {
     view_rows: usize,
     last_columns: Option<layout::MainColumns>,
     last_command_area: Option<Rect>,
+    undo_stack: Vec<UndoEntry>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct UndoEntry {
+    offset: u64,
+    previous_patch: PatchState,
+    cursor_before: u64,
+    mode_before: Mode,
 }
 
 impl App {
@@ -63,6 +73,7 @@ impl App {
             view_rows: 1,
             last_columns: None,
             last_command_area: None,
+            undo_stack: Vec::new(),
             document,
             cursor,
             config,
@@ -252,6 +263,7 @@ impl App {
                 Ok(())
             }
             Action::DeleteByte => self.delete_current(),
+            Action::Undo(steps) => self.undo(steps, true),
             Action::EditHex(value) => self.edit_nibble(value),
             Action::CommandChar(c) => {
                 self.command_buffer.push(c);
@@ -371,18 +383,23 @@ impl App {
     }
 
     fn delete_current(&mut self) -> HxResult<()> {
+        let previous_patch = self.document.patch_state_at(self.cursor);
         self.document.delete_byte(self.cursor)?;
+        self.push_undo_if_changed(self.cursor, previous_patch, self.cursor, self.mode);
         self.status_message = format!("deleted 0x{:x}", self.cursor);
         Ok(())
     }
 
     fn edit_nibble(&mut self, value: u8) -> HxResult<()> {
+        let offset = self.cursor;
         let phase = match self.mode {
             Mode::EditHex { phase } => phase,
             _ => return Ok(()),
         };
-        self.document.replace_nibble(self.cursor, phase, value)?;
-        self.status_message = format!("edited 0x{:x}", self.cursor);
+        let previous_patch = self.document.patch_state_at(offset);
+        self.document.replace_nibble(offset, phase, value)?;
+        self.push_undo_if_changed(offset, previous_patch, self.cursor, self.mode);
+        self.status_message = format!("edited 0x{:x}", offset);
         self.mode = match phase {
             NibblePhase::High => Mode::EditHex {
                 phase: NibblePhase::Low,
@@ -415,12 +432,14 @@ impl App {
             }
             Command::Write { path } => {
                 let saved = self.document.save(path)?;
+                self.undo_stack.clear();
                 self.cursor = self.clamp_offset(self.cursor);
                 self.status_message = format!("wrote {}", saved.display());
                 Ok(())
             }
             Command::WriteQuit { path } => {
                 let saved = self.document.save(path)?;
+                self.undo_stack.clear();
                 self.cursor = self.clamp_offset(self.cursor);
                 self.status_message = format!("wrote {}", saved.display());
                 self.should_quit = true;
@@ -431,6 +450,7 @@ impl App {
                 self.status_message = format!("goto 0x{:x}", self.cursor);
                 Ok(())
             }
+            Command::Undo { steps } => self.undo(steps, false),
             Command::SearchAscii { pattern } | Command::SearchHex { pattern } => {
                 // Search continues after the current cursor, mirroring modal
                 // editor behavior and avoiding immediate self-matches.
@@ -447,6 +467,54 @@ impl App {
                 }
                 Ok(())
             }
+        }
+    }
+
+    fn undo(&mut self, steps: usize, restore_mode: bool) -> HxResult<()> {
+        let mut undone = 0;
+
+        for _ in 0..steps {
+            let Some(entry) = self.undo_stack.pop() else {
+                break;
+            };
+            self.document
+                .restore_patch_state(entry.offset, entry.previous_patch)?;
+            self.cursor = self.clamp_offset(entry.cursor_before);
+            if restore_mode {
+                self.mode = entry.mode_before;
+            }
+            undone += 1;
+        }
+
+        if !restore_mode {
+            self.mode = Mode::Normal;
+        }
+
+        if undone == 0 {
+            self.status_message = "nothing to undo".to_owned();
+        } else if undone == 1 {
+            self.status_message = "undid 1 change".to_owned();
+        } else {
+            self.status_message = format!("undid {undone} changes");
+        }
+
+        Ok(())
+    }
+
+    fn push_undo_if_changed(
+        &mut self,
+        offset: u64,
+        previous_patch: PatchState,
+        cursor_before: u64,
+        mode_before: Mode,
+    ) {
+        if self.document.patch_state_at(offset) != previous_patch {
+            self.undo_stack.push(UndoEntry {
+                offset,
+                previous_patch,
+                cursor_before,
+                mode_before,
+            });
         }
     }
 
@@ -610,5 +678,48 @@ mod tests {
         let mut app = app_with_len(256);
         app.scroll_viewport(99);
         assert_eq!(app.viewport_top, 192);
+    }
+
+    #[test]
+    fn edit_mode_undo_restores_previous_nibble_state() {
+        let mut app = app_with_len(16);
+        app.mode = Mode::EditHex {
+            phase: NibblePhase::High,
+        };
+
+        app.edit_nibble(0xa).unwrap();
+        assert_eq!(app.cursor, 0);
+        assert_eq!(
+            app.mode,
+            Mode::EditHex {
+                phase: NibblePhase::Low
+            }
+        );
+
+        app.undo(1, true).unwrap();
+        assert_eq!(app.cursor, 0);
+        assert_eq!(
+            app.mode,
+            Mode::EditHex {
+                phase: NibblePhase::High
+            }
+        );
+        assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
+    }
+
+    #[test]
+    fn command_undo_can_rewind_multiple_changes() {
+        let mut app = app_with_len(16);
+        app.mode = Mode::EditHex {
+            phase: NibblePhase::High,
+        };
+        app.edit_nibble(0xa).unwrap();
+        app.edit_nibble(0xb).unwrap();
+        app.mode = Mode::Normal;
+
+        app.execute_command(Command::Undo { steps: 2 }).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.cursor, 0);
+        assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
     }
 }

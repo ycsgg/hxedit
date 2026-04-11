@@ -14,6 +14,8 @@ pub enum HxError {
     EmptySearch,
     #[error("invalid offset: {0}")]
     InvalidOffset(String),
+    #[error("invalid undo count: {0}")]
+    InvalidUndoCount(String),
     #[error("invalid hex pattern: {0}")]
     InvalidHexPattern(String),
     #[error("unknown command: {0}")]

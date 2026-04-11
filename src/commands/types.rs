@@ -6,6 +6,7 @@ pub enum Command {
     Write { path: Option<PathBuf> },
     WriteQuit { path: Option<PathBuf> },
     Goto { offset: u64 },
+    Undo { steps: usize },
     SearchAscii { pattern: Vec<u8> },
     SearchHex { pattern: Vec<u8> },
 }

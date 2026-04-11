@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::core::file_view::FileView;
-use crate::core::patch::PatchSet;
+use crate::core::patch::{PatchSet, PatchState};
 use crate::core::save;
 use crate::core::search::KmpSearcher;
 use crate::error::{HxError, HxResult};
@@ -75,6 +75,10 @@ impl Document {
         &self.patches
     }
 
+    pub fn patch_state_at(&self, offset: u64) -> PatchState {
+        self.patches.state_at(offset)
+    }
+
     pub fn raw_range(&mut self, offset: u64, len: usize) -> HxResult<Vec<u8>> {
         if offset >= self.original_len {
             return Ok(Vec::new());
@@ -133,7 +137,12 @@ impl Document {
             NibblePhase::High => (nibble << 4) | (current & 0x0f),
             NibblePhase::Low => (current & 0xf0) | nibble,
         };
-        self.patches.set_replacement(offset, updated);
+        let original = self.raw_byte(offset)?;
+        if updated == original {
+            self.patches.apply_state(offset, PatchState::Unmodified);
+        } else {
+            self.patches.set_replacement(offset, updated);
+        }
         Ok(offset)
     }
 
@@ -145,6 +154,17 @@ impl Document {
             return Err(HxError::OffsetOutOfRange);
         }
         self.patches.mark_deleted(offset);
+        Ok(())
+    }
+
+    pub fn restore_patch_state(&mut self, offset: u64, state: PatchState) -> HxResult<()> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        if offset >= self.original_len {
+            return Err(HxError::OffsetOutOfRange);
+        }
+        self.patches.apply_state(offset, state);
         Ok(())
     }
 
@@ -214,5 +234,10 @@ impl Document {
             offset += chunk_size as u64;
         }
         Ok(None)
+    }
+
+    fn raw_byte(&mut self, offset: u64) -> HxResult<u8> {
+        let raw = self.view.read_range(offset, 1)?;
+        raw.first().copied().ok_or(HxError::OffsetOutOfRange)
     }
 }

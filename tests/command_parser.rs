@@ -13,6 +13,8 @@ fn parses_basic_commands() {
         parse_command("goto 0x20").unwrap(),
         Command::Goto { offset: 0x20 }
     );
+    assert_eq!(parse_command("u").unwrap(), Command::Undo { steps: 1 });
+    assert_eq!(parse_command("undo 3").unwrap(), Command::Undo { steps: 3 });
     assert_eq!(
         parse_command("s hello").unwrap(),
         Command::SearchAscii {
@@ -30,6 +32,8 @@ fn parses_basic_commands() {
 #[test]
 fn rejects_invalid_commands() {
     assert!(parse_command("goto nope").is_err());
+    assert!(parse_command("undo nope").is_err());
+    assert!(parse_command("undo 0").is_err());
     assert!(parse_command("S 0xz1").is_err());
     assert!(parse_command("unknown").is_err());
 }
