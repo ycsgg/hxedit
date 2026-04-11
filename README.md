@@ -11,12 +11,14 @@
 - Rewrite save for sessions that contain deleted bytes
 - Search by ASCII or hex pattern
 - Navigation with arrow keys and `hjkl`
+- Optional profiling summary with `--profile`
 
 ## Keybindings
 
 - `h` `j` `k` `l` or arrow keys: move cursor
 - `PageUp` `PageDown`: scroll by page
 - `Home` `End`: jump to row start/end
+- `n` `p`: jump to next / previous match for the last search
 - `i` or `r`: enter hex edit mode
 - `x`: mark current byte as deleted
 - `:`: enter command mode
@@ -32,6 +34,10 @@
 - `:g <offset>` `:goto <offset>`: jump to decimal or `0x` offset
 - `:s <text>`: search ASCII text
 - `:S <hex>`: search hex bytes, for example `:S 7f 45 4c 46`
+
+## Profiling
+
+Use `hxedit --profile <file>` to print startup, first-frame, slow-frame, and cache diagnostics to `stderr` when the editor exits.
 
 ## Notes
 

@@ -2,11 +2,14 @@ use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::core::file_view::FileView;
+use crate::core::page_cache::CacheStats;
 use crate::core::patch::{PatchSet, PatchState};
 use crate::core::save;
-use crate::core::search::KmpSearcher;
+use crate::core::search;
 use crate::error::{HxError, HxResult};
 use crate::mode::NibblePhase;
+
+const SEARCH_CHUNK_SIZE: usize = 128 * 1024;
 
 /// What the renderer sees at a given original file offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +76,10 @@ impl Document {
 
     pub fn patches(&self) -> &PatchSet {
         &self.patches
+    }
+
+    pub fn io_stats(&self) -> CacheStats {
+        self.view.cache_stats()
     }
 
     pub fn patch_state_at(&self, offset: u64) -> PatchState {
@@ -208,36 +215,104 @@ impl Document {
             return Ok(None);
         }
 
-        let mut searcher = KmpSearcher::new(pattern.to_vec());
+        let overlap = pattern.len().saturating_sub(1);
+        let mut carry_offsets = Vec::with_capacity(overlap);
+        let mut carry_bytes = Vec::with_capacity(overlap);
         let mut offset = start;
-        let chunk_size = 64 * 1024;
 
         while offset < self.original_len {
-            let bytes = self.raw_range(offset, chunk_size)?;
-            if bytes.is_empty() {
+            let len = SEARCH_CHUNK_SIZE.min((self.original_len - offset) as usize);
+            let raw = self.raw_range(offset, len)?;
+            if raw.is_empty() {
                 break;
             }
-            for (idx, byte) in bytes.into_iter().enumerate() {
-                let absolute = offset + idx as u64;
-                // Deleted bytes are removed from the logical stream, so they
-                // break any in-flight match.
-                if self.patches.is_deleted(absolute) {
-                    searcher.reset();
-                    continue;
-                }
-                let value = self.patches.replacement_at(absolute).unwrap_or(byte);
-                if searcher.feed(value) {
-                    let found = absolute + 1 - searcher.len() as u64;
+
+            let mut logical_offsets = std::mem::take(&mut carry_offsets);
+            let mut logical_bytes = std::mem::take(&mut carry_bytes);
+            self.materialize_logical_chunk(offset, raw, &mut logical_offsets, &mut logical_bytes);
+
+            if let Some(idx) = search::find(&logical_bytes, pattern) {
+                return Ok(Some(logical_offsets[idx]));
+            }
+
+            let keep = overlap.min(logical_bytes.len());
+            if keep > 0 {
+                carry_offsets = logical_offsets[logical_offsets.len() - keep..].to_vec();
+                carry_bytes = logical_bytes[logical_bytes.len() - keep..].to_vec();
+            }
+
+            offset += len as u64;
+        }
+        Ok(None)
+    }
+
+    pub fn search_backward(&mut self, end_exclusive: u64, pattern: &[u8]) -> HxResult<Option<u64>> {
+        if pattern.is_empty() {
+            return Err(HxError::EmptySearch);
+        }
+        let mut end = end_exclusive.min(self.original_len);
+        if end == 0 {
+            return Ok(None);
+        }
+
+        let overlap = pattern.len().saturating_sub(1);
+        let mut carry_offsets = Vec::with_capacity(overlap);
+        let mut carry_bytes = Vec::with_capacity(overlap);
+
+        while end > 0 {
+            let start = end.saturating_sub(SEARCH_CHUNK_SIZE as u64);
+            let len = (end - start) as usize;
+            let raw = self.raw_range(start, len)?;
+            if raw.is_empty() {
+                break;
+            }
+
+            let mut logical_offsets = Vec::new();
+            let mut logical_bytes = Vec::new();
+            self.materialize_logical_chunk(start, raw, &mut logical_offsets, &mut logical_bytes);
+            logical_offsets.extend_from_slice(&carry_offsets);
+            logical_bytes.extend_from_slice(&carry_bytes);
+
+            if let Some(idx) = search::rfind(&logical_bytes, pattern) {
+                let found = logical_offsets[idx];
+                if found < end_exclusive {
                     return Ok(Some(found));
                 }
             }
-            offset += chunk_size as u64;
+
+            let keep = overlap.min(logical_bytes.len());
+            if keep > 0 {
+                carry_offsets = logical_offsets[..keep].to_vec();
+                carry_bytes = logical_bytes[..keep].to_vec();
+            }
+
+            end = start;
         }
+
         Ok(None)
     }
 
     fn raw_byte(&mut self, offset: u64) -> HxResult<u8> {
         let raw = self.view.read_range(offset, 1)?;
         raw.first().copied().ok_or(HxError::OffsetOutOfRange)
+    }
+
+    fn materialize_logical_chunk(
+        &self,
+        chunk_start: u64,
+        raw: Vec<u8>,
+        offsets: &mut Vec<u64>,
+        bytes: &mut Vec<u8>,
+    ) {
+        offsets.reserve(raw.len());
+        bytes.reserve(raw.len());
+        for (idx, raw_byte) in raw.into_iter().enumerate() {
+            let absolute = chunk_start + idx as u64;
+            if self.patches.is_deleted(absolute) {
+                continue;
+            }
+            offsets.push(absolute);
+            bytes.push(self.patches.replacement_at(absolute).unwrap_or(raw_byte));
+        }
     }
 }

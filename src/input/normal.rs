@@ -14,6 +14,8 @@ pub fn map(key: KeyEvent) -> Option<Action> {
         KeyCode::End => Some(Action::RowEnd),
         KeyCode::Char('i') | KeyCode::Char('r') => Some(Action::EnterEdit),
         KeyCode::Char('x') => Some(Action::DeleteByte),
+        KeyCode::Char('n') => Some(Action::SearchNext),
+        KeyCode::Char('p') => Some(Action::SearchPrev),
         KeyCode::Char(':') => Some(Action::EnterCommand),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(Action::ForceQuit)

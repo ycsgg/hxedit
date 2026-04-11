@@ -20,6 +20,9 @@ pub struct Cli {
     #[arg(long, default_value_t = 128)]
     pub cache_pages: usize,
 
+    #[arg(long, help = "Print startup and render diagnostics to stderr")]
+    pub profile: bool,
+
     #[arg(long)]
     pub readonly: bool,
 
@@ -36,6 +39,7 @@ impl Cli {
             bytes_per_line: self.bytes_per_line.max(1),
             page_size: self.page_size.max(256),
             cache_pages: self.cache_pages.max(4),
+            profile: self.profile,
             readonly: self.readonly,
             color: !self.no_color,
             initial_offset: match &self.offset {

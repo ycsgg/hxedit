@@ -10,6 +10,7 @@ fn app_constructs_from_cli() {
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,
+        profile: false,
         readonly: true,
         no_color: true,
         offset: None,

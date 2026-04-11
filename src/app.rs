@@ -1,5 +1,5 @@
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{
@@ -26,6 +26,7 @@ use crate::error::{HxError, HxResult};
 use crate::input::keymap::map_key;
 use crate::input::mouse;
 use crate::mode::{Mode, NibblePhase};
+use crate::profile::{FrameStats, Profiler, RenderMainStats, StartupStats};
 use crate::util::format::offset_width;
 use crate::view::{ascii_grid, command_line, gutter, hex_grid, layout, palette::Palette, status};
 
@@ -44,6 +45,8 @@ pub struct App {
     last_columns: Option<layout::MainColumns>,
     last_command_area: Option<Rect>,
     undo_stack: Vec<UndoEntry>,
+    last_search: Option<SearchState>,
+    profiler: Option<Profiler>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,15 +57,55 @@ struct UndoEntry {
     mode_before: Mode,
 }
 
+#[derive(Debug, Clone)]
+struct SearchState {
+    kind: SearchKind,
+    pattern: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SearchKind {
+    Ascii,
+    Hex,
+}
+
+impl SearchKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ascii => "ascii",
+            Self::Hex => "hex",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SearchDirection {
+    Forward,
+    Backward,
+}
+
+impl SearchDirection {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Forward => "forward",
+            Self::Backward => "backward",
+        }
+    }
+}
+
 impl App {
     pub fn from_cli(cli: Cli) -> Result<Self> {
+        let startup_begin = Instant::now();
         let config = cli.config()?;
+        let after_config = Instant::now();
         let document = Document::open(&cli.file, &config)?;
+        let after_open = Instant::now();
         let cursor = if document.original_len() == 0 {
             0
         } else {
             config.initial_offset.min(document.original_len() - 1)
         };
+        let after_init = Instant::now();
         Ok(Self {
             palette: Palette::new(config.color),
             viewport_top: align_offset(cursor, config.bytes_per_line),
@@ -74,6 +117,15 @@ impl App {
             last_columns: None,
             last_command_area: None,
             undo_stack: Vec::new(),
+            last_search: None,
+            profiler: config.profile.then(|| {
+                Profiler::new(StartupStats {
+                    config_parse: after_config.duration_since(startup_begin),
+                    document_open: after_open.duration_since(after_config),
+                    app_init: after_init.duration_since(after_open),
+                    terminal_setup: Duration::default(),
+                })
+            }),
             document,
             cursor,
             config,
@@ -81,11 +133,16 @@ impl App {
     }
 
     pub fn run(&mut self) -> Result<()> {
+        let terminal_start = self.profiler.as_ref().map(|_| Instant::now());
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
+        if let (Some(start), Some(profiler)) = (terminal_start, self.profiler.as_mut()) {
+            profiler.set_terminal_setup(start.elapsed());
+            profiler.log_startup(self.document.io_stats());
+        }
 
         let result = self.run_loop(&mut terminal);
 
@@ -96,6 +153,10 @@ impl App {
             DisableMouseCapture
         )?;
         terminal.show_cursor()?;
+
+        if let Some(profiler) = self.profiler.as_ref() {
+            profiler.print_report(self.document.io_stats());
+        }
 
         result
     }
@@ -119,16 +180,46 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut ratatui::Frame<'_>) {
+        let profiling = self.profiler.is_some();
+        let frame_start = profiling.then(Instant::now);
         let screen = layout::split_screen(frame.area(), self.mode == Mode::Command);
         self.last_command_area = screen.command;
-        self.render_main(frame, screen.main);
+        let main_start = profiling.then(Instant::now);
+        let main_stats = self.render_main(frame, screen.main, profiling);
+        let main_elapsed = main_start.map(|start| start.elapsed()).unwrap_or_default();
+        let status_start = profiling.then(Instant::now);
         self.render_status(frame, screen.status);
+        let status_elapsed = status_start
+            .map(|start| start.elapsed())
+            .unwrap_or_default();
+        let command_start = profiling.then(Instant::now);
         if let Some(command_area) = screen.command {
             self.render_command(frame, command_area);
         }
+        let command_elapsed = command_start
+            .map(|start| start.elapsed())
+            .unwrap_or_default();
+        if let (Some(start), Some(profiler)) = (frame_start, self.profiler.as_mut()) {
+            profiler.record_frame(
+                FrameStats {
+                    total: start.elapsed(),
+                    main: main_elapsed,
+                    status: status_elapsed,
+                    command: command_elapsed,
+                    main_stats,
+                },
+                self.document.io_stats(),
+            );
+        }
     }
 
-    fn render_main(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+    fn render_main(
+        &mut self,
+        frame: &mut ratatui::Frame<'_>,
+        area: Rect,
+        profiling: bool,
+    ) -> RenderMainStats {
+        let mut stats = RenderMainStats::default();
         let block = Block::default().borders(Borders::ALL);
         let columns = layout::split_main(
             &block,
@@ -140,7 +231,9 @@ impl App {
 
         // Keep render-derived row count in sync with navigation and paging.
         self.view_rows = columns.gutter.height.max(1) as usize;
+        stats.rows = self.view_rows;
 
+        let row_collect_start = profiling.then(Instant::now);
         let row_count = columns.gutter.height as usize;
         let mut row_offsets = Vec::with_capacity(row_count);
         let mut rows = Vec::with_capacity(row_count);
@@ -153,7 +246,11 @@ impl App {
                 .unwrap_or_else(|_| vec![ByteSlot::Empty; self.config.bytes_per_line]);
             rows.push(row_data);
         }
+        if let Some(start) = row_collect_start {
+            stats.row_collect = start.elapsed();
+        }
 
+        let line_build_start = profiling.then(Instant::now);
         let gutter_lines = if self.document.original_len() == 0 {
             vec![Line::raw("No data")]
         } else {
@@ -187,7 +284,11 @@ impl App {
                 self.config.bytes_per_line,
             )
         };
+        if let Some(start) = line_build_start {
+            stats.line_build = start.elapsed();
+        }
 
+        let widget_draw_start = profiling.then(Instant::now);
         frame.render_widget(Paragraph::new(gutter_lines), columns.gutter);
         frame.render_widget(
             separator_widget(columns.gutter.height, &self.palette),
@@ -202,6 +303,10 @@ impl App {
             columns.sep2,
         );
         frame.render_widget(Paragraph::new(ascii_lines), columns.ascii);
+        if let Some(start) = widget_draw_start {
+            stats.widget_draw = start.elapsed();
+        }
+        stats
     }
 
     fn render_status(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
@@ -263,6 +368,8 @@ impl App {
                 Ok(())
             }
             Action::DeleteByte => self.delete_current(),
+            Action::SearchNext => self.repeat_search(SearchDirection::Forward),
+            Action::SearchPrev => self.repeat_search(SearchDirection::Backward),
             Action::Undo(steps) => self.undo(steps, true),
             Action::EditHex(value) => self.edit_nibble(value),
             Action::CommandChar(c) => {
@@ -451,21 +558,21 @@ impl App {
                 Ok(())
             }
             Command::Undo { steps } => self.undo(steps, false),
-            Command::SearchAscii { pattern } | Command::SearchHex { pattern } => {
-                // Search continues after the current cursor, mirroring modal
-                // editor behavior and avoiding immediate self-matches.
-                let start = if self.document.original_len() == 0 {
-                    0
-                } else {
-                    (self.cursor + 1).min(self.document.original_len())
+            Command::SearchAscii { pattern } => {
+                let search = SearchState {
+                    kind: SearchKind::Ascii,
+                    pattern,
                 };
-                if let Some(found) = self.document.search_forward(start, &pattern)? {
-                    self.cursor = found;
-                    self.status_message = format!("found at 0x{:x}", found);
-                } else {
-                    self.status_message = "pattern not found".to_owned();
-                }
-                Ok(())
+                self.last_search = Some(search.clone());
+                self.run_search(&search, SearchDirection::Forward)
+            }
+            Command::SearchHex { pattern } => {
+                let search = SearchState {
+                    kind: SearchKind::Hex,
+                    pattern,
+                };
+                self.last_search = Some(search.clone());
+                self.run_search(&search, SearchDirection::Forward)
             }
         }
     }
@@ -516,6 +623,51 @@ impl App {
                 mode_before,
             });
         }
+    }
+
+    fn repeat_search(&mut self, direction: SearchDirection) -> HxResult<()> {
+        let Some(search) = self.last_search.clone() else {
+            self.status_message = "no active search".to_owned();
+            return Ok(());
+        };
+        self.run_search(&search, direction)
+    }
+
+    fn run_search(&mut self, search: &SearchState, direction: SearchDirection) -> HxResult<()> {
+        let started_at = Instant::now();
+        let found = match direction {
+            SearchDirection::Forward => {
+                let start = if self.document.original_len() == 0 {
+                    0
+                } else {
+                    (self.cursor + 1).min(self.document.original_len())
+                };
+                self.document.search_forward(start, &search.pattern)?
+            }
+            SearchDirection::Backward => self
+                .document
+                .search_backward(self.cursor, &search.pattern)?,
+        };
+
+        if let Some(profiler) = self.profiler.as_mut() {
+            profiler.record_search(
+                search.kind.label(),
+                direction.label(),
+                search.pattern.len(),
+                started_at.elapsed(),
+                found,
+                self.document.io_stats(),
+            );
+        }
+
+        if let Some(found) = found {
+            self.cursor = found;
+            self.status_message = format!("found {} at 0x{:x}", search.kind.label(), found);
+        } else {
+            self.status_message = format!("{} pattern not found", search.kind.label());
+        }
+
+        Ok(())
     }
 
     fn ensure_cursor_visible(&mut self) {
@@ -649,6 +801,26 @@ mod tests {
             bytes_per_line: 16,
             page_size: 4096,
             cache_pages: 8,
+            profile: false,
+            readonly: false,
+            no_color: true,
+            offset: None,
+        };
+        let mut app = App::from_cli(cli).unwrap();
+        app.view_rows = 4;
+        app
+    }
+
+    fn app_with_bytes(bytes: &[u8]) -> App {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("sample.bin");
+        fs::write(&file, bytes).unwrap();
+        let cli = Cli {
+            file,
+            bytes_per_line: 16,
+            page_size: 4096,
+            cache_pages: 8,
+            profile: false,
             readonly: false,
             no_color: true,
             offset: None,
@@ -721,5 +893,21 @@ mod tests {
         assert_eq!(app.mode, Mode::Normal);
         assert_eq!(app.cursor, 0);
         assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
+    }
+
+    #[test]
+    fn search_next_and_prev_follow_last_pattern() {
+        let mut app = app_with_bytes(b"abc hello xyz hello end");
+        app.execute_command(Command::SearchAscii {
+            pattern: b"hello".to_vec(),
+        })
+        .unwrap();
+        assert_eq!(app.cursor, 4);
+
+        app.repeat_search(SearchDirection::Forward).unwrap();
+        assert_eq!(app.cursor, 14);
+
+        app.repeat_search(SearchDirection::Backward).unwrap();
+        assert_eq!(app.cursor, 4);
     }
 }

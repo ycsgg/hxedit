@@ -1,7 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-use crate::core::page_cache::PageCache;
+use crate::core::page_cache::{CacheStats, PageCache};
 use crate::error::{HxError, HxResult};
 
 /// Read-through file access with page caching.
@@ -62,5 +62,9 @@ impl FileView {
 
     pub fn clear_cache(&mut self) {
         self.cache.clear();
+    }
+
+    pub fn cache_stats(&self) -> CacheStats {
+        self.cache.stats()
     }
 }

@@ -15,6 +15,15 @@ fn searches_ascii_forward() {
 }
 
 #[test]
+fn searches_ascii_backward() {
+    let mut doc = open_fixture("tests/fixtures/mixed.bin");
+    assert_eq!(
+        doc.search_backward(doc.original_len(), b"hello").unwrap(),
+        Some(14)
+    );
+}
+
+#[test]
 fn searches_hex_with_replacements() {
     let mut doc = open_fixture("tests/fixtures/mixed.bin");
     doc.replace_nibble(1, NibblePhase::High, 0x4).unwrap();
@@ -30,4 +39,8 @@ fn deleted_byte_breaks_match() {
     let mut doc = open_fixture("tests/fixtures/mixed.bin");
     doc.delete_byte(14).unwrap();
     assert_eq!(doc.search_forward(0, b"hello").unwrap(), None);
+    assert_eq!(
+        doc.search_backward(doc.original_len(), b"hello").unwrap(),
+        None
+    );
 }

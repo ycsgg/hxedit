@@ -12,6 +12,8 @@ pub enum Action {
     EnterCommand,
     LeaveMode,
     DeleteByte,
+    SearchNext,
+    SearchPrev,
     Undo(usize),
     EditHex(u8),
     CommandChar(char),
