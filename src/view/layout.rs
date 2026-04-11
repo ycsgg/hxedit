@@ -2,6 +2,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::Block;
 
 /// Top-level screen slices used by the app render pass.
+#[derive(Debug, Clone, Copy)]
 pub struct ScreenLayout {
     pub main: Rect,
     pub status: Rect,
@@ -9,6 +10,7 @@ pub struct ScreenLayout {
 }
 
 /// Fixed three-column layout for the hex viewer body.
+#[derive(Debug, Clone, Copy)]
 pub struct MainColumns {
     pub gutter: Rect,
     pub sep1: Rect,

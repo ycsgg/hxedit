@@ -2,7 +2,9 @@ use std::io;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, MouseButton, MouseEvent, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -21,6 +23,7 @@ use crate::config::Config;
 use crate::core::document::{ByteSlot, Document};
 use crate::error::{HxError, HxResult};
 use crate::input::keymap::map_key;
+use crate::input::mouse;
 use crate::mode::{Mode, NibblePhase};
 use crate::util::format::offset_width;
 use crate::view::{ascii_grid, command_line, gutter, hex_grid, layout, palette::Palette, status};
@@ -37,6 +40,8 @@ pub struct App {
     status_message: String,
     should_quit: bool,
     view_rows: usize,
+    last_columns: Option<layout::MainColumns>,
+    last_command_area: Option<Rect>,
 }
 
 impl App {
@@ -56,6 +61,8 @@ impl App {
             status_message: String::new(),
             should_quit: false,
             view_rows: 1,
+            last_columns: None,
+            last_command_area: None,
             document,
             cursor,
             config,
@@ -65,14 +72,18 @@ impl App {
     pub fn run(&mut self) -> Result<()> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen)?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
         let result = self.run_loop(&mut terminal);
 
         disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )?;
         terminal.show_cursor()?;
 
         result
@@ -82,10 +93,14 @@ impl App {
         while !self.should_quit {
             terminal.draw(|frame| self.render(frame))?;
             if event::poll(Duration::from_millis(250))? {
-                if let Event::Key(key) = event::read()? {
-                    if let Some(action) = map_key(self.mode, key) {
-                        self.handle_action(action)?;
+                match event::read()? {
+                    Event::Key(key) => {
+                        if let Some(action) = map_key(self.mode, key) {
+                            self.handle_action(action)?;
+                        }
                     }
+                    Event::Mouse(mouse) => self.handle_mouse(mouse)?,
+                    _ => {}
                 }
             }
         }
@@ -94,6 +109,7 @@ impl App {
 
     fn render(&mut self, frame: &mut ratatui::Frame<'_>) {
         let screen = layout::split_screen(frame.area(), self.mode == Mode::Command);
+        self.last_command_area = screen.command;
         self.render_main(frame, screen.main);
         self.render_status(frame, screen.status);
         if let Some(command_area) = screen.command {
@@ -108,6 +124,7 @@ impl App {
             area,
             offset_width(self.document.original_len()) as u16,
         );
+        self.last_columns = Some(columns);
         frame.render_widget(block, area);
 
         // Keep render-derived row count in sync with navigation and paging.
@@ -271,6 +288,60 @@ impl App {
         }
     }
 
+    fn handle_mouse(&mut self, mouse_event: MouseEvent) -> Result<()> {
+        match mouse_event.kind {
+            MouseEventKind::ScrollUp => {
+                self.scroll_viewport(-3);
+                Ok(())
+            }
+            MouseEventKind::ScrollDown => {
+                self.scroll_viewport(3);
+                Ok(())
+            }
+            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
+                let Some(columns) = self.last_columns else {
+                    return Ok(());
+                };
+
+                if let Some(hit) = mouse::hit_test(
+                    columns,
+                    mouse_event.column,
+                    mouse_event.row,
+                    self.viewport_top,
+                    self.config.bytes_per_line,
+                    self.document.original_len(),
+                ) {
+                    self.cursor = hit.offset;
+                    match self.mode {
+                        Mode::EditHex { .. } => {
+                            self.mode = Mode::EditHex {
+                                phase: hit.phase.unwrap_or(NibblePhase::High),
+                            };
+                        }
+                        Mode::Command => {
+                            self.command_buffer.clear();
+                            self.mode = Mode::Normal;
+                        }
+                        Mode::Normal => {}
+                    }
+                    self.ensure_cursor_visible();
+                    return Ok(());
+                }
+
+                if matches!(self.mode, Mode::Command)
+                    && self
+                        .last_command_area
+                        .is_some_and(|rect| contains(rect, mouse_event.column, mouse_event.row))
+                {
+                    return Ok(());
+                }
+
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn move_horizontal(&mut self, delta: i64) -> HxResult<()> {
         self.cursor = self.offset_with_delta(self.cursor, delta);
         if let Mode::EditHex { ref mut phase } = self.mode {
@@ -382,7 +453,7 @@ impl App {
     fn ensure_cursor_visible(&mut self) {
         let row_size = self.config.bytes_per_line as u64;
         let cursor_row = align_offset(self.cursor, self.config.bytes_per_line);
-        let visible_rows = self.view_rows.max(1) as u64;
+        let visible_rows = self.visible_rows();
         let bottom = self.viewport_top + visible_rows.saturating_sub(1) * row_size;
         if cursor_row < self.viewport_top {
             self.viewport_top = cursor_row;
@@ -391,6 +462,52 @@ impl App {
                 cursor_row.saturating_sub((visible_rows.saturating_sub(1)) * row_size);
         }
         self.viewport_top = align_offset(self.viewport_top, self.config.bytes_per_line);
+    }
+
+    fn scroll_viewport(&mut self, rows: i64) {
+        if self.document.original_len() == 0 {
+            return;
+        }
+        let max_top = self.max_viewport_top();
+        let delta = rows.saturating_mul(self.config.bytes_per_line as i64);
+        self.viewport_top = if delta >= 0 {
+            self.viewport_top.saturating_add(delta as u64).min(max_top)
+        } else {
+            self.viewport_top.saturating_sub(delta.unsigned_abs())
+        };
+        self.viewport_top =
+            align_offset(self.viewport_top, self.config.bytes_per_line).min(max_top);
+        self.clamp_cursor_into_view();
+    }
+
+    fn clamp_cursor_into_view(&mut self) {
+        if self.document.original_len() == 0 {
+            self.cursor = 0;
+            return;
+        }
+        let row_size = self.config.bytes_per_line as u64;
+        let visible_rows = self.visible_rows();
+        let visible_start = self.viewport_top;
+        let visible_end = (self.viewport_top + visible_rows.saturating_mul(row_size))
+            .min(self.document.original_len())
+            .saturating_sub(1);
+        self.cursor = self.cursor.clamp(visible_start, visible_end);
+    }
+
+    fn max_viewport_top(&self) -> u64 {
+        if self.document.original_len() == 0 {
+            return 0;
+        }
+        let row_size = self.config.bytes_per_line as u64;
+        let visible_rows = self.visible_rows();
+        let tail_rows = self.document.original_len().saturating_sub(1) / row_size;
+        tail_rows
+            .saturating_sub(visible_rows.saturating_sub(1))
+            .saturating_mul(row_size)
+    }
+
+    fn visible_rows(&self) -> u64 {
+        self.view_rows.max(1) as u64
     }
 
     fn offset_with_delta(&self, current: u64, delta: i64) -> u64 {
@@ -438,4 +555,60 @@ fn separator_widget(height: u16, palette: &Palette) -> Paragraph<'static> {
         .map(|_| Line::styled("│", palette.separator))
         .collect::<Vec<_>>();
     Paragraph::new(lines)
+}
+
+fn contains(rect: Rect, x: u16, y: u16) -> bool {
+    x >= rect.x
+        && x < rect.x.saturating_add(rect.width)
+        && y >= rect.y
+        && y < rect.y.saturating_add(rect.height)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::*;
+
+    fn app_with_len(len: usize) -> App {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("sample.bin");
+        fs::write(&file, vec![0_u8; len]).unwrap();
+        let cli = Cli {
+            file,
+            bytes_per_line: 16,
+            page_size: 4096,
+            cache_pages: 8,
+            readonly: false,
+            no_color: true,
+            offset: None,
+        };
+        let mut app = App::from_cli(cli).unwrap();
+        app.view_rows = 4;
+        app
+    }
+
+    #[test]
+    fn scroll_viewport_moves_top_down() {
+        let mut app = app_with_len(256);
+        app.scroll_viewport(3);
+        assert_eq!(app.viewport_top, 48);
+    }
+
+    #[test]
+    fn scroll_viewport_clamps_cursor_into_visible_range() {
+        let mut app = app_with_len(256);
+        app.cursor = 0;
+        app.scroll_viewport(3);
+        assert_eq!(app.cursor, 48);
+    }
+
+    #[test]
+    fn scroll_viewport_stops_at_last_page() {
+        let mut app = app_with_len(256);
+        app.scroll_viewport(99);
+        assert_eq!(app.viewport_top, 192);
+    }
 }
