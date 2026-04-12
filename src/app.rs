@@ -134,6 +134,7 @@ impl App {
 
     pub fn run(&mut self) -> Result<()> {
         let terminal_start = self.profiler.as_ref().map(|_| Instant::now());
+        let session_start = self.profiler.as_ref().map(|_| Instant::now());
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -154,6 +155,9 @@ impl App {
         )?;
         terminal.show_cursor()?;
 
+        if let (Some(start), Some(profiler)) = (session_start, self.profiler.as_mut()) {
+            profiler.set_session_wall(start.elapsed());
+        }
         if let Some(profiler) = self.profiler.as_ref() {
             profiler.print_report(self.document.io_stats());
         }
@@ -164,15 +168,32 @@ impl App {
     fn run_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         while !self.should_quit {
             terminal.draw(|frame| self.render(frame))?;
-            if event::poll(Duration::from_millis(250))? {
+            let poll_start = self.profiler.as_ref().map(|_| Instant::now());
+            let has_event = event::poll(Duration::from_millis(250))?;
+            if let (Some(start), Some(profiler)) = (poll_start, self.profiler.as_mut()) {
+                profiler.record_poll(start.elapsed(), has_event);
+            }
+            if has_event {
                 match event::read()? {
                     Event::Key(key) => {
+                        if let Some(profiler) = self.profiler.as_mut() {
+                            profiler.record_key_event();
+                        }
                         if let Some(action) = map_key(self.mode, key) {
                             self.handle_action(action)?;
                         }
                     }
-                    Event::Mouse(mouse) => self.handle_mouse(mouse)?,
-                    _ => {}
+                    Event::Mouse(mouse) => {
+                        if let Some(profiler) = self.profiler.as_mut() {
+                            profiler.record_mouse_event();
+                        }
+                        self.handle_mouse(mouse)?
+                    }
+                    _ => {
+                        if let Some(profiler) = self.profiler.as_mut() {
+                            profiler.record_other_event();
+                        }
+                    }
                 }
             }
         }

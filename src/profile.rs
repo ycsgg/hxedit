@@ -34,6 +34,13 @@ pub struct Profiler {
     slowest_frame: FrameStats,
     last_cache_stats: CacheStats,
     slow_frame_threshold: Duration,
+    session_wall: Duration,
+    poll_wait_total: Duration,
+    poll_calls: u64,
+    poll_timeouts: u64,
+    key_events: u64,
+    mouse_events: u64,
+    other_events: u64,
     events: Vec<String>,
 }
 
@@ -46,6 +53,13 @@ impl Profiler {
             slowest_frame: FrameStats::default(),
             last_cache_stats: CacheStats::default(),
             slow_frame_threshold: Duration::from_millis(16),
+            session_wall: Duration::default(),
+            poll_wait_total: Duration::default(),
+            poll_calls: 0,
+            poll_timeouts: 0,
+            key_events: 0,
+            mouse_events: 0,
+            other_events: 0,
             events: Vec::new(),
         }
     }
@@ -130,6 +144,30 @@ impl Profiler {
         ));
     }
 
+    pub fn record_poll(&mut self, duration: Duration, had_event: bool) {
+        self.poll_calls += 1;
+        self.poll_wait_total += duration;
+        if !had_event {
+            self.poll_timeouts += 1;
+        }
+    }
+
+    pub fn record_key_event(&mut self) {
+        self.key_events += 1;
+    }
+
+    pub fn record_mouse_event(&mut self) {
+        self.mouse_events += 1;
+    }
+
+    pub fn record_other_event(&mut self) {
+        self.other_events += 1;
+    }
+
+    pub fn set_session_wall(&mut self, duration: Duration) {
+        self.session_wall = duration;
+    }
+
     pub fn print_report(&self, total_cache: CacheStats) {
         for event in &self.events {
             eprintln!("{event}");
@@ -138,10 +176,18 @@ impl Profiler {
             return;
         }
         eprintln!(
-            "[profile] summary frames={} avg={:.3}ms slowest={:.3}ms total-io={}",
+            "[profile] summary wall={:.3}ms frames={} avg={:.3}ms slowest={:.3}ms render-total={:.3}ms poll-total={:.3}ms polls={} timeouts={} events(key={} mouse={} other={}) total-io={}",
+            ms(self.session_wall),
             self.frame_count,
             ms(self.total_frame_time / self.frame_count as u32),
             ms(self.slowest_frame.total),
+            ms(self.total_frame_time),
+            ms(self.poll_wait_total),
+            self.poll_calls,
+            self.poll_timeouts,
+            self.key_events,
+            self.mouse_events,
+            self.other_events,
             fmt_cache(total_cache),
         );
     }
