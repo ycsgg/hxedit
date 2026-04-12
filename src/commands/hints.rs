@@ -1,0 +1,146 @@
+#[derive(Debug, Clone)]
+pub struct CommandHint {
+    pub syntax: String,
+    pub details: String,
+}
+
+pub fn hint_for(input: &str) -> CommandHint {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return CommandHint {
+            syntax: "type a command name".to_owned(),
+            details: "hints expand after you start typing".to_owned(),
+        };
+    }
+
+    let (name, rest) = split_command(trimmed);
+    match name {
+        "q" | "quit" | "q!" | "quit!" => CommandHint {
+            syntax: "q | quit | q! | quit!".to_owned(),
+            details: "quit editor; ! forces quit even with unsaved changes".to_owned(),
+        },
+        "w" | "write" => CommandHint {
+            syntax: "w [path] | write [path]".to_owned(),
+            details: "save current file; optional path writes to a new target".to_owned(),
+        },
+        "wq" => CommandHint {
+            syntax: "wq".to_owned(),
+            details: "save current file and quit".to_owned(),
+        },
+        "g" | "goto" => CommandHint {
+            syntax: format!("{name} <offset>"),
+            details: "jump to byte offset; supports decimal or 0x-prefixed hex".to_owned(),
+        },
+        "s" => CommandHint {
+            syntax: "s <ascii>".to_owned(),
+            details: "search ASCII text; use n/p to jump next/previous match".to_owned(),
+        },
+        "S" => CommandHint {
+            syntax: "S <hex-bytes>".to_owned(),
+            details: "search hex bytes like: S 7f 45 4c 46".to_owned(),
+        },
+        "u" | "undo" => CommandHint {
+            syntax: format!("{name} [steps]"),
+            details: "undo one change by default; pass a positive number to undo more".to_owned(),
+        },
+        "c" | "copy" => copy_hint(name, rest),
+        other => {
+            let suggestions = known_commands()
+                .into_iter()
+                .filter(|candidate| candidate.starts_with(other))
+                .collect::<Vec<_>>();
+            if suggestions.is_empty() {
+                CommandHint {
+                    syntax: "unknown command".to_owned(),
+                    details: "available: q w wq g s S u c".to_owned(),
+                }
+            } else {
+                CommandHint {
+                    syntax: suggestions.join(" | "),
+                    details: "keep typing, then provide the arguments shown for that command"
+                        .to_owned(),
+                }
+            }
+        }
+    }
+}
+
+fn copy_hint(name: &str, rest: Option<&str>) -> CommandHint {
+    let mut format = None;
+    let mut display = None;
+
+    if let Some(rest) = rest {
+        for token in rest.split_whitespace() {
+            if format.is_none() && matches!(token, "bin" | "binary" | "b" | "byte" | "db" | "qb") {
+                format = Some(token);
+                continue;
+            }
+            if display.is_none() && matches!(token, "r" | "raw" | "nb" | "nl") {
+                display = Some(token);
+            }
+        }
+    }
+
+    let remaining = match (format.is_some(), display.is_some()) {
+        (false, false) => "[bin|b|db|qb] [r|nb|nl]",
+        (true, false) => "[r|nb|nl]",
+        (false, true) => "[bin|b|db|qb]",
+        (true, true) => "",
+    };
+
+    let syntax = if remaining.is_empty() {
+        if let Some(rest) = rest {
+            format!("{name} {}", rest.trim())
+        } else {
+            name.to_owned()
+        }
+    } else {
+        format!("{name} {remaining}")
+    };
+
+    CommandHint {
+        syntax,
+        details:
+            "fmt: bin=binary b=byte(default) db=2-byte qb=4-byte; disp: r=raw(default) nb=big-endian nums nl=little-endian nums"
+                .to_owned(),
+    }
+}
+
+fn split_command(input: &str) -> (&str, Option<&str>) {
+    if let Some(idx) = input.find(char::is_whitespace) {
+        let (name, tail) = input.split_at(idx);
+        (name, Some(tail.trim()))
+    } else {
+        (input, None)
+    }
+}
+
+fn known_commands() -> Vec<&'static str> {
+    vec![
+        "q", "quit", "q!", "w", "write", "wq", "g", "goto", "s", "S", "u", "undo", "c", "copy",
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_input_shows_short_placeholder() {
+        let hint = hint_for("");
+        assert_eq!(hint.syntax, "type a command name");
+        assert_eq!(hint.details, "hints expand after you start typing");
+    }
+
+    #[test]
+    fn copy_hint_shows_remaining_args() {
+        let hint = hint_for("copy db");
+        assert_eq!(hint.syntax, "copy [r|nb|nl]");
+    }
+
+    #[test]
+    fn goto_hint_shows_offset_help() {
+        let hint = hint_for("go");
+        assert!(hint.syntax.contains("goto"));
+    }
+}

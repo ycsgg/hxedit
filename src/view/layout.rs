@@ -24,7 +24,7 @@ pub fn split_screen(area: Rect, show_command: bool) -> ScreenLayout {
         vec![
             Constraint::Min(1),
             Constraint::Length(1),
-            Constraint::Length(3),
+            Constraint::Length(5),
         ]
     } else {
         vec![Constraint::Min(1), Constraint::Length(1)]

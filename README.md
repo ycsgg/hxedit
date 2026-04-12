@@ -23,6 +23,8 @@
 - `i` or `r`: enter hex edit mode
 - `x`: mark current byte as deleted
 - `:`: enter command mode
+
+When command mode is open, the bottom command box shows live syntax hints and argument meaning as you type.
 - `Esc`: leave edit or command mode
 
 ## Commands

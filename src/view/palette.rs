@@ -16,6 +16,7 @@ pub struct Palette {
     pub cursor: Style,
     pub cursor_nibble: Style,
     pub command_border: Style,
+    pub command_hint: Style,
 }
 
 impl Palette {
@@ -47,6 +48,7 @@ impl Palette {
                     .fg(Color::Black)
                     .add_modifier(Modifier::BOLD),
                 command_border: Style::default().fg(Color::Cyan),
+                command_hint: Style::default().fg(Color::DarkGray),
             }
         } else {
             let base = Style::default();
@@ -65,6 +67,7 @@ impl Palette {
                 cursor: base.add_modifier(Modifier::REVERSED),
                 cursor_nibble: base.add_modifier(Modifier::REVERSED),
                 command_border: base,
+                command_hint: base,
             }
         }
     }

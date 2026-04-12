@@ -18,6 +18,7 @@ use ratatui::Terminal;
 use crate::action::Action;
 use crate::cli::Cli;
 use crate::clipboard;
+use crate::commands::hints;
 use crate::commands::parser::parse_command;
 use crate::commands::types::Command;
 use crate::config::Config;
@@ -359,7 +360,8 @@ impl App {
     }
 
     fn render_command(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
-        let widget = command_line::widget(&self.command_buffer, &self.palette);
+        let hint = hints::hint_for(&self.command_buffer);
+        let widget = command_line::widget(&self.command_buffer, hint, &self.palette);
         let inner = Rect {
             x: area.x.saturating_add(1),
             y: area.y.saturating_add(1),
