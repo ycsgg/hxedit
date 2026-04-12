@@ -429,7 +429,7 @@ impl App {
                 self.leave_mode();
                 Ok(())
             }
-            Action::DeleteByte => self.delete_current(),
+            Action::DeleteByte => self.delete_at_cursor_or_selection(),
             Action::SearchNext => self.repeat_search(SearchDirection::Forward),
             Action::SearchPrev => self.repeat_search(SearchDirection::Backward),
             Action::Undo(steps) => self.undo(steps, true),
@@ -582,11 +582,47 @@ impl App {
         Ok(())
     }
 
+    fn delete_at_cursor_or_selection(&mut self) -> HxResult<()> {
+        if matches!(self.mode, Mode::Visual) {
+            return self.delete_selection();
+        }
+        self.delete_current()
+    }
+
     fn delete_current(&mut self) -> HxResult<()> {
         let previous_patch = self.document.patch_state_at(self.cursor);
         self.document.delete_byte(self.cursor)?;
         self.push_undo_if_changed(self.cursor, previous_patch, self.cursor, self.mode);
         self.status_message = format!("deleted 0x{:x}", self.cursor);
+        Ok(())
+    }
+
+    fn delete_selection(&mut self) -> HxResult<()> {
+        let Some((start, end)) = self.selection_range() else {
+            return self.delete_current();
+        };
+
+        let cursor_before = start;
+        let mode_before = Mode::Visual;
+        let mut undo_entries = Vec::with_capacity((end - start + 1) as usize);
+        for offset in start..=end {
+            let previous_patch = self.document.patch_state_at(offset);
+            self.document.delete_byte(offset)?;
+            if self.document.patch_state_at(offset) != previous_patch {
+                undo_entries.push(UndoEntry {
+                    offset,
+                    previous_patch,
+                    cursor_before,
+                    mode_before,
+                });
+            }
+        }
+
+        self.push_undo_step(undo_entries);
+        self.cursor = self.clamp_offset(start);
+        self.selection_anchor = None;
+        self.mode = Mode::Normal;
+        self.status_message = format!("deleted selection {} bytes", end - start + 1);
         Ok(())
     }
 
@@ -1168,6 +1204,26 @@ mod tests {
         app.toggle_visual().unwrap();
         assert_eq!(app.mode, Mode::Normal);
         assert_eq!(app.selection_range(), None);
+    }
+
+    #[test]
+    fn visual_delete_removes_range_as_one_action() {
+        let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
+        app.toggle_visual().unwrap();
+        app.move_horizontal(2).unwrap();
+        app.delete_at_cursor_or_selection().unwrap();
+
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.cursor, 0);
+        assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Deleted);
+        assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Deleted);
+        assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Deleted);
+        assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Present(0x13));
+
+        app.undo(1, true).unwrap();
+        assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x10));
+        assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0x11));
+        assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
     }
 
     #[test]
