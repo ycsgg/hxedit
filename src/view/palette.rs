@@ -6,6 +6,7 @@ pub struct Palette {
     pub separator: Style,
     pub status: Style,
     pub dirty: Style,
+    pub selection: Style,
     pub deleted: Style,
     pub null: Style,
     pub printable: Style,
@@ -26,6 +27,10 @@ impl Palette {
                 status: Style::default().fg(Color::White),
                 dirty: Style::default()
                     .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+                selection: Style::default()
+                    .bg(Color::Blue)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
                 deleted: Style::default().fg(Color::Red),
                 null: Style::default().fg(Color::DarkGray),
@@ -50,6 +55,7 @@ impl Palette {
                 separator: base,
                 status: base,
                 dirty: base.add_modifier(Modifier::BOLD),
+                selection: base.add_modifier(Modifier::REVERSED),
                 deleted: base,
                 null: base,
                 printable: base,

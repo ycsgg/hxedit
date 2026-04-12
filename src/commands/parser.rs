@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::commands::types::Command;
+use crate::copy::{CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
 use crate::util::parse::{parse_hex_bytes, parse_offset};
 
@@ -21,6 +22,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         "wq" => Ok(Command::WriteQuit {
             path: opt_path(rest),
         }),
+        "c" | "copy" => parse_copy(rest),
         "u" | "undo" => Ok(Command::Undo {
             steps: parse_undo_steps(rest)?,
         }),
@@ -76,4 +78,25 @@ fn parse_undo_steps(input: Option<&str>) -> HxResult<usize> {
             Ok(steps)
         }
     }
+}
+
+fn parse_copy(input: Option<&str>) -> HxResult<Command> {
+    let mut format = CopyFormat::Byte;
+    let mut display = CopyDisplay::Raw;
+
+    if let Some(rest) = input {
+        for token in rest.split_whitespace() {
+            if let Some(parsed) = CopyFormat::parse(token) {
+                format = parsed;
+                continue;
+            }
+            if let Some(parsed) = CopyDisplay::parse(token) {
+                display = parsed;
+                continue;
+            }
+            return Err(HxError::UnknownCommand(token.to_owned()));
+        }
+    }
+
+    Ok(Command::Copy { format, display })
 }

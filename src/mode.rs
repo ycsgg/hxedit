@@ -17,6 +17,7 @@ impl NibblePhase {
 pub enum Mode {
     Normal,
     EditHex { phase: NibblePhase },
+    Visual,
     Command,
 }
 
@@ -25,6 +26,7 @@ impl Mode {
         match self {
             Self::Normal => "NORMAL",
             Self::EditHex { .. } => "EDIT",
+            Self::Visual => "VISUAL",
             Self::Command => "COMMAND",
         }
     }

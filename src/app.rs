@@ -17,9 +17,11 @@ use ratatui::Terminal;
 
 use crate::action::Action;
 use crate::cli::Cli;
+use crate::clipboard;
 use crate::commands::parser::parse_command;
 use crate::commands::types::Command;
 use crate::config::Config;
+use crate::copy::{format_selection, CopyDisplay, CopyFormat};
 use crate::core::document::{ByteSlot, Document};
 use crate::core::patch::PatchState;
 use crate::error::{HxError, HxResult};
@@ -44,6 +46,9 @@ pub struct App {
     view_rows: usize,
     last_columns: Option<layout::MainColumns>,
     last_command_area: Option<Rect>,
+    selection_anchor: Option<u64>,
+    mouse_selection_anchor: Option<u64>,
+    command_return_mode: Option<Mode>,
     undo_stack: Vec<UndoEntry>,
     last_search: Option<SearchState>,
     profiler: Option<Profiler>,
@@ -116,6 +121,9 @@ impl App {
             view_rows: 1,
             last_columns: None,
             last_command_area: None,
+            selection_anchor: None,
+            mouse_selection_anchor: None,
+            command_return_mode: None,
             undo_stack: Vec::new(),
             last_search: None,
             profiler: config.profile.then(|| {
@@ -291,6 +299,7 @@ impl App {
                 self.mode,
                 &self.palette,
                 self.config.bytes_per_line,
+                self.selection_range(),
             )
         };
         let ascii_lines = if self.document.original_len() == 0 {
@@ -303,6 +312,7 @@ impl App {
                 self.mode,
                 &self.palette,
                 self.config.bytes_per_line,
+                self.selection_range(),
             )
         };
         if let Some(start) = line_build_start {
@@ -338,6 +348,7 @@ impl App {
                 path: &path_display,
                 cursor: self.cursor,
                 len: self.document.original_len(),
+                selection_len: self.selection_range().map(|(start, end)| end - start + 1),
                 dirty: self.document.is_dirty(),
                 message: &self.status_message,
                 readonly: self.document.is_readonly(),
@@ -369,6 +380,7 @@ impl App {
             Action::PageDown => self.move_vertical(self.view_rows as i64),
             Action::RowStart => self.move_row_edge(false),
             Action::RowEnd => self.move_row_edge(true),
+            Action::ToggleVisual => self.toggle_visual(),
             Action::EnterEdit => {
                 if self.document.is_readonly() {
                     Err(HxError::ReadOnly)
@@ -380,12 +392,13 @@ impl App {
                 }
             }
             Action::EnterCommand => {
+                self.command_return_mode = Some(self.mode);
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
                 Ok(())
             }
             Action::LeaveMode => {
-                self.mode = Mode::Normal;
+                self.leave_mode();
                 Ok(())
             }
             Action::DeleteByte => self.delete_current(),
@@ -404,7 +417,7 @@ impl App {
             Action::CommandSubmit => self.submit_command(),
             Action::CommandCancel => {
                 self.command_buffer.clear();
-                self.mode = Mode::Normal;
+                self.mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
                 Ok(())
             }
             Action::ForceQuit => {
@@ -438,7 +451,7 @@ impl App {
                 self.scroll_viewport(3);
                 Ok(())
             }
-            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
+            MouseEventKind::Down(MouseButton::Left) => {
                 let Some(columns) = self.last_columns else {
                     return Ok(());
                 };
@@ -451,6 +464,7 @@ impl App {
                     self.config.bytes_per_line,
                     self.document.original_len(),
                 ) {
+                    self.mouse_selection_anchor = Some(hit.offset);
                     self.cursor = hit.offset;
                     match self.mode {
                         Mode::EditHex { .. } => {
@@ -460,6 +474,10 @@ impl App {
                         }
                         Mode::Command => {
                             self.command_buffer.clear();
+                            self.mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
+                        }
+                        Mode::Visual => {
+                            self.selection_anchor = None;
                             self.mode = Mode::Normal;
                         }
                         Mode::Normal => {}
@@ -476,6 +494,32 @@ impl App {
                     return Ok(());
                 }
 
+                Ok(())
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let Some(columns) = self.last_columns else {
+                    return Ok(());
+                };
+                let Some(hit) = mouse::hit_test(
+                    columns,
+                    mouse_event.column,
+                    mouse_event.row,
+                    self.viewport_top,
+                    self.config.bytes_per_line,
+                    self.document.original_len(),
+                ) else {
+                    return Ok(());
+                };
+
+                let anchor = self.mouse_selection_anchor.unwrap_or(hit.offset);
+                self.selection_anchor = Some(anchor);
+                self.cursor = hit.offset;
+                self.mode = Mode::Visual;
+                self.ensure_cursor_visible();
+                Ok(())
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.mouse_selection_anchor = None;
                 Ok(())
             }
             _ => Ok(()),
@@ -543,10 +587,13 @@ impl App {
     }
 
     fn submit_command(&mut self) -> HxResult<()> {
+        let return_mode = self.command_return_mode.unwrap_or(Mode::Normal);
         let command = parse_command(&self.command_buffer)?;
         self.command_buffer.clear();
-        self.mode = Mode::Normal;
-        self.execute_command(command)
+        self.execute_command(command)?;
+        self.mode = return_mode;
+        self.command_return_mode = None;
+        Ok(())
     }
 
     fn execute_command(&mut self, command: Command) -> HxResult<()> {
@@ -579,6 +626,7 @@ impl App {
                 Ok(())
             }
             Command::Undo { steps } => self.undo(steps, false),
+            Command::Copy { format, display } => self.copy_selection(format, display),
             Command::SearchAscii { pattern } => {
                 let search = SearchState {
                     kind: SearchKind::Ascii,
@@ -626,6 +674,22 @@ impl App {
             self.status_message = format!("undid {undone} changes");
         }
 
+        Ok(())
+    }
+
+    fn copy_selection(&mut self, format: CopyFormat, display: CopyDisplay) -> HxResult<()> {
+        let Some((start, end)) = self.selection_range() else {
+            return Err(HxError::MissingSelection);
+        };
+        let bytes = self.document.logical_bytes(start, end)?;
+        let text = format_selection(&bytes, format, display)?;
+        clipboard::copy_text(&text)?;
+        self.status_message = format!(
+            "copied {} bytes [{} {}]",
+            bytes.len(),
+            format.label(),
+            display.label()
+        );
         Ok(())
     }
 
@@ -688,6 +752,21 @@ impl App {
             self.status_message = format!("{} pattern not found", search.kind.label());
         }
 
+        Ok(())
+    }
+
+    fn toggle_visual(&mut self) -> HxResult<()> {
+        match self.mode {
+            Mode::Visual => {
+                self.selection_anchor = None;
+                self.mode = Mode::Normal;
+            }
+            Mode::Normal => {
+                self.selection_anchor = Some(self.cursor);
+                self.mode = Mode::Visual;
+            }
+            Mode::EditHex { .. } | Mode::Command => {}
+        }
         Ok(())
     }
 
@@ -779,6 +858,26 @@ impl App {
         if !matches!(self.mode, Mode::Command) && is_error {
             self.status_message.clear();
         }
+    }
+
+    fn leave_mode(&mut self) {
+        match self.mode {
+            Mode::Visual => {
+                self.selection_anchor = None;
+                self.mode = Mode::Normal;
+            }
+            Mode::Command => {
+                self.mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
+            }
+            _ => {
+                self.mode = Mode::Normal;
+            }
+        }
+    }
+
+    fn selection_range(&self) -> Option<(u64, u64)> {
+        let anchor = self.selection_anchor?;
+        Some((anchor.min(self.cursor), anchor.max(self.cursor)))
     }
 }
 
@@ -914,6 +1013,21 @@ mod tests {
         assert_eq!(app.mode, Mode::Normal);
         assert_eq!(app.cursor, 0);
         assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
+    }
+
+    #[test]
+    fn toggling_visual_tracks_selection_range() {
+        let mut app = app_with_len(32);
+        app.toggle_visual().unwrap();
+        assert_eq!(app.mode, Mode::Visual);
+        assert_eq!(app.selection_range(), Some((0, 0)));
+
+        app.move_horizontal(3).unwrap();
+        assert_eq!(app.selection_range(), Some((0, 3)));
+
+        app.toggle_visual().unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.selection_range(), None);
     }
 
     #[test]

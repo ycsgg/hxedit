@@ -4,6 +4,7 @@ use crate::action::Action;
 
 pub fn map(key: KeyEvent) -> Option<Action> {
     match key.code {
+        KeyCode::Esc => Some(Action::LeaveMode),
         KeyCode::Left | KeyCode::Char('h') => Some(Action::MoveLeft),
         KeyCode::Right | KeyCode::Char('l') => Some(Action::MoveRight),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::MoveUp),
@@ -13,8 +14,6 @@ pub fn map(key: KeyEvent) -> Option<Action> {
         KeyCode::Home => Some(Action::RowStart),
         KeyCode::End => Some(Action::RowEnd),
         KeyCode::Char('v') => Some(Action::ToggleVisual),
-        KeyCode::Char('i') | KeyCode::Char('r') => Some(Action::EnterEdit),
-        KeyCode::Char('x') => Some(Action::DeleteByte),
         KeyCode::Char('n') => Some(Action::SearchNext),
         KeyCode::Char('p') => Some(Action::SearchPrev),
         KeyCode::Char(':') => Some(Action::EnterCommand),

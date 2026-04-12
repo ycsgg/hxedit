@@ -292,6 +292,19 @@ impl Document {
         Ok(None)
     }
 
+    pub fn logical_bytes(&mut self, start: u64, end_inclusive: u64) -> HxResult<Vec<u8>> {
+        if self.original_len == 0 || start > end_inclusive || start >= self.original_len {
+            return Ok(Vec::new());
+        }
+
+        let end = end_inclusive.min(self.original_len - 1);
+        let raw = self.raw_range(start, (end - start + 1) as usize)?;
+        let mut offsets = Vec::with_capacity(raw.len());
+        let mut bytes = Vec::with_capacity(raw.len());
+        self.materialize_logical_chunk(start, raw, &mut offsets, &mut bytes);
+        Ok(bytes)
+    }
+
     fn raw_byte(&mut self, offset: u64) -> HxResult<u8> {
         let raw = self.view.read_range(offset, 1)?;
         raw.first().copied().ok_or(HxError::OffsetOutOfRange)

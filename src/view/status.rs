@@ -8,6 +8,7 @@ pub struct StatusInfo<'a> {
     pub path: &'a str,
     pub cursor: u64,
     pub len: u64,
+    pub selection_len: Option<u64>,
     pub dirty: bool,
     pub message: &'a str,
     pub readonly: bool,
@@ -23,6 +24,14 @@ pub fn build(info: StatusInfo<'_>, palette: &Palette) -> Line<'static> {
         Span::raw("  "),
         Span::styled(format!("len {}", info.len), palette.status),
     ];
+
+    if let Some(selection_len) = info.selection_len {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("sel {}", selection_len),
+            palette.status,
+        ));
+    }
 
     if info.readonly {
         spans.push(Span::raw("  "));

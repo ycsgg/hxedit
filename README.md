@@ -19,6 +19,7 @@
 - `PageUp` `PageDown`: scroll by page
 - `Home` `End`: jump to row start/end
 - `n` `p`: jump to next / previous match for the last search
+- `v`: enter or leave visual selection mode
 - `i` or `r`: enter hex edit mode
 - `x`: mark current byte as deleted
 - `:`: enter command mode
@@ -34,6 +35,7 @@
 - `:g <offset>` `:goto <offset>`: jump to decimal or `0x` offset
 - `:s <text>`: search ASCII text
 - `:S <hex>`: search hex bytes, for example `:S 7f 45 4c 46`
+- `:c` `:copy [bin|b|db|qb] [r|nb|nl]`: copy the current visual selection to the system clipboard
 
 ## Profiling
 

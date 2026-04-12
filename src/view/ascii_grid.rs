@@ -13,6 +13,7 @@ pub fn build(
     mode: Mode,
     palette: &Palette,
     bytes_per_line: usize,
+    selection: Option<(u64, u64)>,
 ) -> Vec<Line<'static>> {
     rows.iter()
         .enumerate()
@@ -21,6 +22,9 @@ pub fn build(
             for (col_idx, slot) in row.iter().enumerate() {
                 let offset = row_offsets[row_idx] + col_idx as u64;
                 let mut style = slot_style(*slot, palette);
+                if selected(selection, offset) {
+                    style = palette.selection.patch(style);
+                }
                 if offset == cursor {
                     style = palette.cursor.patch(style);
                 }
@@ -39,4 +43,10 @@ pub fn build(
             }
         })
         .collect()
+}
+
+fn selected(selection: Option<(u64, u64)>, offset: u64) -> bool {
+    selection
+        .map(|(start, end)| offset >= start && offset <= end)
+        .unwrap_or(false)
 }

@@ -14,6 +14,7 @@ pub fn build(
     mode: Mode,
     palette: &Palette,
     bytes_per_line: usize,
+    selection: Option<(u64, u64)>,
 ) -> Vec<Line<'static>> {
     rows.iter()
         .enumerate()
@@ -21,7 +22,10 @@ pub fn build(
             let mut spans = Vec::with_capacity(bytes_per_line * 4);
             for (col_idx, slot) in row.iter().enumerate() {
                 let offset = row_offsets[row_idx] + col_idx as u64;
-                let base = slot_style(*slot, palette);
+                let mut base = slot_style(*slot, palette);
+                if selected(selection, offset) {
+                    base = palette.selection.patch(base);
+                }
                 let pair = hex_pair(*slot);
                 let is_cursor = offset == cursor;
                 let phase = match mode {
@@ -49,6 +53,12 @@ pub fn build(
             Line::from(spans)
         })
         .collect()
+}
+
+fn selected(selection: Option<(u64, u64)>, offset: u64) -> bool {
+    selection
+        .map(|(start, end)| offset >= start && offset <= end)
+        .unwrap_or(false)
 }
 
 fn style_for_nibble(

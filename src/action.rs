@@ -9,6 +9,7 @@ pub enum Action {
     RowStart,
     RowEnd,
     EnterEdit,
+    ToggleVisual,
     EnterCommand,
     LeaveMode,
     DeleteByte,

@@ -1,5 +1,6 @@
 use hxedit::commands::parser::parse_command;
 use hxedit::commands::types::Command;
+use hxedit::copy::{CopyDisplay, CopyFormat};
 
 #[test]
 fn parses_basic_commands() {
@@ -15,6 +16,20 @@ fn parses_basic_commands() {
     );
     assert_eq!(parse_command("u").unwrap(), Command::Undo { steps: 1 });
     assert_eq!(parse_command("undo 3").unwrap(), Command::Undo { steps: 3 });
+    assert_eq!(
+        parse_command("copy").unwrap(),
+        Command::Copy {
+            format: CopyFormat::Byte,
+            display: CopyDisplay::Raw,
+        }
+    );
+    assert_eq!(
+        parse_command("c db nl").unwrap(),
+        Command::Copy {
+            format: CopyFormat::DoubleByte,
+            display: CopyDisplay::NumericLittle,
+        }
+    );
     assert_eq!(
         parse_command("s hello").unwrap(),
         Command::SearchAscii {
@@ -34,6 +49,7 @@ fn rejects_invalid_commands() {
     assert!(parse_command("goto nope").is_err());
     assert!(parse_command("undo nope").is_err());
     assert!(parse_command("undo 0").is_err());
+    assert!(parse_command("copy nope").is_err());
     assert!(parse_command("S 0xz1").is_err());
     assert!(parse_command("unknown").is_err());
 }
