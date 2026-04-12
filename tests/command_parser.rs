@@ -17,6 +17,38 @@ fn parses_basic_commands() {
     assert_eq!(parse_command("u").unwrap(), Command::Undo { steps: 1 });
     assert_eq!(parse_command("undo 3").unwrap(), Command::Undo { steps: 3 });
     assert_eq!(
+        parse_command("p").unwrap(),
+        Command::Paste {
+            raw: false,
+            preview: false,
+            limit: None,
+        }
+    );
+    assert_eq!(
+        parse_command("paste! 8").unwrap(),
+        Command::Paste {
+            raw: true,
+            preview: false,
+            limit: Some(8),
+        }
+    );
+    assert_eq!(
+        parse_command("p? 4").unwrap(),
+        Command::Paste {
+            raw: false,
+            preview: true,
+            limit: Some(4),
+        }
+    );
+    assert_eq!(
+        parse_command("p!? 2").unwrap(),
+        Command::Paste {
+            raw: true,
+            preview: true,
+            limit: Some(2),
+        }
+    );
+    assert_eq!(
         parse_command("copy").unwrap(),
         Command::Copy {
             format: CopyFormat::Byte,
@@ -49,6 +81,7 @@ fn rejects_invalid_commands() {
     assert!(parse_command("goto nope").is_err());
     assert!(parse_command("undo nope").is_err());
     assert!(parse_command("undo 0").is_err());
+    assert!(parse_command("paste nope").is_err());
     assert!(parse_command("copy nope").is_err());
     assert!(parse_command("S 0xz1").is_err());
     assert!(parse_command("unknown").is_err());

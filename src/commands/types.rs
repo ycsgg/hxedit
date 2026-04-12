@@ -16,6 +16,11 @@ pub enum Command {
     Goto {
         offset: u64,
     },
+    Paste {
+        raw: bool,
+        preview: bool,
+        limit: Option<usize>,
+    },
     Undo {
         steps: usize,
     },

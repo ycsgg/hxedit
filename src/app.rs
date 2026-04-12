@@ -50,8 +50,9 @@ pub struct App {
     selection_anchor: Option<u64>,
     mouse_selection_anchor: Option<u64>,
     command_return_mode: Option<Mode>,
-    undo_stack: Vec<UndoEntry>,
+    undo_stack: Vec<UndoStep>,
     last_search: Option<SearchState>,
+    last_paste: Option<PasteState>,
     profiler: Option<Profiler>,
 }
 
@@ -64,9 +65,19 @@ struct UndoEntry {
 }
 
 #[derive(Debug, Clone)]
+struct UndoStep {
+    entries: Vec<UndoEntry>,
+}
+
+#[derive(Debug, Clone)]
 struct SearchState {
     kind: SearchKind,
     pattern: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct PasteState {
+    summary: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,11 +86,28 @@ enum SearchKind {
     Hex,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum PasteSource {
+    Hex,
+    Base64,
+    Raw,
+}
+
 impl SearchKind {
     fn label(self) -> &'static str {
         match self {
             Self::Ascii => "ascii",
             Self::Hex => "hex",
+        }
+    }
+}
+
+impl PasteSource {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Hex => "hex",
+            Self::Base64 => "base64",
+            Self::Raw => "raw",
         }
     }
 }
@@ -106,10 +134,10 @@ impl App {
         let after_config = Instant::now();
         let document = Document::open(&cli.file, &config)?;
         let after_open = Instant::now();
-        let cursor = if document.original_len() == 0 {
+        let cursor = if document.len() == 0 {
             0
         } else {
-            config.initial_offset.min(document.original_len() - 1)
+            config.initial_offset.min(document.len() - 1)
         };
         let after_init = Instant::now();
         Ok(Self {
@@ -127,6 +155,7 @@ impl App {
             command_return_mode: None,
             undo_stack: Vec::new(),
             last_search: None,
+            last_paste: None,
             profiler: config.profile.then(|| {
                 Profiler::new(StartupStats {
                     config_parse: after_config.duration_since(startup_begin),
@@ -251,11 +280,7 @@ impl App {
     ) -> RenderMainStats {
         let mut stats = RenderMainStats::default();
         let block = Block::default().borders(Borders::ALL);
-        let columns = layout::split_main(
-            &block,
-            area,
-            offset_width(self.document.original_len()) as u16,
-        );
+        let columns = layout::split_main(&block, area, offset_width(self.document.len()) as u16);
         self.last_columns = Some(columns);
         frame.render_widget(block, area);
 
@@ -281,16 +306,16 @@ impl App {
         }
 
         let line_build_start = profiling.then(Instant::now);
-        let gutter_lines = if self.document.original_len() == 0 {
+        let gutter_lines = if self.document.len() == 0 {
             vec![Line::raw("No data")]
         } else {
             gutter::build(
                 &row_offsets,
-                offset_width(self.document.original_len()),
+                offset_width(self.document.len()),
                 &self.palette,
             )
         };
-        let hex_lines = if self.document.original_len() == 0 {
+        let hex_lines = if self.document.len() == 0 {
             vec![Line::raw("No content")]
         } else {
             hex_grid::build(
@@ -303,7 +328,7 @@ impl App {
                 self.selection_range(),
             )
         };
-        let ascii_lines = if self.document.original_len() == 0 {
+        let ascii_lines = if self.document.len() == 0 {
             vec![Line::raw("")]
         } else {
             ascii_grid::build(
@@ -348,8 +373,9 @@ impl App {
                 mode: self.mode,
                 path: &path_display,
                 cursor: self.cursor,
-                len: self.document.original_len(),
+                len: self.document.len(),
                 selection_len: self.selection_range().map(|(start, end)| end - start + 1),
+                paste_info: self.last_paste.as_ref().map(|state| state.summary.as_str()),
                 dirty: self.document.is_dirty(),
                 message: &self.status_message,
                 readonly: self.document.is_readonly(),
@@ -464,7 +490,7 @@ impl App {
                     mouse_event.row,
                     self.viewport_top,
                     self.config.bytes_per_line,
-                    self.document.original_len(),
+                    self.document.len(),
                 ) {
                     self.mouse_selection_anchor = Some(hit.offset);
                     self.cursor = hit.offset;
@@ -508,7 +534,7 @@ impl App {
                     mouse_event.row,
                     self.viewport_top,
                     self.config.bytes_per_line,
-                    self.document.original_len(),
+                    self.document.len(),
                 ) else {
                     return Ok(());
                 };
@@ -579,7 +605,8 @@ impl App {
                 phase: NibblePhase::Low,
             },
             NibblePhase::Low => {
-                self.cursor = self.offset_with_delta(self.cursor, 1);
+                let next = offset + 1;
+                self.cursor = next.min(self.document.len());
                 Mode::EditHex {
                     phase: NibblePhase::High,
                 }
@@ -628,6 +655,11 @@ impl App {
                 Ok(())
             }
             Command::Undo { steps } => self.undo(steps, false),
+            Command::Paste {
+                raw,
+                preview,
+                limit,
+            } => self.paste_from_clipboard(raw, preview, limit),
             Command::Copy { format, display } => self.copy_selection(format, display),
             Command::SearchAscii { pattern } => {
                 let search = SearchState {
@@ -652,14 +684,18 @@ impl App {
         let mut undone = 0;
 
         for _ in 0..steps {
-            let Some(entry) = self.undo_stack.pop() else {
+            let Some(step) = self.undo_stack.pop() else {
                 break;
             };
-            self.document
-                .restore_patch_state(entry.offset, entry.previous_patch)?;
-            self.cursor = self.clamp_offset(entry.cursor_before);
-            if restore_mode {
-                self.mode = entry.mode_before;
+            for entry in step.entries.iter().rev() {
+                self.document
+                    .restore_patch_state(entry.offset, entry.previous_patch)?;
+            }
+            if let Some(entry) = step.entries.first() {
+                self.cursor = self.clamp_offset(entry.cursor_before);
+                if restore_mode {
+                    self.mode = entry.mode_before;
+                }
             }
             undone += 1;
         }
@@ -671,9 +707,9 @@ impl App {
         if undone == 0 {
             self.status_message = "nothing to undo".to_owned();
         } else if undone == 1 {
-            self.status_message = "undid 1 change".to_owned();
+            self.status_message = "undid 1 action".to_owned();
         } else {
-            self.status_message = format!("undid {undone} changes");
+            self.status_message = format!("undid {undone} actions");
         }
 
         Ok(())
@@ -695,6 +731,76 @@ impl App {
         Ok(())
     }
 
+    fn paste_from_clipboard(
+        &mut self,
+        raw: bool,
+        preview: bool,
+        limit: Option<usize>,
+    ) -> HxResult<()> {
+        let (mut bytes, source) = if raw {
+            (clipboard::read_raw_bytes()?, PasteSource::Raw)
+        } else {
+            let text = clipboard::read_text()?;
+            parse_paste_payload(&text)?
+        };
+
+        if let Some(limit) = limit {
+            bytes.truncate(limit);
+        }
+
+        self.last_paste = Some(PasteState {
+            summary: paste_summary(source, bytes.len(), preview, &bytes),
+        });
+
+        if preview {
+            self.status_message = if bytes.is_empty() {
+                "paste preview: no bytes".to_owned()
+            } else {
+                format!("paste preview [{} {} bytes]", source.label(), bytes.len())
+            };
+            return Ok(());
+        }
+
+        let pasted = self.apply_paste_bytes(&bytes)?;
+        if pasted == 0 {
+            self.status_message = "paste produced no bytes".to_owned();
+        } else {
+            self.status_message = format!("pasted {} bytes [{}]", pasted, source.label());
+        }
+        Ok(())
+    }
+
+    fn apply_paste_bytes(&mut self, bytes: &[u8]) -> HxResult<usize> {
+        if self.document.is_readonly() {
+            return Err(HxError::ReadOnly);
+        }
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+
+        let cursor_before = self.cursor;
+        let mode_before = self.mode;
+        let mut undo_entries = Vec::with_capacity(bytes.len());
+        for (idx, &byte) in bytes.iter().enumerate() {
+            let offset = cursor_before + idx as u64;
+            let previous_patch = self.document.patch_state_at(offset);
+            self.document.set_byte(offset, byte)?;
+            if self.document.patch_state_at(offset) != previous_patch {
+                undo_entries.push(UndoEntry {
+                    offset,
+                    previous_patch,
+                    cursor_before,
+                    mode_before,
+                });
+            }
+        }
+
+        self.push_undo_step(undo_entries);
+
+        self.cursor = self.clamp_offset(cursor_before + bytes.len().saturating_sub(1) as u64);
+        Ok(bytes.len())
+    }
+
     fn push_undo_if_changed(
         &mut self,
         offset: u64,
@@ -703,13 +809,20 @@ impl App {
         mode_before: Mode,
     ) {
         if self.document.patch_state_at(offset) != previous_patch {
-            self.undo_stack.push(UndoEntry {
+            self.push_undo_step(vec![UndoEntry {
                 offset,
                 previous_patch,
                 cursor_before,
                 mode_before,
-            });
+            }]);
         }
+    }
+
+    fn push_undo_step(&mut self, entries: Vec<UndoEntry>) {
+        if entries.is_empty() {
+            return;
+        }
+        self.undo_stack.push(UndoStep { entries });
     }
 
     fn repeat_search(&mut self, direction: SearchDirection) -> HxResult<()> {
@@ -724,10 +837,10 @@ impl App {
         let started_at = Instant::now();
         let found = match direction {
             SearchDirection::Forward => {
-                let start = if self.document.original_len() == 0 {
+                let start = if self.document.len() == 0 {
                     0
                 } else {
-                    (self.cursor + 1).min(self.document.original_len())
+                    (self.cursor + 1).min(self.document.len())
                 };
                 self.document.search_forward(start, &search.pattern)?
             }
@@ -787,7 +900,7 @@ impl App {
     }
 
     fn scroll_viewport(&mut self, rows: i64) {
-        if self.document.original_len() == 0 {
+        if self.document.len() == 0 {
             return;
         }
         let max_top = self.max_viewport_top();
@@ -803,7 +916,7 @@ impl App {
     }
 
     fn clamp_cursor_into_view(&mut self) {
-        if self.document.original_len() == 0 {
+        if self.document.len() == 0 {
             self.cursor = 0;
             return;
         }
@@ -811,18 +924,18 @@ impl App {
         let visible_rows = self.visible_rows();
         let visible_start = self.viewport_top;
         let visible_end = (self.viewport_top + visible_rows.saturating_mul(row_size))
-            .min(self.document.original_len())
+            .min(self.document.len())
             .saturating_sub(1);
         self.cursor = self.cursor.clamp(visible_start, visible_end);
     }
 
     fn max_viewport_top(&self) -> u64 {
-        if self.document.original_len() == 0 {
+        if self.document.len() == 0 {
             return 0;
         }
         let row_size = self.config.bytes_per_line as u64;
         let visible_rows = self.visible_rows();
-        let tail_rows = self.document.original_len().saturating_sub(1) / row_size;
+        let tail_rows = self.document.len().saturating_sub(1) / row_size;
         tail_rows
             .saturating_sub(visible_rows.saturating_sub(1))
             .saturating_mul(row_size)
@@ -833,10 +946,10 @@ impl App {
     }
 
     fn offset_with_delta(&self, current: u64, delta: i64) -> u64 {
-        if self.document.original_len() == 0 {
+        if self.document.len() == 0 {
             return 0;
         }
-        let max = self.document.original_len() - 1;
+        let max = self.document.len() - 1;
         if delta >= 0 {
             current.saturating_add(delta as u64).min(max)
         } else {
@@ -845,10 +958,10 @@ impl App {
     }
 
     fn clamp_offset(&self, offset: u64) -> u64 {
-        if self.document.original_len() == 0 {
+        if self.document.len() == 0 {
             0
         } else {
-            offset.min(self.document.original_len() - 1)
+            offset.min(self.document.len() - 1)
         }
     }
 
@@ -904,6 +1017,31 @@ fn contains(rect: Rect, x: u16, y: u16) -> bool {
         && x < rect.x.saturating_add(rect.width)
         && y >= rect.y
         && y < rect.y.saturating_add(rect.height)
+}
+
+fn parse_paste_payload(text: &str) -> HxResult<(Vec<u8>, PasteSource)> {
+    if let Ok(hex) = crate::util::parse::parse_hex_stream(text) {
+        return Ok((hex, PasteSource::Hex));
+    }
+    if let Ok(base64) = crate::util::parse::decode_base64(text) {
+        return Ok((base64, PasteSource::Base64));
+    }
+    Err(HxError::InvalidPasteData(text.trim().to_owned()))
+}
+
+fn paste_summary(source: PasteSource, bytes: usize, preview: bool, data: &[u8]) -> String {
+    let head = data
+        .iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let suffix = if data.len() > 4 { " …" } else { "" };
+    if preview {
+        format!("pv {}:{} [{}{}]", source.label(), bytes, head, suffix)
+    } else {
+        format!("ps {}:{} [{}{}]", source.label(), bytes, head, suffix)
+    }
 }
 
 #[cfg(test)]
@@ -1046,5 +1184,44 @@ mod tests {
 
         app.repeat_search(SearchDirection::Backward).unwrap();
         assert_eq!(app.cursor, 4);
+    }
+
+    #[test]
+    fn paste_overwrites_and_appends_past_eof() {
+        let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
+        app.cursor = 1;
+        assert_eq!(app.apply_paste_bytes(&[0xaa, 0xbb, 0xcc]).unwrap(), 3);
+        assert_eq!(app.document.len(), 4);
+        assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
+        assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
+        assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
+        assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Present(0xcc));
+    }
+
+    #[test]
+    fn undo_reverts_entire_paste_as_one_action() {
+        let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
+        app.cursor = 1;
+        app.apply_paste_bytes(&[0xaa, 0xbb, 0xcc]).unwrap();
+        app.undo(1, true).unwrap();
+
+        assert_eq!(app.document.len(), 3);
+        assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
+        assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0x22));
+        assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x33));
+        assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Empty);
+    }
+
+    #[test]
+    fn edit_mode_can_append_at_eof() {
+        let mut app = app_with_bytes(&[0x11]);
+        app.mode = Mode::EditHex {
+            phase: NibblePhase::High,
+        };
+        app.cursor = 1;
+        app.edit_nibble(0xa).unwrap();
+        app.edit_nibble(0xb).unwrap();
+        assert_eq!(app.document.len(), 2);
+        assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
     }
 }

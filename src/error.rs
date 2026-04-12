@@ -14,6 +14,10 @@ pub enum HxError {
     EmptySearch,
     #[error("invalid offset: {0}")]
     InvalidOffset(String),
+    #[error("invalid paste count: {0}")]
+    InvalidPasteCount(String),
+    #[error("invalid paste data: {0}")]
+    InvalidPasteData(String),
     #[error("invalid copy format: {0}")]
     InvalidCopyFormat(String),
     #[error("invalid copy display: {0}")]

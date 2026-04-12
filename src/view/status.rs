@@ -9,6 +9,7 @@ pub struct StatusInfo<'a> {
     pub cursor: u64,
     pub len: u64,
     pub selection_len: Option<u64>,
+    pub paste_info: Option<&'a str>,
     pub dirty: bool,
     pub message: &'a str,
     pub readonly: bool,
@@ -31,6 +32,11 @@ pub fn build(info: StatusInfo<'_>, palette: &Palette) -> Line<'static> {
             format!("sel {}", selection_len),
             palette.status,
         ));
+    }
+
+    if let Some(paste_info) = info.paste_info {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(paste_info.to_owned(), palette.status));
     }
 
     if info.readonly {

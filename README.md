@@ -35,9 +35,14 @@ When command mode is open, the bottom command box shows live syntax hints and ar
 - `:w <path>` `:write <path>`: save as and switch buffer to the new path
 - `:wq`: save and quit
 - `:g <offset>` `:goto <offset>`: jump to decimal or `0x` offset
+- `:p` `:paste [num]`: parse clipboard hex text and paste bytes at the cursor; supports spaces, commas, or compact hex
+- `:p!` `:paste! [num]`: paste raw clipboard bytes at the cursor
+- `:p?` `:paste? [num]`: preview parsed clipboard bytes without modifying the document
 - `:s <text>`: search ASCII text
 - `:S <hex>`: search hex bytes, for example `:S 7f 45 4c 46`
 - `:c` `:copy [bin|b|db|qb] [r|nb|nl]`: copy the current visual selection to the system clipboard
+
+Paste overwrites existing bytes from the cursor and appends the remainder if it runs past the end of the file.
 
 ## Profiling
 

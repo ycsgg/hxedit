@@ -57,8 +57,16 @@ impl Document {
         self.original_len
     }
 
+    pub fn len(&self) -> u64 {
+        self.patches
+            .max_touched_offset()
+            .map(|offset| offset + 1)
+            .unwrap_or(self.original_len)
+            .max(self.original_len)
+    }
+
     pub fn visible_len(&self) -> u64 {
-        self.original_len
+        self.len()
             .saturating_sub(self.patches.deletions().len() as u64)
     }
 
@@ -72,6 +80,10 @@ impl Document {
 
     pub fn has_deletions(&self) -> bool {
         self.patches.has_deletions()
+    }
+
+    pub fn has_appends(&self) -> bool {
+        self.patches.has_appends(self.original_len)
     }
 
     pub fn patches(&self) -> &PatchSet {
@@ -95,15 +107,15 @@ impl Document {
     }
 
     pub fn byte_at(&mut self, offset: u64) -> HxResult<ByteSlot> {
-        if offset >= self.original_len {
-            return Ok(ByteSlot::Empty);
-        }
         // Patches always shadow on-disk bytes for both rendering and search.
         if self.patches.is_deleted(offset) {
             return Ok(ByteSlot::Deleted);
         }
         if let Some(value) = self.patches.replacement_at(offset) {
             return Ok(ByteSlot::Present(value));
+        }
+        if offset >= self.original_len {
+            return Ok(ByteSlot::Empty);
         }
         let raw = self.view.read_range(offset, 1)?;
         Ok(raw
@@ -114,11 +126,11 @@ impl Document {
     }
 
     pub fn byte_for_edit(&mut self, offset: u64) -> HxResult<u8> {
-        if offset >= self.original_len {
-            return Err(HxError::OffsetOutOfRange);
-        }
         if let Some(value) = self.patches.replacement_at(offset) {
             return Ok(value);
+        }
+        if offset >= self.original_len {
+            return Err(HxError::OffsetOutOfRange);
         }
         let raw = self.view.read_range(offset, 1)?;
         raw.first().copied().ok_or(HxError::OffsetOutOfRange)
@@ -136,7 +148,14 @@ impl Document {
         if self.readonly {
             return Err(HxError::ReadOnly);
         }
-        if offset >= self.original_len {
+        if offset == self.len() {
+            if matches!(phase, NibblePhase::High) {
+                self.set_byte(offset, nibble << 4)?;
+                return Ok(offset);
+            }
+            return Err(HxError::OffsetOutOfRange);
+        }
+        if offset >= self.len() {
             return Err(HxError::OffsetOutOfRange);
         }
         let current = self.byte_for_edit(offset)?;
@@ -144,6 +163,10 @@ impl Document {
             NibblePhase::High => (nibble << 4) | (current & 0x0f),
             NibblePhase::Low => (current & 0xf0) | nibble,
         };
+        if offset >= self.original_len {
+            self.patches.set_replacement(offset, updated);
+            return Ok(offset);
+        }
         let original = self.raw_byte(offset)?;
         if updated == original {
             self.patches.apply_state(offset, PatchState::Unmodified);
@@ -157,7 +180,7 @@ impl Document {
         if self.readonly {
             return Err(HxError::ReadOnly);
         }
-        if offset >= self.original_len {
+        if offset >= self.len() {
             return Err(HxError::OffsetOutOfRange);
         }
         self.patches.mark_deleted(offset);
@@ -168,10 +191,32 @@ impl Document {
         if self.readonly {
             return Err(HxError::ReadOnly);
         }
-        if offset >= self.original_len {
+        if offset > self.len() {
             return Err(HxError::OffsetOutOfRange);
         }
         self.patches.apply_state(offset, state);
+        Ok(())
+    }
+
+    pub fn set_byte(&mut self, offset: u64, value: u8) -> HxResult<()> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        if offset > self.len() {
+            return Err(HxError::OffsetOutOfRange);
+        }
+
+        if offset < self.original_len {
+            let original = self.raw_byte(offset)?;
+            if value == original {
+                self.patches.apply_state(offset, PatchState::Unmodified);
+            } else {
+                self.patches.set_replacement(offset, value);
+            }
+        } else {
+            self.patches.set_replacement(offset, value);
+        }
+
         Ok(())
     }
 
@@ -183,7 +228,7 @@ impl Document {
 
         // Fixed-size sessions can patch the file in place. Any logical deletion
         // requires rewriting the compacted byte stream.
-        if target == self.path && !self.has_deletions() {
+        if target == self.path && !self.has_deletions() && !self.has_appends() {
             save::save_in_place(self, &target)?;
         } else {
             save::save_rewrite(self, &target)?;
@@ -198,10 +243,10 @@ impl Document {
     }
 
     pub fn goto(&self, offset: u64) -> HxResult<u64> {
-        if self.original_len == 0 {
+        if self.len() == 0 {
             return Ok(0);
         }
-        if offset >= self.original_len {
+        if offset >= self.len() {
             return Err(HxError::OffsetOutOfRange);
         }
         Ok(offset)
@@ -211,7 +256,7 @@ impl Document {
         if pattern.is_empty() {
             return Err(HxError::EmptySearch);
         }
-        if start >= self.original_len {
+        if start >= self.len() {
             return Ok(None);
         }
 
@@ -219,26 +264,28 @@ impl Document {
         let mut carry_offsets = Vec::with_capacity(overlap);
         let mut carry_bytes = Vec::with_capacity(overlap);
         let mut offset = start;
+        let limit = self.len();
 
-        while offset < self.original_len {
-            let len = SEARCH_CHUNK_SIZE.min((self.original_len - offset) as usize);
-            let raw = self.raw_range(offset, len)?;
-            if raw.is_empty() {
+        while offset < limit {
+            let len = SEARCH_CHUNK_SIZE.min((limit - offset) as usize);
+            let (logical_offsets, logical_bytes) = self.logical_chunk(offset, len)?;
+            if logical_bytes.is_empty() {
                 break;
             }
 
-            let mut logical_offsets = std::mem::take(&mut carry_offsets);
-            let mut logical_bytes = std::mem::take(&mut carry_bytes);
-            self.materialize_logical_chunk(offset, raw, &mut logical_offsets, &mut logical_bytes);
+            let mut chunk_offsets = std::mem::take(&mut carry_offsets);
+            let mut chunk_bytes = std::mem::take(&mut carry_bytes);
+            chunk_offsets.extend(logical_offsets);
+            chunk_bytes.extend(logical_bytes);
 
-            if let Some(idx) = search::find(&logical_bytes, pattern) {
-                return Ok(Some(logical_offsets[idx]));
+            if let Some(idx) = search::find(&chunk_bytes, pattern) {
+                return Ok(Some(chunk_offsets[idx]));
             }
 
-            let keep = overlap.min(logical_bytes.len());
+            let keep = overlap.min(chunk_bytes.len());
             if keep > 0 {
-                carry_offsets = logical_offsets[logical_offsets.len() - keep..].to_vec();
-                carry_bytes = logical_bytes[logical_bytes.len() - keep..].to_vec();
+                carry_offsets = chunk_offsets[chunk_offsets.len() - keep..].to_vec();
+                carry_bytes = chunk_bytes[chunk_bytes.len() - keep..].to_vec();
             }
 
             offset += len as u64;
@@ -250,7 +297,7 @@ impl Document {
         if pattern.is_empty() {
             return Err(HxError::EmptySearch);
         }
-        let mut end = end_exclusive.min(self.original_len);
+        let mut end = end_exclusive.min(self.len());
         if end == 0 {
             return Ok(None);
         }
@@ -262,14 +309,11 @@ impl Document {
         while end > 0 {
             let start = end.saturating_sub(SEARCH_CHUNK_SIZE as u64);
             let len = (end - start) as usize;
-            let raw = self.raw_range(start, len)?;
-            if raw.is_empty() {
+            let (mut logical_offsets, mut logical_bytes) = self.logical_chunk(start, len)?;
+            if logical_bytes.is_empty() {
                 break;
             }
 
-            let mut logical_offsets = Vec::new();
-            let mut logical_bytes = Vec::new();
-            self.materialize_logical_chunk(start, raw, &mut logical_offsets, &mut logical_bytes);
             logical_offsets.extend_from_slice(&carry_offsets);
             logical_bytes.extend_from_slice(&carry_bytes);
 
@@ -293,15 +337,13 @@ impl Document {
     }
 
     pub fn logical_bytes(&mut self, start: u64, end_inclusive: u64) -> HxResult<Vec<u8>> {
-        if self.original_len == 0 || start > end_inclusive || start >= self.original_len {
+        let len = self.len();
+        if len == 0 || start > end_inclusive || start >= len {
             return Ok(Vec::new());
         }
 
-        let end = end_inclusive.min(self.original_len - 1);
-        let raw = self.raw_range(start, (end - start + 1) as usize)?;
-        let mut offsets = Vec::with_capacity(raw.len());
-        let mut bytes = Vec::with_capacity(raw.len());
-        self.materialize_logical_chunk(start, raw, &mut offsets, &mut bytes);
+        let end = end_inclusive.min(len - 1);
+        let (_, bytes) = self.logical_chunk(start, (end - start + 1) as usize)?;
         Ok(bytes)
     }
 
@@ -327,5 +369,37 @@ impl Document {
             offsets.push(absolute);
             bytes.push(self.patches.replacement_at(absolute).unwrap_or(raw_byte));
         }
+    }
+
+    fn logical_chunk(&mut self, start: u64, len: usize) -> HxResult<(Vec<u64>, Vec<u8>)> {
+        let limit = self.len();
+        if start >= limit || len == 0 {
+            return Ok((Vec::new(), Vec::new()));
+        }
+
+        let end = (start + len as u64).min(limit);
+        let mut offsets = Vec::with_capacity(len);
+        let mut bytes = Vec::with_capacity(len);
+
+        if start < self.original_len {
+            let raw_end = end.min(self.original_len);
+            let raw = self.raw_range(start, (raw_end - start) as usize)?;
+            self.materialize_logical_chunk(start, raw, &mut offsets, &mut bytes);
+        }
+
+        if end > self.original_len {
+            let append_start = start.max(self.original_len);
+            for offset in append_start..end {
+                if self.patches.is_deleted(offset) {
+                    continue;
+                }
+                if let Some(value) = self.patches.replacement_at(offset) {
+                    offsets.push(offset);
+                    bytes.push(value);
+                }
+            }
+        }
+
+        Ok((offsets, bytes))
     }
 }

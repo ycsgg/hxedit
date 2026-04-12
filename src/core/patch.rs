@@ -68,8 +68,24 @@ impl PatchSet {
         self.deletions.clear();
     }
 
+    pub fn max_touched_offset(&self) -> Option<u64> {
+        self.replacements
+            .keys()
+            .next_back()
+            .copied()
+            .into_iter()
+            .chain(self.deletions.iter().next_back().copied())
+            .max()
+    }
+
     pub fn has_deletions(&self) -> bool {
         !self.deletions.is_empty()
+    }
+
+    pub fn has_appends(&self, original_len: u64) -> bool {
+        self.max_touched_offset()
+            .map(|offset| offset >= original_len)
+            .unwrap_or(false)
     }
 
     pub fn is_dirty(&self) -> bool {

@@ -27,6 +27,8 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "wq".to_owned(),
             details: "save current file and quit".to_owned(),
         },
+        "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
+        | "paste?!" => paste_hint(name, rest),
         "g" | "goto" => CommandHint {
             syntax: format!("{name} <offset>"),
             details: "jump to byte offset; supports decimal or 0x-prefixed hex".to_owned(),
@@ -52,7 +54,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             if suggestions.is_empty() {
                 CommandHint {
                     syntax: "unknown command".to_owned(),
-                    details: "available: q w wq g s S u c".to_owned(),
+                    details: "available: q w wq g s S u c p".to_owned(),
                 }
             } else {
                 CommandHint {
@@ -106,6 +108,44 @@ fn copy_hint(name: &str, rest: Option<&str>) -> CommandHint {
     }
 }
 
+fn paste_hint(name: &str, rest: Option<&str>) -> CommandHint {
+    let mut raw = name.contains('!');
+    let preview = name.contains('?');
+    let mut has_limit = false;
+
+    if let Some(rest) = rest {
+        for token in rest.split_whitespace() {
+            if token == "!" {
+                raw = true;
+            } else if token.parse::<usize>().is_ok() {
+                has_limit = true;
+            }
+        }
+    }
+
+    let mut syntax = if raw {
+        format!("{name} [num]")
+    } else if has_limit {
+        format!("{name} {}", rest.unwrap_or_default().trim())
+    } else {
+        format!("{name} [!] [num]")
+    };
+    if syntax.ends_with(' ') {
+        syntax.pop();
+    }
+
+    CommandHint {
+        syntax,
+        details: if preview {
+            "preview only; default parses clipboard as hex/base64 text. ! previews raw clipboard bytes. num limits previewed bytes."
+                .to_owned()
+        } else {
+            "default parses clipboard as hex/base64 text. ! pastes raw clipboard bytes. num limits pasted bytes."
+                .to_owned()
+        },
+    }
+}
+
 fn split_command(input: &str) -> (&str, Option<&str>) {
     if let Some(idx) = input.find(char::is_whitespace) {
         let (name, tail) = input.split_at(idx);
@@ -118,6 +158,7 @@ fn split_command(input: &str) -> (&str, Option<&str>) {
 fn known_commands() -> Vec<&'static str> {
     vec![
         "q", "quit", "q!", "w", "write", "wq", "g", "goto", "s", "S", "u", "undo", "c", "copy",
+        "p", "paste", "p!", "paste!", "p?", "paste?", "p!?", "p?!", "paste!?", "paste?!",
     ]
 }
 
@@ -136,6 +177,18 @@ mod tests {
     fn copy_hint_shows_remaining_args() {
         let hint = hint_for("copy db");
         assert_eq!(hint.syntax, "copy [r|nb|nl]");
+    }
+
+    #[test]
+    fn paste_hint_explains_raw_mode() {
+        let hint = hint_for("paste!");
+        assert!(hint.details.contains("raw clipboard bytes"));
+    }
+
+    #[test]
+    fn paste_preview_hint_mentions_preview() {
+        let hint = hint_for("paste?");
+        assert!(hint.details.contains("preview only"));
     }
 
     #[test]

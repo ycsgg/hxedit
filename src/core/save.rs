@@ -81,6 +81,18 @@ fn write_virtual(document: &mut Document, target: &Path) -> HxResult<()> {
         offset += chunk_size as u64;
     }
 
+    let mut append_offset = document.original_len();
+    while append_offset < document.len() {
+        if document.patches().is_deleted(append_offset) {
+            append_offset += 1;
+            continue;
+        }
+        if let Some(value) = document.patches().replacement_at(append_offset) {
+            writer.write_all(&[value])?;
+        }
+        append_offset += 1;
+    }
+
     writer.flush()?;
     Ok(())
 }

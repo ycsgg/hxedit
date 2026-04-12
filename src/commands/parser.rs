@@ -22,6 +22,8 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         "wq" => Ok(Command::WriteQuit {
             path: opt_path(rest),
         }),
+        "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
+        | "paste?!" => parse_paste(name, rest),
         "c" | "copy" => parse_copy(rest),
         "u" | "undo" => Ok(Command::Undo {
             steps: parse_undo_steps(rest)?,
@@ -99,4 +101,33 @@ fn parse_copy(input: Option<&str>) -> HxResult<Command> {
     }
 
     Ok(Command::Copy { format, display })
+}
+
+fn parse_paste(name: &str, input: Option<&str>) -> HxResult<Command> {
+    let mut raw = name.contains('!');
+    let preview = name.contains('?');
+    let mut limit = None;
+
+    if let Some(rest) = input {
+        for token in rest.split_whitespace() {
+            if token == "!" {
+                raw = true;
+                continue;
+            }
+            if limit.is_none() {
+                let parsed = token
+                    .parse::<usize>()
+                    .map_err(|_| HxError::InvalidPasteCount(token.to_owned()))?;
+                limit = Some(parsed);
+                continue;
+            }
+            return Err(HxError::UnknownCommand(token.to_owned()));
+        }
+    }
+
+    Ok(Command::Paste {
+        raw,
+        preview,
+        limit,
+    })
 }
