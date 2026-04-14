@@ -18,7 +18,15 @@ impl App {
             Action::RowStart => self.move_row_edge(false),
             Action::RowEnd => self.move_row_edge(true),
             Action::ToggleVisual => self.toggle_visual(),
-            Action::EnterEdit => {
+            Action::EnterInsert => {
+                if self.document.is_readonly() {
+                    Err(HxError::ReadOnly)
+                } else {
+                    self.mode = Mode::InsertHex { pending: None };
+                    Ok(())
+                }
+            }
+            Action::EnterReplace => {
                 if self.document.is_readonly() {
                     Err(HxError::ReadOnly)
                 } else {
@@ -29,20 +37,37 @@ impl App {
                 }
             }
             Action::EnterCommand => {
-                self.command_return_mode = Some(self.mode);
+                let return_mode = if matches!(self.mode, Mode::InsertHex { .. }) {
+                    self.commit_pending_insert()?;
+                    Mode::Normal
+                } else {
+                    self.mode
+                };
+                self.command_return_mode = Some(return_mode);
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
                 Ok(())
             }
-            Action::LeaveMode => {
-                self.leave_mode();
-                Ok(())
-            }
+            Action::LeaveMode => self.leave_mode(),
             Action::DeleteByte => self.delete_at_cursor_or_selection(),
             Action::SearchNext => self.repeat_search(crate::app::SearchDirection::Forward),
             Action::SearchPrev => self.repeat_search(crate::app::SearchDirection::Backward),
-            Action::Undo(steps) => self.undo(steps, true),
-            Action::EditHex(value) => self.edit_nibble(value),
+            Action::Undo(steps) => {
+                if self.undo_pending_insert()? {
+                    if steps > 1 {
+                        self.undo(steps - 1, true)
+                    } else {
+                        Ok(())
+                    }
+                } else {
+                    self.undo(steps, true)
+                }
+            }
+            Action::EditHex(value) => match self.mode {
+                Mode::InsertHex { .. } => self.insert_nibble(value),
+                _ => self.edit_nibble(value),
+            },
+            Action::EditBackspace => self.edit_backspace(),
             Action::CommandChar(c) => {
                 self.command_buffer.push(c);
                 Ok(())
@@ -101,6 +126,9 @@ impl App {
                     self.config.bytes_per_line,
                     self.document.len(),
                 ) {
+                    if matches!(self.mode, Mode::InsertHex { .. }) {
+                        self.commit_pending_insert()?;
+                    }
                     self.mouse_selection_anchor = Some(hit.offset);
                     self.cursor = hit.offset;
                     match self.mode {
@@ -108,6 +136,9 @@ impl App {
                             self.mode = Mode::EditHex {
                                 phase: hit.phase.unwrap_or(NibblePhase::High),
                             };
+                        }
+                        Mode::InsertHex { .. } => {
+                            self.mode = Mode::Normal;
                         }
                         Mode::Command => {
                             self.command_buffer.clear();

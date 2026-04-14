@@ -14,9 +14,16 @@ impl NibblePhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingInsert {
+    pub offset: u64,
+    pub high_nibble: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Normal,
     EditHex { phase: NibblePhase },
+    InsertHex { pending: Option<PendingInsert> },
     Visual,
     Command,
 }
@@ -26,6 +33,7 @@ impl Mode {
         match self {
             Self::Normal => "NORMAL",
             Self::EditHex { .. } => "EDIT",
+            Self::InsertHex { .. } => "INSERT",
             Self::Visual => "VISUAL",
             Self::Command => "COMMAND",
         }

@@ -24,7 +24,7 @@ use ratatui::Terminal;
 use crate::cli::Cli;
 use crate::config::Config;
 use crate::core::document::Document;
-use crate::core::patch::PatchState;
+use crate::core::piece_table::CellId;
 use crate::input::keymap::map_key;
 use crate::mode::Mode;
 use crate::profile::{Profiler, StartupStats};
@@ -54,17 +54,36 @@ pub struct App {
     profiler: Option<Profiler>,
 }
 
+/// Snapshot of a single cell's replacement state before an edit.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct UndoEntry {
-    offset: u64,
-    previous_patch: PatchState,
-    cursor_before: u64,
-    mode_before: Mode,
+pub(crate) struct ReplacementUndo {
+    id: CellId,
+    /// `None` means the cell had no replacement (base byte was displayed).
+    previous: Option<u8>,
 }
 
+/// A single reversible edit operation.
+///
+/// Each variant stores enough information to undo itself:
+/// - `Insert` — undo by real-deleting `len` bytes at `offset`.
+/// - `RealDelete` — undo by re-inserting the saved `cells` at `offset`.
+/// - `TombstoneDelete` — undo by clearing the tombstones for `ids`.
+/// - `ReplaceBytes` — undo by restoring each cell's previous replacement.
+#[derive(Debug, Clone)]
+pub(crate) enum EditOp {
+    Insert { offset: u64, len: u64 },
+    RealDelete { offset: u64, cells: Vec<CellId> },
+    TombstoneDelete { ids: Vec<CellId> },
+    ReplaceBytes { changes: Vec<ReplacementUndo> },
+}
+
+/// One entry on the undo stack: the cursor/mode before the edit, plus the
+/// list of operations that were performed (replayed in reverse to undo).
 #[derive(Debug, Clone)]
 struct UndoStep {
-    entries: Vec<UndoEntry>,
+    cursor_before: u64,
+    mode_before: Mode,
+    ops: Vec<EditOp>,
 }
 
 #[derive(Debug, Clone)]

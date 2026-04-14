@@ -11,7 +11,7 @@ pub fn map_key(mode: Mode, key: KeyEvent) -> Option<Action> {
 
     match mode {
         Mode::Normal => normal::map(key),
-        Mode::EditHex { .. } => edit::map(key),
+        Mode::EditHex { .. } | Mode::InsertHex { .. } => edit::map(key),
         Mode::Visual => visual::map(key),
         Mode::Command => command::map(key),
     }

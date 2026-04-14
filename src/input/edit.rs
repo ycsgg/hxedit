@@ -21,6 +21,7 @@ pub fn map(key: KeyEvent) -> Option<Action> {
         KeyCode::PageDown => Some(Action::PageDown),
         KeyCode::Home => Some(Action::RowStart),
         KeyCode::End => Some(Action::RowEnd),
+        KeyCode::Backspace => Some(Action::EditBackspace),
         KeyCode::Char(c) => parse_hex_nibble(c).map(Action::EditHex),
         _ => None,
     }

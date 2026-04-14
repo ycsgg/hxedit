@@ -1,4 +1,4 @@
-use crate::app::{App, PasteSource, PasteState, UndoEntry};
+use crate::app::{App, EditOp, PasteSource, PasteState};
 use crate::clipboard;
 use crate::copy::{format_selection, CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
@@ -72,24 +72,19 @@ impl App {
         }
 
         let cursor_before = self.cursor;
-        let mode_before = self.mode;
-        let mut undo_entries = Vec::with_capacity(bytes.len());
-        for (idx, &byte) in bytes.iter().enumerate() {
-            let offset = cursor_before + idx as u64;
-            let previous_patch = self.document.patch_state_at(offset);
-            self.document.set_byte(offset, byte)?;
-            if self.document.patch_state_at(offset) != previous_patch {
-                undo_entries.push(UndoEntry {
-                    offset,
-                    previous_patch,
-                    cursor_before,
-                    mode_before,
-                });
-            }
-        }
-
-        self.push_undo_step(undo_entries);
-        self.cursor = self.clamp_offset(cursor_before + bytes.len().saturating_sub(1) as u64);
+        self.document.insert_bytes(cursor_before, bytes)?;
+        self.push_undo_step(
+            vec![EditOp::Insert {
+                offset: cursor_before,
+                len: bytes.len() as u64,
+            }],
+            cursor_before,
+            self.mode,
+        );
+        self.cursor = self.clamp_cursor_for_mode(
+            cursor_before + bytes.len().saturating_sub(1) as u64,
+            self.mode,
+        );
         Ok(bytes.len())
     }
 }

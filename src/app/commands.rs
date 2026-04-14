@@ -25,17 +25,17 @@ impl App {
                 Ok(())
             }
             Command::Write { path } => {
-                let saved = self.document.save(path)?;
+                let (saved, profile) = self.document.save(path)?;
                 self.undo_stack.clear();
                 self.cursor = self.clamp_offset(self.cursor);
-                self.status_message = format!("wrote {}", saved.display());
+                self.status_message = format!("wrote {} [{}]", saved.display(), profile);
                 Ok(())
             }
             Command::WriteQuit { path } => {
-                let saved = self.document.save(path)?;
+                let (saved, profile) = self.document.save(path)?;
                 self.undo_stack.clear();
                 self.cursor = self.clamp_offset(self.cursor);
-                self.status_message = format!("wrote {}", saved.display());
+                self.status_message = format!("wrote {} [{}]", saved.display(), profile);
                 self.should_quit = true;
                 Ok(())
             }

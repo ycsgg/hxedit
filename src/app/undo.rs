@@ -1,8 +1,23 @@
-use crate::app::{App, UndoEntry, UndoStep};
+use crate::app::{App, EditOp, UndoStep};
 use crate::error::HxResult;
 use crate::mode::Mode;
 
 impl App {
+    /// Undo `steps` edit actions by popping from the undo stack and replaying
+    /// each operation in reverse.
+    ///
+    /// Each [`UndoStep`] records the cursor position and mode *before* the
+    /// edit, plus a list of [`EditOp`]s that describe what changed.  Undoing
+    /// replays the inverse of each op:
+    ///
+    /// - `Insert` → real-delete the inserted bytes
+    /// - `RealDelete` → re-insert the removed cells
+    /// - `TombstoneDelete` → clear the tombstones
+    /// - `ReplaceBytes` → restore each cell's previous replacement state
+    ///
+    /// When `restore_mode` is true the mode is set back to what it was before
+    /// the edit (used by Ctrl-Z in edit/insert modes).  When false the mode
+    /// is forced to Normal (used by `:u`).
     pub(crate) fn undo(&mut self, steps: usize, restore_mode: bool) -> HxResult<()> {
         let mut undone = 0;
 
@@ -10,15 +25,29 @@ impl App {
             let Some(step) = self.undo_stack.pop() else {
                 break;
             };
-            for entry in step.entries.iter().rev() {
-                self.document
-                    .restore_patch_state(entry.offset, entry.previous_patch)?;
-            }
-            if let Some(entry) = step.entries.first() {
-                self.cursor = self.clamp_offset(entry.cursor_before);
-                if restore_mode {
-                    self.mode = entry.mode_before;
+
+            for op in step.ops.iter().rev() {
+                match op {
+                    EditOp::Insert { offset, len } => {
+                        self.document.delete_range_real(*offset, *len)?;
+                    }
+                    EditOp::RealDelete { offset, cells } => {
+                        self.document.restore_real_delete(*offset, cells)?;
+                    }
+                    EditOp::TombstoneDelete { ids } => {
+                        self.document.clear_tombstones(ids);
+                    }
+                    EditOp::ReplaceBytes { changes } => {
+                        for change in changes {
+                            self.document.restore_replacement(change.id, change.previous)?;
+                        }
+                    }
                 }
+            }
+
+            self.cursor = self.clamp_cursor_for_mode(step.cursor_before, step.mode_before);
+            if restore_mode {
+                self.mode = step.mode_before;
             }
             undone += 1;
         }
@@ -38,27 +67,20 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn push_undo_if_changed(
+    /// Push a new undo step onto the stack.
+    pub(crate) fn push_undo_step(
         &mut self,
-        offset: u64,
-        previous_patch: crate::core::patch::PatchState,
+        ops: Vec<EditOp>,
         cursor_before: u64,
         mode_before: Mode,
     ) {
-        if self.document.patch_state_at(offset) != previous_patch {
-            self.push_undo_step(vec![UndoEntry {
-                offset,
-                previous_patch,
-                cursor_before,
-                mode_before,
-            }]);
-        }
-    }
-
-    pub(crate) fn push_undo_step(&mut self, entries: Vec<UndoEntry>) {
-        if entries.is_empty() {
+        if ops.is_empty() {
             return;
         }
-        self.undo_stack.push(UndoStep { entries });
+        self.undo_stack.push(UndoStep {
+            cursor_before,
+            mode_before,
+            ops,
+        });
     }
 }

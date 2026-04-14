@@ -4,6 +4,7 @@ use crate::mode::Mode;
 
 impl App {
     pub(crate) fn move_horizontal(&mut self, delta: i64) -> HxResult<()> {
+        self.ensure_insert_pending_committed()?;
         self.cursor = self.offset_with_delta(self.cursor, delta);
         if let Mode::EditHex { ref mut phase } = self.mode {
             *phase = crate::mode::NibblePhase::High;
@@ -12,6 +13,7 @@ impl App {
     }
 
     pub(crate) fn move_vertical(&mut self, rows: i64) -> HxResult<()> {
+        self.ensure_insert_pending_committed()?;
         let delta = rows.saturating_mul(self.config.bytes_per_line as i64);
         self.cursor = self.offset_with_delta(self.cursor, delta);
         if let Mode::EditHex { ref mut phase } = self.mode {
@@ -21,19 +23,20 @@ impl App {
     }
 
     pub(crate) fn move_row_edge(&mut self, end: bool) -> HxResult<()> {
+        self.ensure_insert_pending_committed()?;
         let row_start = align_offset(self.cursor, self.config.bytes_per_line);
         let target = if end {
             row_start + self.config.bytes_per_line.saturating_sub(1) as u64
         } else {
             row_start
         };
-        self.cursor = self.clamp_offset(target);
+        self.cursor = self.clamp_cursor_for_mode(target, self.mode);
         Ok(())
     }
 
     pub(crate) fn ensure_cursor_visible(&mut self) {
         let row_size = self.config.bytes_per_line as u64;
-        let cursor_row = align_offset(self.cursor, self.config.bytes_per_line);
+        let cursor_row = align_offset(self.cursor_anchor_offset(), self.config.bytes_per_line);
         let visible_rows = self.visible_rows();
         let bottom = self.viewport_top + visible_rows.saturating_sub(1) * row_size;
         if cursor_row < self.viewport_top {
@@ -72,7 +75,14 @@ impl App {
         let visible_end = (self.viewport_top + visible_rows.saturating_mul(row_size))
             .min(self.document.len())
             .saturating_sub(1);
-        self.cursor = self.cursor.clamp(visible_start, visible_end);
+        let anchor = self.cursor_anchor_offset().clamp(visible_start, visible_end);
+        if self.mode_allows_eof_cursor()
+            && self.cursor == self.document.len()
+            && self.cursor_anchor_offset() == anchor
+        {
+            return;
+        }
+        self.cursor = anchor;
     }
 
     pub(crate) fn max_viewport_top(&self) -> u64 {
@@ -95,7 +105,7 @@ impl App {
         if self.document.len() == 0 {
             return 0;
         }
-        let max = self.document.len() - 1;
+        let max = self.cursor_max(self.mode_allows_eof_cursor());
         if delta >= 0 {
             current.saturating_add(delta as u64).min(max)
         } else {
@@ -104,10 +114,43 @@ impl App {
     }
 
     pub(crate) fn clamp_offset(&self, offset: u64) -> u64 {
+        self.clamp_offset_with_eof(offset, false)
+    }
+
+    pub(crate) fn clamp_cursor_for_mode(&self, offset: u64, mode: Mode) -> u64 {
+        self.clamp_offset_with_eof(
+            offset,
+            matches!(mode, Mode::EditHex { .. } | Mode::InsertHex { .. }),
+        )
+    }
+
+    pub(crate) fn mode_allows_eof_cursor(&self) -> bool {
+        matches!(self.mode, Mode::EditHex { .. } | Mode::InsertHex { .. })
+    }
+
+    pub(crate) fn cursor_anchor_offset(&self) -> u64 {
         if self.document.len() == 0 {
             0
         } else {
-            offset.min(self.document.len() - 1)
+            self.cursor.min(self.document.len() - 1)
+        }
+    }
+
+    fn cursor_max(&self, allow_eof: bool) -> u64 {
+        if self.document.len() == 0 {
+            0
+        } else if allow_eof {
+            self.document.len()
+        } else {
+            self.document.len() - 1
+        }
+    }
+
+    fn clamp_offset_with_eof(&self, offset: u64, allow_eof: bool) -> u64 {
+        if self.document.len() == 0 {
+            0
+        } else {
+            offset.min(self.cursor_max(allow_eof))
         }
     }
 }

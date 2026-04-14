@@ -1,28 +1,40 @@
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::core::file_view::FileView;
 use crate::core::page_cache::CacheStats;
-use crate::core::patch::{PatchSet, PatchState};
+use crate::core::piece_table::{CellId, PieceTable};
 use crate::core::save;
-use crate::core::search;
 use crate::error::{HxError, HxResult};
 use crate::mode::NibblePhase;
 
-const SEARCH_CHUNK_SIZE: usize = 128 * 1024;
-
-/// What the renderer sees at a given original file offset.
+/// What the renderer sees at a given display offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ByteSlot {
+    /// A visible byte with the given value (after applying replacements).
     Present(u8),
+    /// A tombstone-deleted byte — still occupies a display slot but is
+    /// rendered as "XX" and skipped on save.
     Deleted,
+    /// Past the end of the document.
     Empty,
 }
 
 /// Backing document model for the editor.
 ///
-/// The file is read lazily through `FileView`, while edits are recorded in
-/// `PatchSet`. Deletions remain logical tombstones until a rewrite save.
+/// Composes three layers:
+///
+/// 1. **PieceTable** — tracks insertions and real deletions (insert-mode
+///    backspace).  These immediately shift subsequent display offsets.
+/// 2. **Tombstones** (`BTreeSet<CellId>`) — normal/visual-mode deletions.
+///    The cell still occupies its display slot (shown as `Deleted`) but is
+///    skipped on save.
+/// 3. **Replacements** (`BTreeMap<CellId, u8>`) — in-place byte edits
+///    (edit-mode nibble changes).  The replacement value overrides the base
+///    byte from the file or add-buffer.
+///
+/// All external interfaces use *display offsets* derived from the piece table.
 #[derive(Debug)]
 pub struct Document {
     path: PathBuf,
@@ -31,10 +43,13 @@ pub struct Document {
     cache_pages: usize,
     original_len: u64,
     view: FileView,
-    patches: PatchSet,
+    pieces: PieceTable,
+    tombstones: BTreeSet<CellId>,
+    replacements: BTreeMap<CellId, u8>,
 }
 
 impl Document {
+    /// Open a document from disk with the given configuration.
     pub fn open(path: &Path, config: &Config) -> HxResult<Self> {
         let view = FileView::open(path, config.readonly, config.page_size, config.cache_pages)?;
         let original_len = view.len();
@@ -45,7 +60,9 @@ impl Document {
             cache_pages: config.cache_pages,
             original_len,
             view,
-            patches: PatchSet::default(),
+            pieces: PieceTable::new(original_len),
+            tombstones: BTreeSet::new(),
+            replacements: BTreeMap::new(),
         })
     }
 
@@ -57,47 +74,34 @@ impl Document {
         self.original_len
     }
 
+    /// Total display length including tombstoned slots.
     pub fn len(&self) -> u64 {
-        self.patches
-            .max_touched_offset()
-            .map(|offset| offset + 1)
-            .unwrap_or(self.original_len)
-            .max(self.original_len)
+        self.pieces.len()
     }
 
+    /// Number of bytes that would be written on save (display len minus tombstones).
+    ///
+    /// O(1) — simply subtracts the tombstone count from the piece table length.
     pub fn visible_len(&self) -> u64 {
-        self.len()
-            .saturating_sub(self.patches.deletions().len() as u64)
+        self.pieces.len().saturating_sub(self.tombstones.len() as u64)
     }
 
+    /// True when any edits (inserts, deletions, replacements) have been made
+    /// since the last save.
     pub fn is_dirty(&self) -> bool {
-        self.patches.is_dirty()
+        !self.pieces.is_identity() || !self.tombstones.is_empty() || !self.replacements.is_empty()
     }
 
     pub fn is_readonly(&self) -> bool {
         self.readonly
     }
 
-    pub fn has_deletions(&self) -> bool {
-        self.patches.has_deletions()
-    }
-
-    pub fn has_appends(&self) -> bool {
-        self.patches.has_appends(self.original_len)
-    }
-
-    pub fn patches(&self) -> &PatchSet {
-        &self.patches
-    }
-
     pub fn io_stats(&self) -> CacheStats {
         self.view.cache_stats()
     }
 
-    pub fn patch_state_at(&self, offset: u64) -> PatchState {
-        self.patches.state_at(offset)
-    }
-
+    /// Read raw bytes from the original file (bypasses piece table / overlays).
+    /// Used by the save path for bulk reads.
     pub fn raw_range(&mut self, offset: u64, len: usize) -> HxResult<Vec<u8>> {
         if offset >= self.original_len {
             return Ok(Vec::new());
@@ -106,36 +110,62 @@ impl Document {
         self.view.read_range(offset, clamped)
     }
 
+    /// Resolve a display offset to its stable [`CellId`].
+    pub fn cell_id_at(&self, offset: u64) -> Option<CellId> {
+        self.pieces.resolve(offset)
+    }
+
+    /// Get the current replacement value for a cell (used by undo to snapshot
+    /// the "before" state).
+    pub fn replacement_state(&self, id: CellId) -> Option<u8> {
+        self.replacements.get(&id).copied()
+    }
+
+    /// Restore a replacement to its previous state (used by undo).
+    pub fn restore_replacement(&mut self, id: CellId, previous: Option<u8>) -> HxResult<()> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        match previous {
+            Some(value) => {
+                self.replacements.insert(id, value);
+            }
+            None => {
+                self.replacements.remove(&id);
+            }
+        }
+        Ok(())
+    }
+
+    /// Tombstone-delete a byte (normal/visual mode).  The cell keeps its
+    /// display slot but renders as `Deleted` and is skipped on save.
+    pub fn mark_tombstone(&mut self, offset: u64) -> HxResult<Option<CellId>> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let id = self.cell_id_at(offset).ok_or(HxError::OffsetOutOfRange)?;
+        Ok(self.tombstones.insert(id).then_some(id))
+    }
+
+    /// Remove tombstones (used by undo of tombstone-delete).
+    pub fn clear_tombstones(&mut self, ids: &[CellId]) {
+        for id in ids {
+            self.tombstones.remove(id);
+        }
+    }
+
+    /// Read a single display slot: `Present(byte)`, `Deleted`, or `Empty`.
     pub fn byte_at(&mut self, offset: u64) -> HxResult<ByteSlot> {
-        // Patches always shadow on-disk bytes for both rendering and search.
-        if self.patches.is_deleted(offset) {
+        let Some(id) = self.cell_id_at(offset) else {
+            return Ok(ByteSlot::Empty);
+        };
+        if self.tombstones.contains(&id) {
             return Ok(ByteSlot::Deleted);
         }
-        if let Some(value) = self.patches.replacement_at(offset) {
-            return Ok(ByteSlot::Present(value));
-        }
-        if offset >= self.original_len {
-            return Ok(ByteSlot::Empty);
-        }
-        let raw = self.view.read_range(offset, 1)?;
-        Ok(raw
-            .first()
-            .copied()
-            .map(ByteSlot::Present)
-            .unwrap_or(ByteSlot::Empty))
+        Ok(ByteSlot::Present(self.display_byte_for_id(id)?))
     }
 
-    pub fn byte_for_edit(&mut self, offset: u64) -> HxResult<u8> {
-        if let Some(value) = self.patches.replacement_at(offset) {
-            return Ok(value);
-        }
-        if offset >= self.original_len {
-            return Err(HxError::OffsetOutOfRange);
-        }
-        let raw = self.view.read_range(offset, 1)?;
-        raw.first().copied().ok_or(HxError::OffsetOutOfRange)
-    }
-
+    /// Read a row of display slots starting at `offset`.
     pub fn row_bytes(&mut self, offset: u64, width: usize) -> HxResult<Vec<ByteSlot>> {
         let mut out = Vec::with_capacity(width);
         for idx in 0..width {
@@ -144,104 +174,139 @@ impl Document {
         Ok(out)
     }
 
-    pub fn replace_nibble(&mut self, offset: u64, phase: NibblePhase, nibble: u8) -> HxResult<u64> {
+    /// Replace a single nibble (high or low) of the byte at `offset`.
+    /// Used by edit-mode hex input.  If `offset == len`, inserts a new byte
+    /// (only valid for the high nibble).
+    pub fn replace_nibble(
+        &mut self,
+        offset: u64,
+        phase: NibblePhase,
+        nibble: u8,
+    ) -> HxResult<CellId> {
         if self.readonly {
             return Err(HxError::ReadOnly);
         }
         if offset == self.len() {
             if matches!(phase, NibblePhase::High) {
-                self.set_byte(offset, nibble << 4)?;
-                return Ok(offset);
+                return self.insert_byte(offset, nibble << 4);
             }
             return Err(HxError::OffsetOutOfRange);
         }
-        if offset >= self.len() {
-            return Err(HxError::OffsetOutOfRange);
-        }
-        let current = self.byte_for_edit(offset)?;
+
+        let (id, current) = self.display_byte_for_edit(offset)?;
         let updated = match phase {
             NibblePhase::High => (nibble << 4) | (current & 0x0f),
             NibblePhase::Low => (current & 0xf0) | nibble,
         };
-        if offset >= self.original_len {
-            self.patches.set_replacement(offset, updated);
-            return Ok(offset);
-        }
-        let original = self.raw_byte(offset)?;
-        if updated == original {
-            self.patches.apply_state(offset, PatchState::Unmodified);
-        } else {
-            self.patches.set_replacement(offset, updated);
-        }
-        Ok(offset)
+        self.set_display_byte_by_id(id, updated)?;
+        Ok(id)
     }
 
-    pub fn delete_byte(&mut self, offset: u64) -> HxResult<()> {
+    /// Replace the entire byte at `offset` with `value`.
+    /// Used by insert-mode to fill in the low nibble of a pending byte.
+    pub fn replace_display_byte(&mut self, offset: u64, value: u8) -> HxResult<CellId> {
         if self.readonly {
             return Err(HxError::ReadOnly);
+        }
+        let (id, _) = self.display_byte_for_edit(offset)?;
+        self.set_display_byte_by_id(id, value)?;
+        Ok(id)
+    }
+
+    /// Set a byte: replace if within bounds, insert if at EOF.
+    pub fn set_byte(&mut self, offset: u64, value: u8) -> HxResult<()> {
+        if offset == self.len() {
+            self.insert_byte(offset, value)?;
+            return Ok(());
+        }
+        self.replace_display_byte(offset, value)?;
+        Ok(())
+    }
+
+    /// Insert a single byte at `offset`.  Subsequent display offsets shift right.
+    pub fn insert_byte(&mut self, offset: u64, value: u8) -> HxResult<CellId> {
+        let inserted = self.insert_bytes(offset, &[value])?;
+        inserted.first().copied().ok_or(HxError::OffsetOutOfRange)
+    }
+
+    /// Insert multiple bytes at `offset`.  Returns the `CellId`s of the new
+    /// bytes (used by paste to build an undo step).
+    pub fn insert_bytes(&mut self, offset: u64, bytes: &[u8]) -> HxResult<Vec<CellId>> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        if offset > self.len() {
+            return Err(HxError::OffsetOutOfRange);
+        }
+        if bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let add_start = self.pieces.add_len();
+        self.pieces.insert_bytes(offset, bytes);
+        Ok((0..bytes.len())
+            .map(|idx| CellId::Add(add_start + idx as u64))
+            .collect())
+    }
+
+    /// Tombstone-delete a byte (convenience wrapper over `mark_tombstone`).
+    pub fn delete_byte(&mut self, offset: u64) -> HxResult<Option<CellId>> {
+        self.mark_tombstone(offset)
+    }
+
+    /// Real-delete bytes from the piece table (insert-mode backspace).
+    /// Returns the removed `CellId`s so undo can re-insert them.
+    /// Subsequent display offsets shift left immediately.
+    pub fn delete_range_real(&mut self, offset: u64, len: u64) -> HxResult<Vec<CellId>> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        if len == 0 {
+            return Ok(Vec::new());
         }
         if offset >= self.len() {
             return Err(HxError::OffsetOutOfRange);
         }
-        self.patches.mark_deleted(offset);
-        Ok(())
+        Ok(self.pieces.delete_range_real(offset, len))
     }
 
-    pub fn restore_patch_state(&mut self, offset: u64, state: PatchState) -> HxResult<()> {
+    /// Re-insert previously removed cells (undo of real-delete).
+    pub fn restore_real_delete(&mut self, offset: u64, cells: &[CellId]) -> HxResult<()> {
         if self.readonly {
             return Err(HxError::ReadOnly);
         }
         if offset > self.len() {
             return Err(HxError::OffsetOutOfRange);
         }
-        self.patches.apply_state(offset, state);
+        self.pieces.insert_existing_cells(offset, cells);
         Ok(())
     }
 
-    pub fn set_byte(&mut self, offset: u64, value: u8) -> HxResult<()> {
-        if self.readonly {
-            return Err(HxError::ReadOnly);
-        }
-        if offset > self.len() {
-            return Err(HxError::OffsetOutOfRange);
-        }
-
-        if offset < self.original_len {
-            let original = self.raw_byte(offset)?;
-            if value == original {
-                self.patches.apply_state(offset, PatchState::Unmodified);
-            } else {
-                self.patches.set_replacement(offset, value);
-            }
-        } else {
-            self.patches.set_replacement(offset, value);
-        }
-
-        Ok(())
-    }
-
-    pub fn save(&mut self, path: Option<PathBuf>) -> HxResult<PathBuf> {
+    /// Save the document to disk.  Walks the piece list in bulk, skipping
+    /// tombstones and applying replacements.  After saving, resets all edit
+    /// state (piece table, tombstones, replacements) and reloads the file.
+    ///
+    /// Returns the saved path and a [`SaveProfile`](save::SaveProfile) with
+    /// timing / throughput information for the status bar.
+    pub fn save(&mut self, path: Option<PathBuf>) -> HxResult<(PathBuf, save::SaveProfile)> {
         let target = path.unwrap_or_else(|| self.path.clone());
         if target == self.path && self.readonly {
             return Err(HxError::ReadOnly);
         }
 
-        // Fixed-size sessions can patch the file in place. Any logical deletion
-        // requires rewriting the compacted byte stream.
-        if target == self.path && !self.has_deletions() && !self.has_appends() {
-            save::save_in_place(self, &target)?;
-        } else {
-            save::save_rewrite(self, &target)?;
-        }
+        let profile = save::save_rewrite(self, &target)?;
 
         self.path = target.clone();
         self.view
             .reload(&target, self.readonly, self.page_size, self.cache_pages)?;
         self.original_len = self.view.len();
-        self.patches.clear();
-        Ok(target)
+        self.pieces = PieceTable::new(self.original_len);
+        self.tombstones.clear();
+        self.replacements.clear();
+        Ok((target, profile))
     }
 
+    /// Validate and return a display offset for `:goto`.
     pub fn goto(&self, offset: u64) -> HxResult<u64> {
         if self.len() == 0 {
             return Ok(0);
@@ -252,6 +317,8 @@ impl Document {
         Ok(offset)
     }
 
+    /// Search forward through the display stream.  Tombstoned bytes break
+    /// matches (they are treated as gaps).  Inserted bytes participate normally.
     pub fn search_forward(&mut self, start: u64, pattern: &[u8]) -> HxResult<Option<u64>> {
         if pattern.is_empty() {
             return Err(HxError::EmptySearch);
@@ -260,146 +327,181 @@ impl Document {
             return Ok(None);
         }
 
-        let overlap = pattern.len().saturating_sub(1);
-        let mut carry_offsets = Vec::with_capacity(overlap);
-        let mut carry_bytes = Vec::with_capacity(overlap);
-        let mut offset = start;
-        let limit = self.len();
+        let mut offsets = VecDeque::with_capacity(pattern.len());
+        let mut bytes = VecDeque::with_capacity(pattern.len());
 
-        while offset < limit {
-            let len = SEARCH_CHUNK_SIZE.min((limit - offset) as usize);
-            let (logical_offsets, logical_bytes) = self.logical_chunk(offset, len)?;
-            if logical_bytes.is_empty() {
-                break;
+        for offset in start..self.len() {
+            match self.byte_at(offset)? {
+                ByteSlot::Present(byte) => {
+                    offsets.push_back(offset);
+                    bytes.push_back(byte);
+                    if bytes.len() > pattern.len() {
+                        offsets.pop_front();
+                        bytes.pop_front();
+                    }
+                    if bytes.len() == pattern.len()
+                        && bytes.iter().copied().eq(pattern.iter().copied())
+                    {
+                        return Ok(offsets.front().copied());
+                    }
+                }
+                ByteSlot::Deleted | ByteSlot::Empty => {
+                    offsets.clear();
+                    bytes.clear();
+                }
             }
-
-            let mut chunk_offsets = std::mem::take(&mut carry_offsets);
-            let mut chunk_bytes = std::mem::take(&mut carry_bytes);
-            chunk_offsets.extend(logical_offsets);
-            chunk_bytes.extend(logical_bytes);
-
-            if let Some(idx) = search::find(&chunk_bytes, pattern) {
-                return Ok(Some(chunk_offsets[idx]));
-            }
-
-            let keep = overlap.min(chunk_bytes.len());
-            if keep > 0 {
-                carry_offsets = chunk_offsets[chunk_offsets.len() - keep..].to_vec();
-                carry_bytes = chunk_bytes[chunk_bytes.len() - keep..].to_vec();
-            }
-
-            offset += len as u64;
         }
+
         Ok(None)
     }
 
+    /// Search backward through the display stream.
     pub fn search_backward(&mut self, end_exclusive: u64, pattern: &[u8]) -> HxResult<Option<u64>> {
         if pattern.is_empty() {
             return Err(HxError::EmptySearch);
         }
-        let mut end = end_exclusive.min(self.len());
+        let end = end_exclusive.min(self.len());
         if end == 0 {
             return Ok(None);
         }
 
-        let overlap = pattern.len().saturating_sub(1);
-        let mut carry_offsets = Vec::with_capacity(overlap);
-        let mut carry_bytes = Vec::with_capacity(overlap);
+        let mut offsets = VecDeque::with_capacity(pattern.len());
+        let mut bytes = VecDeque::with_capacity(pattern.len());
 
-        while end > 0 {
-            let start = end.saturating_sub(SEARCH_CHUNK_SIZE as u64);
-            let len = (end - start) as usize;
-            let (mut logical_offsets, mut logical_bytes) = self.logical_chunk(start, len)?;
-            if logical_bytes.is_empty() {
-                break;
-            }
-
-            logical_offsets.extend_from_slice(&carry_offsets);
-            logical_bytes.extend_from_slice(&carry_bytes);
-
-            if let Some(idx) = search::rfind(&logical_bytes, pattern) {
-                let found = logical_offsets[idx];
-                if found < end_exclusive {
-                    return Ok(Some(found));
+        for offset in (0..end).rev() {
+            match self.byte_at(offset)? {
+                ByteSlot::Present(byte) => {
+                    offsets.push_front(offset);
+                    bytes.push_front(byte);
+                    if bytes.len() > pattern.len() {
+                        offsets.pop_back();
+                        bytes.pop_back();
+                    }
+                    if bytes.len() == pattern.len()
+                        && bytes.iter().copied().eq(pattern.iter().copied())
+                    {
+                        return Ok(offsets.front().copied());
+                    }
+                }
+                ByteSlot::Deleted | ByteSlot::Empty => {
+                    offsets.clear();
+                    bytes.clear();
                 }
             }
-
-            let keep = overlap.min(logical_bytes.len());
-            if keep > 0 {
-                carry_offsets = logical_offsets[..keep].to_vec();
-                carry_bytes = logical_bytes[..keep].to_vec();
-            }
-
-            end = start;
         }
 
         Ok(None)
     }
 
+    /// Extract the actual bytes (skipping tombstones) in a display range.
+    /// Used by copy to get the selection content.
     pub fn logical_bytes(&mut self, start: u64, end_inclusive: u64) -> HxResult<Vec<u8>> {
         let len = self.len();
         if len == 0 || start > end_inclusive || start >= len {
             return Ok(Vec::new());
         }
 
-        let end = end_inclusive.min(len - 1);
-        let (_, bytes) = self.logical_chunk(start, (end - start + 1) as usize)?;
-        Ok(bytes)
+        let mut out = Vec::with_capacity((end_inclusive - start + 1) as usize);
+        for offset in start..=end_inclusive.min(len - 1) {
+            if let ByteSlot::Present(byte) = self.byte_at(offset)? {
+                out.push(byte);
+            }
+        }
+        Ok(out)
     }
 
+    /// Resolve a display offset to (CellId, current display byte) for editing.
+    /// Returns an error if the cell is tombstoned or out of range.
+    fn display_byte_for_edit(&mut self, offset: u64) -> HxResult<(CellId, u8)> {
+        let id = self.cell_id_at(offset).ok_or(HxError::OffsetOutOfRange)?;
+        if self.tombstones.contains(&id) {
+            return Err(HxError::OffsetOutOfRange);
+        }
+        Ok((id, self.display_byte_for_id(id)?))
+    }
+
+    /// Get the display value for a cell: replacement if present, else base byte.
+    fn display_byte_for_id(&mut self, id: CellId) -> HxResult<u8> {
+        if let Some(value) = self.replacements.get(&id).copied() {
+            return Ok(value);
+        }
+        self.base_byte(id)
+    }
+
+    /// Set the display value for a cell.  If the new value equals the base
+    /// byte, the replacement entry is removed (no-op edit).
+    fn set_display_byte_by_id(&mut self, id: CellId, value: u8) -> HxResult<()> {
+        let base = self.base_byte(id)?;
+        if value == base {
+            self.replacements.remove(&id);
+        } else {
+            self.replacements.insert(id, value);
+        }
+        Ok(())
+    }
+
+    /// Read the base (unmodified) byte for a cell from the file or add-buffer.
+    fn base_byte(&mut self, id: CellId) -> HxResult<u8> {
+        match id {
+            CellId::Original(offset) => self.raw_byte(offset),
+            CellId::Add(offset) => self.pieces.add_byte(offset).ok_or(HxError::OffsetOutOfRange),
+        }
+    }
+
+    /// Read a single byte from the original file via the page cache.
     fn raw_byte(&mut self, offset: u64) -> HxResult<u8> {
         let raw = self.view.read_range(offset, 1)?;
         raw.first().copied().ok_or(HxError::OffsetOutOfRange)
     }
 
-    fn materialize_logical_chunk(
-        &self,
-        chunk_start: u64,
-        raw: Vec<u8>,
-        offsets: &mut Vec<u64>,
-        bytes: &mut Vec<u8>,
-    ) {
-        offsets.reserve(raw.len());
-        bytes.reserve(raw.len());
-        for (idx, raw_byte) in raw.into_iter().enumerate() {
-            let absolute = chunk_start + idx as u64;
-            if self.patches.is_deleted(absolute) {
-                continue;
-            }
-            offsets.push(absolute);
-            bytes.push(self.patches.replacement_at(absolute).unwrap_or(raw_byte));
-        }
+    // ── helpers used by save::write_pieces ──────────────────────────
+
+    /// Cheap snapshot of the piece list (small structs, no data).
+    pub fn pieces_snapshot(&self) -> Vec<crate::core::piece_table::Piece> {
+        self.pieces.pieces().to_vec()
     }
 
-    fn logical_chunk(&mut self, start: u64, len: usize) -> HxResult<(Vec<u64>, Vec<u8>)> {
-        let limit = self.len();
-        if start >= limit || len == 0 {
-            return Ok((Vec::new(), Vec::new()));
-        }
+    /// Check whether a cell is tombstoned (O(log n) BTreeSet lookup).
+    pub fn is_tombstone(&self, id: CellId) -> bool {
+        self.tombstones.contains(&id)
+    }
 
-        let end = (start + len as u64).min(limit);
-        let mut offsets = Vec::with_capacity(len);
-        let mut bytes = Vec::with_capacity(len);
+    /// True when any tombstones exist.
+    pub fn has_tombstones(&self) -> bool {
+        !self.tombstones.is_empty()
+    }
 
-        if start < self.original_len {
-            let raw_end = end.min(self.original_len);
-            let raw = self.raw_range(start, (raw_end - start) as usize)?;
-            self.materialize_logical_chunk(start, raw, &mut offsets, &mut bytes);
-        }
+    /// True when any replacements exist.
+    pub fn has_replacements(&self) -> bool {
+        !self.replacements.is_empty()
+    }
 
-        if end > self.original_len {
-            let append_start = start.max(self.original_len);
-            for offset in append_start..end {
-                if self.patches.is_deleted(offset) {
-                    continue;
-                }
-                if let Some(value) = self.patches.replacement_at(offset) {
-                    offsets.push(offset);
-                    bytes.push(value);
-                }
-            }
-        }
+    /// Check if any tombstone falls within a CellId range (inclusive).
+    /// Uses BTreeSet range queries for O(log n) instead of scanning every byte.
+    pub fn has_tombstone_in_range(&self, lo: CellId, hi: CellId) -> bool {
+        use std::ops::Bound;
+        self.tombstones
+            .range((Bound::Included(lo), Bound::Included(hi)))
+            .next()
+            .is_some()
+    }
 
-        Ok((offsets, bytes))
+    /// Check if any replacement falls within a CellId range (inclusive).
+    pub fn has_replacement_in_range(&self, lo: CellId, hi: CellId) -> bool {
+        use std::ops::Bound;
+        self.replacements
+            .range((Bound::Included(lo), Bound::Included(hi)))
+            .next()
+            .is_some()
+    }
+
+    /// Return the replacement value for a cell, if any.
+    pub fn replacement_for(&self, id: CellId) -> Option<u8> {
+        self.replacements.get(&id).copied()
+    }
+
+    /// Borrow a slice of the add-buffer.
+    pub fn add_slice(&self, start: u64, len: u64) -> &[u8] {
+        self.pieces.add_buffer_slice(start, len)
     }
 }
