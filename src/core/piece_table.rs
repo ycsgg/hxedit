@@ -28,6 +28,16 @@ pub enum CellId {
     Add(u64),
 }
 
+impl CellId {
+    /// Construct a `CellId` from a [`PieceSource`] and an offset.
+    pub fn from_source(source: PieceSource, offset: u64) -> Self {
+        match source {
+            PieceSource::Original => Self::Original(offset),
+            PieceSource::Add => Self::Add(offset),
+        }
+    }
+}
+
 /// Which backing store a [`Piece`] draws its bytes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PieceSource {

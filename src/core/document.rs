@@ -493,92 +493,46 @@ impl Document {
 
         while remaining > 0 {
             let batch = remaining.min(SEARCH_CHUNK as u64) as usize;
-            match piece.source {
-                PieceSource::Original => {
-                    let raw = self.raw_range(source_offset, batch)?;
-                    if raw.is_empty() {
-                        break;
-                    }
-                    let chunk_len = raw.len() as u64;
-                    let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
-                        piece.source,
-                        source_offset,
-                        chunk_len,
-                        has_tombstones,
-                        has_replacements,
-                    );
+            let raw = self.read_chunk(piece.source, source_offset, batch)?;
+            if raw.is_empty() {
+                break;
+            }
+            let chunk_len = raw.len() as u64;
+            let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
+                piece.source,
+                source_offset,
+                chunk_len,
+                has_tombstones,
+                has_replacements,
+            );
 
-                    if !need_tombstone_scan && !need_replacement_scan {
-                        if let Some(found) =
-                            scan_bytes_forward(&raw, display_offset, matcher, pattern_len)
-                        {
-                            return Ok(Some(found));
-                        }
-                    } else {
-                        for (idx, &base) in raw.iter().enumerate() {
-                            let id = CellId::Original(source_offset + idx as u64);
-                            if need_tombstone_scan && self.tombstones.contains(&id) {
-                                matcher.reset();
-                                continue;
-                            }
-                            let byte = if need_replacement_scan {
-                                self.replacements.get(&id).copied().unwrap_or(base)
-                            } else {
-                                base
-                            };
-                            if matcher.feed(byte) {
-                                return Ok(Some(display_offset + idx as u64 + 1 - pattern_len));
-                            }
-                        }
-                    }
-
-                    source_offset += chunk_len;
-                    display_offset += chunk_len;
-                    remaining -= chunk_len;
+            if !need_tombstone_scan && !need_replacement_scan {
+                if let Some(found) =
+                    scan_bytes_forward(&raw, display_offset, matcher, pattern_len)
+                {
+                    return Ok(Some(found));
                 }
-                PieceSource::Add => {
-                    let raw = self.add_slice(source_offset, batch as u64);
-                    if raw.is_empty() {
-                        break;
+            } else {
+                for (idx, &base) in raw.iter().enumerate() {
+                    let id = CellId::from_source(piece.source, source_offset + idx as u64);
+                    if need_tombstone_scan && self.tombstones.contains(&id) {
+                        matcher.reset();
+                        continue;
                     }
-                    let chunk_len = raw.len() as u64;
-                    let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
-                        piece.source,
-                        source_offset,
-                        chunk_len,
-                        has_tombstones,
-                        has_replacements,
-                    );
-
-                    if !need_tombstone_scan && !need_replacement_scan {
-                        if let Some(found) =
-                            scan_bytes_forward(raw, display_offset, matcher, pattern_len)
-                        {
-                            return Ok(Some(found));
-                        }
+                    let byte = if need_replacement_scan {
+                        self.replacements.get(&id).copied().unwrap_or(base)
                     } else {
-                        for (idx, &base) in raw.iter().enumerate() {
-                            let id = CellId::Add(source_offset + idx as u64);
-                            if need_tombstone_scan && self.tombstones.contains(&id) {
-                                matcher.reset();
-                                continue;
-                            }
-                            let byte = if need_replacement_scan {
-                                self.replacements.get(&id).copied().unwrap_or(base)
-                            } else {
-                                base
-                            };
-                            if matcher.feed(byte) {
-                                return Ok(Some(display_offset + idx as u64 + 1 - pattern_len));
-                            }
-                        }
+                        base
+                    };
+                    if matcher.feed(byte) {
+                        return Ok(Some(display_offset + idx as u64 + 1 - pattern_len));
                     }
-
-                    source_offset += chunk_len;
-                    display_offset += chunk_len;
-                    remaining -= chunk_len;
                 }
             }
+
+            source_offset += chunk_len;
+            display_offset += chunk_len;
+            remaining -= chunk_len;
         }
 
         Ok(None)
@@ -601,77 +555,37 @@ impl Document {
             let source_offset = piece.start + chunk_start;
             let display_offset = piece_display_start + chunk_start;
 
-            match piece.source {
-                PieceSource::Original => {
-                    let raw = self.raw_range(source_offset, batch)?;
-                    if raw.is_empty() {
-                        break;
-                    }
-                    let chunk_len = raw.len() as u64;
-                    let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
-                        piece.source,
-                        source_offset,
-                        chunk_len,
-                        has_tombstones,
-                        has_replacements,
-                    );
+            let raw = self.read_chunk(piece.source, source_offset, batch)?;
+            if raw.is_empty() {
+                break;
+            }
+            let chunk_len = raw.len() as u64;
+            let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
+                piece.source,
+                source_offset,
+                chunk_len,
+                has_tombstones,
+                has_replacements,
+            );
 
-                    if !need_tombstone_scan && !need_replacement_scan {
-                        if let Some(found) = scan_bytes_backward(&raw, display_offset, matcher) {
-                            return Ok(Some(found));
-                        }
-                    } else {
-                        for (idx, &base) in raw.iter().enumerate().rev() {
-                            let id = CellId::Original(source_offset + idx as u64);
-                            if need_tombstone_scan && self.tombstones.contains(&id) {
-                                matcher.reset();
-                                continue;
-                            }
-                            let byte = if need_replacement_scan {
-                                self.replacements.get(&id).copied().unwrap_or(base)
-                            } else {
-                                base
-                            };
-                            if matcher.feed(byte) {
-                                return Ok(Some(display_offset + idx as u64));
-                            }
-                        }
-                    }
+            if !need_tombstone_scan && !need_replacement_scan {
+                if let Some(found) = scan_bytes_backward(&raw, display_offset, matcher) {
+                    return Ok(Some(found));
                 }
-                PieceSource::Add => {
-                    let raw = self.add_slice(source_offset, batch as u64);
-                    if raw.is_empty() {
-                        break;
+            } else {
+                for (idx, &base) in raw.iter().enumerate().rev() {
+                    let id = CellId::from_source(piece.source, source_offset + idx as u64);
+                    if need_tombstone_scan && self.tombstones.contains(&id) {
+                        matcher.reset();
+                        continue;
                     }
-                    let chunk_len = raw.len() as u64;
-                    let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
-                        piece.source,
-                        source_offset,
-                        chunk_len,
-                        has_tombstones,
-                        has_replacements,
-                    );
-
-                    if !need_tombstone_scan && !need_replacement_scan {
-                        if let Some(found) = scan_bytes_backward(raw, display_offset, matcher) {
-                            return Ok(Some(found));
-                        }
+                    let byte = if need_replacement_scan {
+                        self.replacements.get(&id).copied().unwrap_or(base)
                     } else {
-                        for (idx, &base) in raw.iter().enumerate().rev() {
-                            let id = CellId::Add(source_offset + idx as u64);
-                            if need_tombstone_scan && self.tombstones.contains(&id) {
-                                matcher.reset();
-                                continue;
-                            }
-                            let byte = if need_replacement_scan {
-                                self.replacements.get(&id).copied().unwrap_or(base)
-                            } else {
-                                base
-                            };
-                            if matcher.feed(byte) {
-                                return Ok(Some(display_offset + idx as u64));
-                            }
-                        }
+                        base
+                    };
+                    if matcher.feed(byte) {
+                        return Ok(Some(display_offset + idx as u64));
                     }
                 }
             }
@@ -680,6 +594,15 @@ impl Document {
         }
 
         Ok(None)
+    }
+
+    /// Read a chunk of bytes from the given source (Original file or Add buffer).
+    /// Returns owned bytes so the borrow on `self` is released.
+    fn read_chunk(&mut self, source: PieceSource, offset: u64, len: usize) -> HxResult<Vec<u8>> {
+        match source {
+            PieceSource::Original => self.raw_range(offset, len),
+            PieceSource::Add => Ok(self.add_slice(offset, len as u64).to_vec()),
+        }
     }
 
     fn search_overlay_flags(
@@ -694,14 +617,8 @@ impl Document {
             return (false, false);
         }
 
-        let lo = match source {
-            PieceSource::Original => CellId::Original(source_offset),
-            PieceSource::Add => CellId::Add(source_offset),
-        };
-        let hi = match source {
-            PieceSource::Original => CellId::Original(source_offset + len - 1),
-            PieceSource::Add => CellId::Add(source_offset + len - 1),
-        };
+        let lo = CellId::from_source(source, source_offset);
+        let hi = CellId::from_source(source, source_offset + len - 1);
 
         (
             has_tombstones && self.has_tombstone_in_range(lo, hi),
