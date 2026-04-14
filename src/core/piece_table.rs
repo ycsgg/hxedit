@@ -110,16 +110,18 @@ impl PieceTable {
     /// Returns `true` when no edits have been made: the piece list is a
     /// single `Original` piece covering the entire file.
     pub fn is_identity(&self) -> bool {
-        self.len == self.original_len
-            && self.pieces
-                == if self.original_len == 0 {
-                    Vec::new()
-                } else {
-                    vec![Piece {
-                        source: PieceSource::Original,
-                        start: 0,
-                        len: self.original_len,
-                    }]
+        if self.len != self.original_len {
+            return false;
+        }
+        if self.original_len == 0 {
+            return self.pieces.is_empty();
+        }
+        self.pieces.len() == 1
+            && self.pieces[0]
+                == Piece {
+                    source: PieceSource::Original,
+                    start: 0,
+                    len: self.original_len,
                 }
     }
 

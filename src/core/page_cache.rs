@@ -61,10 +61,18 @@ impl PageCache {
 
         let start_page = offset / self.page_size as u64;
         let end_page = (offset + len.saturating_sub(1) as u64) / self.page_size as u64;
-        let mut out = Vec::with_capacity(len);
 
+        // Ensure all needed pages are loaded into the cache.
         for page_idx in start_page..=end_page {
-            let page = self.load_page(file, page_idx)?;
+            self.ensure_loaded(file, page_idx)?;
+        }
+
+        // Now borrow immutably to assemble the result without cloning pages.
+        let mut out = Vec::with_capacity(len);
+        for page_idx in start_page..=end_page {
+            let Some(page) = self.entries.get(&page_idx) else {
+                break;
+            };
             let page_start = page_idx * self.page_size as u64;
             let slice_start = if offset > page_start {
                 (offset - page_start) as usize
@@ -82,14 +90,14 @@ impl PageCache {
         Ok(out)
     }
 
-    fn load_page(&mut self, file: &mut File, page_idx: u64) -> io::Result<Vec<u8>> {
-        if let Some(buf) = self.entries.get(&page_idx).cloned() {
+    /// Ensure a page is present in the cache, loading it from disk if needed.
+    fn ensure_loaded(&mut self, file: &mut File, page_idx: u64) -> io::Result<()> {
+        if self.entries.contains_key(&page_idx) {
             self.stats.page_hits += 1;
             self.touch(page_idx);
-            return Ok(buf);
+            return Ok(());
         }
 
-        // Read a whole page at once so adjacent cursor moves are cheap.
         self.stats.page_misses += 1;
         let page_start = page_idx * self.page_size as u64;
         file.seek(SeekFrom::Start(page_start))?;
@@ -97,10 +105,10 @@ impl PageCache {
         let read = file.read(&mut buf)?;
         buf.truncate(read);
 
-        self.entries.insert(page_idx, buf.clone());
+        self.entries.insert(page_idx, buf);
         self.touch(page_idx);
         self.evict_if_needed();
-        Ok(buf)
+        Ok(())
     }
 
     fn touch(&mut self, page_idx: u64) {
