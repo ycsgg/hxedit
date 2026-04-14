@@ -29,8 +29,13 @@ impl fmt::Display for SaveProfile {
         write!(
             f,
             "{:.2} MB | {} pieces | {} chunks ({} fast, {} slow) | {:.1?} | {:.1} MB/s",
-            mb, self.pieces, self.chunks_read, self.fast_chunks, self.slow_chunks,
-            self.elapsed, throughput,
+            mb,
+            self.pieces,
+            self.chunks_read,
+            self.fast_chunks,
+            self.slow_chunks,
+            self.elapsed,
+            throughput,
         )
     }
 }

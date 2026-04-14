@@ -305,7 +305,7 @@ fn undo_replacement_restores_original_value() {
 fn search_hits_inserted_content() {
     let (_dir, mut doc) = tmp_doc(b"abcdef");
     doc.insert_bytes(3, &[0x58, 0x59]).unwrap(); // insert "XY" at offset 3
-    // Now: a b c X Y d e f
+                                                 // Now: a b c X Y d e f
 
     let found = doc.search_forward(0, &[0x58, 0x59]).unwrap();
     assert_eq!(found, Some(3));
@@ -390,10 +390,7 @@ fn paste_inserts_at_cursor_not_overwrite() {
     doc.insert_bytes(2, b"XY").unwrap();
 
     assert_eq!(doc.len(), 6);
-    assert_eq!(
-        read_all(&mut doc),
-        vec![b'a', b'b', b'X', b'Y', b'c', b'd']
-    );
+    assert_eq!(read_all(&mut doc), vec![b'a', b'b', b'X', b'Y', b'c', b'd']);
 }
 
 /// Paste 后续 offset 右移.

@@ -39,7 +39,8 @@ impl App {
                     }
                     EditOp::ReplaceBytes { changes } => {
                         for change in changes {
-                            self.document.restore_replacement(change.id, change.previous)?;
+                            self.document
+                                .restore_replacement(change.id, change.previous)?;
                         }
                     }
                 }

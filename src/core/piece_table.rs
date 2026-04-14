@@ -403,7 +403,11 @@ mod tests {
 
         assert_eq!(
             table.cell_ids_range(0, table.len()),
-            vec![CellId::Original(0), CellId::Original(2), CellId::Original(3)]
+            vec![
+                CellId::Original(0),
+                CellId::Original(2),
+                CellId::Original(3)
+            ]
         );
 
         // Re-insert the removed cells at offset 1 to restore the original state

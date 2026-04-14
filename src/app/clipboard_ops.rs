@@ -63,16 +63,14 @@ impl App {
             if pasted == 0 {
                 self.status_message = "paste produced no bytes".to_owned();
             } else {
-                self.status_message =
-                    format!("{mode_label} {} bytes [{}]", pasted, source.label());
+                self.status_message = format!("{mode_label} {} bytes [{}]", pasted, source.label());
             }
         } else {
             let pasted = self.apply_paste_overwrite(&bytes)?;
             if pasted == 0 {
                 self.status_message = "paste produced no bytes".to_owned();
             } else {
-                self.status_message =
-                    format!("{mode_label} {} bytes [{}]", pasted, source.label());
+                self.status_message = format!("{mode_label} {} bytes [{}]", pasted, source.label());
             }
         }
         Ok(())
@@ -118,10 +116,8 @@ impl App {
                 self.mode,
             );
         }
-        self.cursor = self.clamp_cursor_for_mode(
-            cursor_before + written.saturating_sub(1) as u64,
-            self.mode,
-        );
+        self.cursor =
+            self.clamp_cursor_for_mode(cursor_before + written.saturating_sub(1) as u64, self.mode);
         Ok(written)
     }
 

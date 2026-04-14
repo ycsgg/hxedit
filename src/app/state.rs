@@ -39,11 +39,7 @@ impl App {
             }
         }
 
-        self.push_undo_step(
-            vec![EditOp::TombstoneDelete { ids }],
-            start,
-            Mode::Visual,
-        );
+        self.push_undo_step(vec![EditOp::TombstoneDelete { ids }], start, Mode::Visual);
         self.cursor = self.clamp_offset(start);
         self.selection_anchor = None;
         self.mode = Mode::Normal;
@@ -86,14 +82,7 @@ impl App {
                 self.mode,
             );
         } else if offset == self.document.len().saturating_sub(1) && previous.is_none() {
-            self.push_undo_step(
-                vec![EditOp::Insert {
-                    offset,
-                    len: 1,
-                }],
-                offset,
-                self.mode,
-            );
+            self.push_undo_step(vec![EditOp::Insert { offset, len: 1 }], offset, self.mode);
         }
 
         self.status_message = format!("edited 0x{:x}", offset);

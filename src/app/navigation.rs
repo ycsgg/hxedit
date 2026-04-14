@@ -75,7 +75,9 @@ impl App {
         let visible_end = (self.viewport_top + visible_rows.saturating_mul(row_size))
             .min(self.document.len())
             .saturating_sub(1);
-        let anchor = self.cursor_anchor_offset().clamp(visible_start, visible_end);
+        let anchor = self
+            .cursor_anchor_offset()
+            .clamp(visible_start, visible_end);
         if self.mode_allows_eof_cursor()
             && self.cursor == self.document.len()
             && self.cursor_anchor_offset() == anchor

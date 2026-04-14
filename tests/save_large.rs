@@ -32,10 +32,7 @@ fn save_16mb_with_insert_is_fast() {
     eprintln!("16MB save took: {elapsed:?}");
 
     // Must complete in under 2 seconds (was ~30s before)
-    assert!(
-        elapsed.as_secs() < 2,
-        "save took too long: {elapsed:?}"
-    );
+    assert!(elapsed.as_secs() < 2, "save took too long: {elapsed:?}");
 
     // Verify correctness
     let saved = fs::read(&path).unwrap();
