@@ -170,12 +170,80 @@ impl Document {
     }
 
     /// Read a row of display slots starting at `offset`.
+    ///
+    /// Walks the piece table once to resolve all bytes in the range,
+    /// avoiding repeated O(pieces) lookups per byte.
     pub fn row_bytes(&mut self, offset: u64, width: usize) -> HxResult<Vec<ByteSlot>> {
-        let mut out = Vec::with_capacity(width);
-        for idx in 0..width {
-            out.push(self.byte_at(offset + idx as u64)?);
+        let doc_len = self.len();
+        if width == 0 || offset >= doc_len {
+            return Ok(vec![ByteSlot::Empty; width]);
         }
+
+        let end = (offset + width as u64).min(doc_len);
+        let actual = (end - offset) as usize;
+        let mut out = Vec::with_capacity(width);
+
+        // Walk pieces once, collecting bytes for the requested range.
+        let mut cursor = 0_u64;
+        for piece in self.pieces.pieces() {
+            if out.len() >= actual {
+                break;
+            }
+            let piece_end = cursor + piece.len;
+            if piece_end <= offset {
+                cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = offset.max(cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start >= overlap_end {
+                cursor = piece_end;
+                continue;
+            }
+
+            let source_start = piece.start + (overlap_start - cursor);
+            let count = (overlap_end - overlap_start) as usize;
+
+            match piece.source {
+                PieceSource::Original => {
+                    let raw = self.view.read_range(source_start, count)?;
+                    for (i, &base) in raw.iter().enumerate() {
+                        let id = CellId::Original(source_start + i as u64);
+                        out.push(self.resolve_slot(id, base));
+                    }
+                    // Pad if read returned fewer bytes than expected
+                    for _ in raw.len()..count {
+                        out.push(ByteSlot::Empty);
+                    }
+                }
+                PieceSource::Add => {
+                    let slice = self.pieces.add_buffer_slice(source_start, count as u64);
+                    for (i, &base) in slice.iter().enumerate() {
+                        let id = CellId::Add(source_start + i as u64);
+                        out.push(self.resolve_slot(id, base));
+                    }
+                    for _ in slice.len()..count {
+                        out.push(ByteSlot::Empty);
+                    }
+                }
+            }
+
+            cursor = piece_end;
+        }
+
+        // Pad remaining slots past EOF with Empty.
+        out.resize(width, ByteSlot::Empty);
         Ok(out)
+    }
+
+    /// Resolve a single cell to its display slot given the base byte.
+    fn resolve_slot(&self, id: CellId, base: u8) -> ByteSlot {
+        if self.tombstones.contains(&id) {
+            return ByteSlot::Deleted;
+        }
+        let byte = self.replacements.get(&id).copied().unwrap_or(base);
+        ByteSlot::Present(byte)
     }
 
     /// Replace a single nibble (high or low) of the byte at `offset`.
