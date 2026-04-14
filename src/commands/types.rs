@@ -16,7 +16,16 @@ pub enum Command {
     Goto {
         offset: u64,
     },
+    /// Overwrite-paste: writes clipboard bytes over existing content starting
+    /// at cursor.  Does not shift subsequent offsets.
     Paste {
+        raw: bool,
+        preview: bool,
+        limit: Option<usize>,
+    },
+    /// Insert-paste: inserts clipboard bytes at cursor, shifting subsequent
+    /// offsets right.  Same arguments as `Paste`.
+    PasteInsert {
         raw: bool,
         preview: bool,
         limit: Option<usize>,

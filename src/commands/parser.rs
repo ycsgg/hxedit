@@ -23,7 +23,11 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             path: opt_path(rest),
         }),
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
-        | "paste?!" => parse_paste(name, rest),
+        | "paste?!" => parse_paste(name, rest, false),
+        "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?"
+        | "pi!?" | "pi?!" | "paste-insert!?" | "paste-insert?!" => {
+            parse_paste(name, rest, true)
+        }
         "c" | "copy" => parse_copy(rest),
         "u" | "undo" => Ok(Command::Undo {
             steps: parse_undo_steps(rest)?,
@@ -103,7 +107,7 @@ fn parse_copy(input: Option<&str>) -> HxResult<Command> {
     Ok(Command::Copy { format, display })
 }
 
-fn parse_paste(name: &str, input: Option<&str>) -> HxResult<Command> {
+fn parse_paste(name: &str, input: Option<&str>, insert: bool) -> HxResult<Command> {
     let mut raw = name.contains('!');
     let preview = name.contains('?');
     let mut limit = None;
@@ -125,9 +129,17 @@ fn parse_paste(name: &str, input: Option<&str>) -> HxResult<Command> {
         }
     }
 
-    Ok(Command::Paste {
-        raw,
-        preview,
-        limit,
-    })
+    if insert {
+        Ok(Command::PasteInsert {
+            raw,
+            preview,
+            limit,
+        })
+    } else {
+        Ok(Command::Paste {
+            raw,
+            preview,
+            limit,
+        })
+    }
 }

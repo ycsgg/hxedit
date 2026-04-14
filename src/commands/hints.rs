@@ -28,7 +28,11 @@ pub fn hint_for(input: &str) -> CommandHint {
             details: "save current file and quit".to_owned(),
         },
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
-        | "paste?!" => paste_hint(name, rest),
+        | "paste?!" => paste_hint(name, rest, false),
+        "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?"
+        | "pi!?" | "pi?!" | "paste-insert!?" | "paste-insert?!" => {
+            paste_hint(name, rest, true)
+        }
         "g" | "goto" => CommandHint {
             syntax: format!("{name} <offset>"),
             details: "jump to byte offset; supports decimal or 0x-prefixed hex".to_owned(),
@@ -54,7 +58,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             if suggestions.is_empty() {
                 CommandHint {
                     syntax: "unknown command".to_owned(),
-                    details: "available: q w wq g s S u c p".to_owned(),
+                    details: "available: q w wq g s S u c p pi".to_owned(),
                 }
             } else {
                 CommandHint {
@@ -108,7 +112,7 @@ fn copy_hint(name: &str, rest: Option<&str>) -> CommandHint {
     }
 }
 
-fn paste_hint(name: &str, rest: Option<&str>) -> CommandHint {
+fn paste_hint(name: &str, rest: Option<&str>, insert: bool) -> CommandHint {
     let mut raw = name.contains('!');
     let preview = name.contains('?');
     let mut has_limit = false;
@@ -136,11 +140,19 @@ fn paste_hint(name: &str, rest: Option<&str>) -> CommandHint {
 
     CommandHint {
         syntax,
-        details: if preview {
+        details: if insert {
+            if preview {
+                "insert-mode preview; default parses clipboard as hex/base64 text. ! previews raw bytes. num limits previewed bytes."
+                    .to_owned()
+            } else {
+                "insert clipboard bytes at cursor, shifting data right. default parses as hex/base64. ! pastes raw. num limits bytes."
+                    .to_owned()
+            }
+        } else if preview {
             "preview only; default parses clipboard as hex/base64 text. ! previews raw clipboard bytes. num limits previewed bytes."
                 .to_owned()
         } else {
-            "default parses clipboard as hex/base64 text. ! pastes raw clipboard bytes. num limits pasted bytes."
+            "overwrite existing bytes from cursor. default parses as hex/base64. ! pastes raw bytes. num limits pasted bytes."
                 .to_owned()
         },
     }
@@ -159,6 +171,8 @@ fn known_commands() -> Vec<&'static str> {
     vec![
         "q", "quit", "q!", "w", "write", "wq", "g", "goto", "s", "S", "u", "undo", "c", "copy",
         "p", "paste", "p!", "paste!", "p?", "paste?", "p!?", "p?!", "paste!?", "paste?!",
+        "pi", "paste-insert", "pi!", "paste-insert!", "pi?", "paste-insert?", "pi!?", "pi?!",
+        "paste-insert!?", "paste-insert?!",
     ]
 }
 
@@ -182,7 +196,7 @@ mod tests {
     #[test]
     fn paste_hint_explains_raw_mode() {
         let hint = hint_for("paste!");
-        assert!(hint.details.contains("raw clipboard bytes"));
+        assert!(hint.details.contains("raw bytes"));
     }
 
     #[test]

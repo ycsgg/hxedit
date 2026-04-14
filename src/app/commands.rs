@@ -49,7 +49,12 @@ impl App {
                 raw,
                 preview,
                 limit,
-            } => self.paste_from_clipboard(raw, preview, limit),
+            } => self.paste_from_clipboard(raw, preview, limit, false),
+            Command::PasteInsert {
+                raw,
+                preview,
+                limit,
+            } => self.paste_from_clipboard(raw, preview, limit, true),
             Command::Copy { format, display } => self.copy_selection(format, display),
             Command::SearchAscii { pattern } => {
                 let search = SearchState {
