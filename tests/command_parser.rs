@@ -66,12 +66,28 @@ fn parses_basic_commands() {
         parse_command("s hello").unwrap(),
         Command::SearchAscii {
             pattern: b"hello".to_vec(),
+            backward: false,
+        }
+    );
+    assert_eq!(
+        parse_command("s! hello").unwrap(),
+        Command::SearchAscii {
+            pattern: b"hello".to_vec(),
+            backward: true,
         }
     );
     assert_eq!(
         parse_command("S 7f 45 4c 46").unwrap(),
         Command::SearchHex {
             pattern: vec![0x7f, 0x45, 0x4c, 0x46],
+            backward: false,
+        }
+    );
+    assert_eq!(
+        parse_command("S! 7f 45 4c 46").unwrap(),
+        Command::SearchHex {
+            pattern: vec![0x7f, 0x45, 0x4c, 0x46],
+            backward: true,
         }
     );
 }

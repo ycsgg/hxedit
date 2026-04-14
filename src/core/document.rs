@@ -1,13 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::core::file_view::FileView;
 use crate::core::page_cache::CacheStats;
-use crate::core::piece_table::{CellId, PieceTable};
+use crate::core::piece_table::{CellId, Piece, PieceSource, PieceTable};
 use crate::core::save;
 use crate::error::{HxError, HxResult};
 use crate::mode::NibblePhase;
+
+const SEARCH_CHUNK: usize = 64 * 1024;
 
 /// What the renderer sees at a given display offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +85,9 @@ impl Document {
     ///
     /// O(1) — simply subtracts the tombstone count from the piece table length.
     pub fn visible_len(&self) -> u64 {
-        self.pieces.len().saturating_sub(self.tombstones.len() as u64)
+        self.pieces
+            .len()
+            .saturating_sub(self.tombstones.len() as u64)
     }
 
     /// True when any edits (inserts, deletions, replacements) have been made
@@ -327,29 +331,34 @@ impl Document {
             return Ok(None);
         }
 
-        let mut offsets = VecDeque::with_capacity(pattern.len());
-        let mut bytes = VecDeque::with_capacity(pattern.len());
+        let pieces = self.pieces_snapshot();
+        let has_tombstones = self.has_tombstones();
+        let has_replacements = self.has_replacements();
+        let mut matcher = KmpMatcher::new(pattern);
+        let pattern_len = pattern.len() as u64;
+        let mut piece_display_start = 0_u64;
 
-        for offset in start..self.len() {
-            match self.byte_at(offset)? {
-                ByteSlot::Present(byte) => {
-                    offsets.push_back(offset);
-                    bytes.push_back(byte);
-                    if bytes.len() > pattern.len() {
-                        offsets.pop_front();
-                        bytes.pop_front();
-                    }
-                    if bytes.len() == pattern.len()
-                        && bytes.iter().copied().eq(pattern.iter().copied())
-                    {
-                        return Ok(offsets.front().copied());
-                    }
-                }
-                ByteSlot::Deleted | ByteSlot::Empty => {
-                    offsets.clear();
-                    bytes.clear();
-                }
+        for piece in pieces {
+            let piece_display_end = piece_display_start + piece.len;
+            if piece_display_end <= start {
+                piece_display_start = piece_display_end;
+                continue;
             }
+
+            let local_start = start.saturating_sub(piece_display_start);
+            if let Some(found) = self.search_piece_forward(
+                piece,
+                piece_display_start,
+                local_start,
+                &mut matcher,
+                pattern_len,
+                has_tombstones,
+                has_replacements,
+            )? {
+                return Ok(Some(found));
+            }
+
+            piece_display_start = piece_display_end;
         }
 
         Ok(None)
@@ -365,28 +374,39 @@ impl Document {
             return Ok(None);
         }
 
-        let mut offsets = VecDeque::with_capacity(pattern.len());
-        let mut bytes = VecDeque::with_capacity(pattern.len());
+        let pieces = self.pieces_snapshot();
+        let has_tombstones = self.has_tombstones();
+        let has_replacements = self.has_replacements();
+        let reversed_pattern: Vec<u8> = pattern.iter().rev().copied().collect();
+        let mut matcher = KmpMatcher::new(&reversed_pattern);
+        let mut indexed_pieces = Vec::with_capacity(pieces.len());
+        let mut piece_display_start = 0_u64;
+        for piece in pieces {
+            indexed_pieces.push((piece, piece_display_start));
+            piece_display_start += piece.len;
+        }
 
-        for offset in (0..end).rev() {
-            match self.byte_at(offset)? {
-                ByteSlot::Present(byte) => {
-                    offsets.push_front(offset);
-                    bytes.push_front(byte);
-                    if bytes.len() > pattern.len() {
-                        offsets.pop_back();
-                        bytes.pop_back();
-                    }
-                    if bytes.len() == pattern.len()
-                        && bytes.iter().copied().eq(pattern.iter().copied())
-                    {
-                        return Ok(offsets.front().copied());
-                    }
-                }
-                ByteSlot::Deleted | ByteSlot::Empty => {
-                    offsets.clear();
-                    bytes.clear();
-                }
+        for (piece, piece_display_start) in indexed_pieces.into_iter().rev() {
+            if piece_display_start >= end {
+                continue;
+            }
+
+            let piece_display_end = piece_display_start + piece.len;
+            let local_end = if end < piece_display_end {
+                end - piece_display_start
+            } else {
+                piece.len
+            };
+
+            if let Some(found) = self.search_piece_backward(
+                piece,
+                piece_display_start,
+                local_end,
+                &mut matcher,
+                has_tombstones,
+                has_replacements,
+            )? {
+                return Ok(Some(found));
             }
         }
 
@@ -444,7 +464,10 @@ impl Document {
     fn base_byte(&mut self, id: CellId) -> HxResult<u8> {
         match id {
             CellId::Original(offset) => self.raw_byte(offset),
-            CellId::Add(offset) => self.pieces.add_byte(offset).ok_or(HxError::OffsetOutOfRange),
+            CellId::Add(offset) => self
+                .pieces
+                .add_byte(offset)
+                .ok_or(HxError::OffsetOutOfRange),
         }
     }
 
@@ -452,6 +475,238 @@ impl Document {
     fn raw_byte(&mut self, offset: u64) -> HxResult<u8> {
         let raw = self.view.read_range(offset, 1)?;
         raw.first().copied().ok_or(HxError::OffsetOutOfRange)
+    }
+
+    fn search_piece_forward(
+        &mut self,
+        piece: Piece,
+        piece_display_start: u64,
+        local_start: u64,
+        matcher: &mut KmpMatcher<'_>,
+        pattern_len: u64,
+        has_tombstones: bool,
+        has_replacements: bool,
+    ) -> HxResult<Option<u64>> {
+        let mut remaining = piece.len.saturating_sub(local_start);
+        let mut source_offset = piece.start + local_start;
+        let mut display_offset = piece_display_start + local_start;
+
+        while remaining > 0 {
+            let batch = remaining.min(SEARCH_CHUNK as u64) as usize;
+            match piece.source {
+                PieceSource::Original => {
+                    let raw = self.raw_range(source_offset, batch)?;
+                    if raw.is_empty() {
+                        break;
+                    }
+                    let chunk_len = raw.len() as u64;
+                    let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
+                        piece.source,
+                        source_offset,
+                        chunk_len,
+                        has_tombstones,
+                        has_replacements,
+                    );
+
+                    if !need_tombstone_scan && !need_replacement_scan {
+                        if let Some(found) =
+                            scan_bytes_forward(&raw, display_offset, matcher, pattern_len)
+                        {
+                            return Ok(Some(found));
+                        }
+                    } else {
+                        for (idx, &base) in raw.iter().enumerate() {
+                            let id = CellId::Original(source_offset + idx as u64);
+                            if need_tombstone_scan && self.tombstones.contains(&id) {
+                                matcher.reset();
+                                continue;
+                            }
+                            let byte = if need_replacement_scan {
+                                self.replacements.get(&id).copied().unwrap_or(base)
+                            } else {
+                                base
+                            };
+                            if matcher.feed(byte) {
+                                return Ok(Some(display_offset + idx as u64 + 1 - pattern_len));
+                            }
+                        }
+                    }
+
+                    source_offset += chunk_len;
+                    display_offset += chunk_len;
+                    remaining -= chunk_len;
+                }
+                PieceSource::Add => {
+                    let raw = self.add_slice(source_offset, batch as u64);
+                    if raw.is_empty() {
+                        break;
+                    }
+                    let chunk_len = raw.len() as u64;
+                    let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
+                        piece.source,
+                        source_offset,
+                        chunk_len,
+                        has_tombstones,
+                        has_replacements,
+                    );
+
+                    if !need_tombstone_scan && !need_replacement_scan {
+                        if let Some(found) =
+                            scan_bytes_forward(raw, display_offset, matcher, pattern_len)
+                        {
+                            return Ok(Some(found));
+                        }
+                    } else {
+                        for (idx, &base) in raw.iter().enumerate() {
+                            let id = CellId::Add(source_offset + idx as u64);
+                            if need_tombstone_scan && self.tombstones.contains(&id) {
+                                matcher.reset();
+                                continue;
+                            }
+                            let byte = if need_replacement_scan {
+                                self.replacements.get(&id).copied().unwrap_or(base)
+                            } else {
+                                base
+                            };
+                            if matcher.feed(byte) {
+                                return Ok(Some(display_offset + idx as u64 + 1 - pattern_len));
+                            }
+                        }
+                    }
+
+                    source_offset += chunk_len;
+                    display_offset += chunk_len;
+                    remaining -= chunk_len;
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn search_piece_backward(
+        &mut self,
+        piece: Piece,
+        piece_display_start: u64,
+        local_end: u64,
+        matcher: &mut KmpMatcher<'_>,
+        has_tombstones: bool,
+        has_replacements: bool,
+    ) -> HxResult<Option<u64>> {
+        let mut remaining = local_end;
+
+        while remaining > 0 {
+            let batch = remaining.min(SEARCH_CHUNK as u64) as usize;
+            let chunk_start = remaining - batch as u64;
+            let source_offset = piece.start + chunk_start;
+            let display_offset = piece_display_start + chunk_start;
+
+            match piece.source {
+                PieceSource::Original => {
+                    let raw = self.raw_range(source_offset, batch)?;
+                    if raw.is_empty() {
+                        break;
+                    }
+                    let chunk_len = raw.len() as u64;
+                    let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
+                        piece.source,
+                        source_offset,
+                        chunk_len,
+                        has_tombstones,
+                        has_replacements,
+                    );
+
+                    if !need_tombstone_scan && !need_replacement_scan {
+                        if let Some(found) = scan_bytes_backward(&raw, display_offset, matcher) {
+                            return Ok(Some(found));
+                        }
+                    } else {
+                        for (idx, &base) in raw.iter().enumerate().rev() {
+                            let id = CellId::Original(source_offset + idx as u64);
+                            if need_tombstone_scan && self.tombstones.contains(&id) {
+                                matcher.reset();
+                                continue;
+                            }
+                            let byte = if need_replacement_scan {
+                                self.replacements.get(&id).copied().unwrap_or(base)
+                            } else {
+                                base
+                            };
+                            if matcher.feed(byte) {
+                                return Ok(Some(display_offset + idx as u64));
+                            }
+                        }
+                    }
+                }
+                PieceSource::Add => {
+                    let raw = self.add_slice(source_offset, batch as u64);
+                    if raw.is_empty() {
+                        break;
+                    }
+                    let chunk_len = raw.len() as u64;
+                    let (need_tombstone_scan, need_replacement_scan) = self.search_overlay_flags(
+                        piece.source,
+                        source_offset,
+                        chunk_len,
+                        has_tombstones,
+                        has_replacements,
+                    );
+
+                    if !need_tombstone_scan && !need_replacement_scan {
+                        if let Some(found) = scan_bytes_backward(raw, display_offset, matcher) {
+                            return Ok(Some(found));
+                        }
+                    } else {
+                        for (idx, &base) in raw.iter().enumerate().rev() {
+                            let id = CellId::Add(source_offset + idx as u64);
+                            if need_tombstone_scan && self.tombstones.contains(&id) {
+                                matcher.reset();
+                                continue;
+                            }
+                            let byte = if need_replacement_scan {
+                                self.replacements.get(&id).copied().unwrap_or(base)
+                            } else {
+                                base
+                            };
+                            if matcher.feed(byte) {
+                                return Ok(Some(display_offset + idx as u64));
+                            }
+                        }
+                    }
+                }
+            }
+
+            remaining = chunk_start;
+        }
+
+        Ok(None)
+    }
+
+    fn search_overlay_flags(
+        &self,
+        source: PieceSource,
+        source_offset: u64,
+        len: u64,
+        has_tombstones: bool,
+        has_replacements: bool,
+    ) -> (bool, bool) {
+        if len == 0 {
+            return (false, false);
+        }
+
+        let lo = match source {
+            PieceSource::Original => CellId::Original(source_offset),
+            PieceSource::Add => CellId::Add(source_offset),
+        };
+        let hi = match source {
+            PieceSource::Original => CellId::Original(source_offset + len - 1),
+            PieceSource::Add => CellId::Add(source_offset + len - 1),
+        };
+
+        (
+            has_tombstones && self.has_tombstone_in_range(lo, hi),
+            has_replacements && self.has_replacement_in_range(lo, hi),
+        )
     }
 
     // ── helpers used by save::write_pieces ──────────────────────────
@@ -504,4 +759,80 @@ impl Document {
     pub fn add_slice(&self, start: u64, len: u64) -> &[u8] {
         self.pieces.add_buffer_slice(start, len)
     }
+}
+
+#[derive(Debug)]
+struct KmpMatcher<'a> {
+    pattern: &'a [u8],
+    prefix: Vec<usize>,
+    matched: usize,
+}
+
+impl<'a> KmpMatcher<'a> {
+    fn new(pattern: &'a [u8]) -> Self {
+        let mut prefix = vec![0; pattern.len()];
+        let mut matched = 0;
+        for idx in 1..pattern.len() {
+            while matched > 0 && pattern[idx] != pattern[matched] {
+                matched = prefix[matched - 1];
+            }
+            if pattern[idx] == pattern[matched] {
+                matched += 1;
+                prefix[idx] = matched;
+            }
+        }
+
+        Self {
+            pattern,
+            prefix,
+            matched: 0,
+        }
+    }
+
+    fn feed(&mut self, byte: u8) -> bool {
+        while self.matched > 0 && byte != self.pattern[self.matched] {
+            self.matched = self.prefix[self.matched - 1];
+        }
+
+        if byte == self.pattern[self.matched] {
+            self.matched += 1;
+            if self.matched == self.pattern.len() {
+                self.matched = self.prefix[self.matched - 1];
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn reset(&mut self) {
+        self.matched = 0;
+    }
+}
+
+fn scan_bytes_forward(
+    bytes: &[u8],
+    display_offset: u64,
+    matcher: &mut KmpMatcher<'_>,
+    pattern_len: u64,
+) -> Option<u64> {
+    for (idx, &byte) in bytes.iter().enumerate() {
+        if matcher.feed(byte) {
+            return Some(display_offset + idx as u64 + 1 - pattern_len);
+        }
+    }
+    None
+}
+
+fn scan_bytes_backward(
+    bytes: &[u8],
+    display_offset: u64,
+    matcher: &mut KmpMatcher<'_>,
+) -> Option<u64> {
+    for (idx, &byte) in bytes.iter().enumerate().rev() {
+        if matcher.feed(byte) {
+            return Some(display_offset + idx as u64);
+        }
+    }
+    None
 }

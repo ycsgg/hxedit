@@ -39,8 +39,10 @@ pub enum Command {
     },
     SearchAscii {
         pattern: Vec<u8>,
+        backward: bool,
     },
     SearchHex {
         pattern: Vec<u8>,
+        backward: bool,
     },
 }

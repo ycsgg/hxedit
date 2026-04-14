@@ -1,4 +1,4 @@
-use crate::app::{App, SearchKind, SearchState};
+use crate::app::{App, SearchDirection, SearchKind, SearchState};
 use crate::commands::parser::parse_command;
 use crate::commands::types::Command;
 use crate::error::{HxError, HxResult};
@@ -56,21 +56,31 @@ impl App {
                 limit,
             } => self.paste_from_clipboard(raw, preview, limit, true),
             Command::Copy { format, display } => self.copy_selection(format, display),
-            Command::SearchAscii { pattern } => {
+            Command::SearchAscii { pattern, backward } => {
                 let search = SearchState {
                     kind: SearchKind::Ascii,
                     pattern,
                 };
                 self.last_search = Some(search.clone());
-                self.run_search(&search, crate::app::SearchDirection::Forward)
+                let direction = if backward {
+                    SearchDirection::Backward
+                } else {
+                    SearchDirection::Forward
+                };
+                self.run_search(&search, direction)
             }
-            Command::SearchHex { pattern } => {
+            Command::SearchHex { pattern, backward } => {
                 let search = SearchState {
                     kind: SearchKind::Hex,
                     pattern,
                 };
                 self.last_search = Some(search.clone());
-                self.run_search(&search, crate::app::SearchDirection::Forward)
+                let direction = if backward {
+                    SearchDirection::Backward
+                } else {
+                    SearchDirection::Forward
+                };
+                self.run_search(&search, direction)
             }
         }
     }

@@ -1,11 +1,21 @@
+use std::fs;
 use std::path::Path;
 
 use hxedit::config::Config;
 use hxedit::core::document::Document;
 use hxedit::mode::NibblePhase;
+use tempfile::tempdir;
 
 fn open_fixture(path: &str) -> Document {
     Document::open(Path::new(path), &Config::default()).unwrap()
+}
+
+fn open_temp(data: &[u8]) -> (tempfile::TempDir, Document) {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("search.bin");
+    fs::write(&path, data).unwrap();
+    let doc = Document::open(&path, &Config::default()).unwrap();
+    (dir, doc)
 }
 
 #[test]
@@ -42,5 +52,30 @@ fn deleted_byte_breaks_match() {
     assert_eq!(
         doc.search_backward(doc.original_len(), b"hello").unwrap(),
         None
+    );
+}
+
+#[test]
+fn searches_across_piece_boundaries() {
+    let (_dir, mut doc) = open_temp(b"abef");
+    doc.insert_bytes(2, b"cd").unwrap();
+
+    assert_eq!(doc.search_forward(0, b"bcde").unwrap(), Some(1));
+    assert_eq!(doc.search_backward(doc.len(), b"bcde").unwrap(), Some(1));
+}
+
+#[test]
+fn searches_across_large_chunk_boundary_with_replacements() {
+    let mut data = vec![b'x'; 70_000];
+    let start = 65_534usize;
+    data[start..start + 5].copy_from_slice(b"hxllo");
+
+    let (_dir, mut doc) = open_temp(&data);
+    doc.replace_display_byte(start as u64 + 1, b'e').unwrap();
+
+    assert_eq!(doc.search_forward(0, b"hello").unwrap(), Some(start as u64));
+    assert_eq!(
+        doc.search_backward(doc.len(), b"hello").unwrap(),
+        Some(start as u64)
     );
 }

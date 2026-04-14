@@ -24,10 +24,8 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         }),
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
         | "paste?!" => parse_paste(name, rest, false),
-        "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?"
-        | "pi!?" | "pi?!" | "paste-insert!?" | "paste-insert?!" => {
-            parse_paste(name, rest, true)
-        }
+        "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?" | "pi!?"
+        | "pi?!" | "paste-insert!?" | "paste-insert?!" => parse_paste(name, rest, true),
         "c" | "copy" => parse_copy(rest),
         "u" | "undo" => Ok(Command::Undo {
             steps: parse_undo_steps(rest)?,
@@ -38,19 +36,21 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 offset: parse_offset(arg).map_err(|_| HxError::InvalidOffset(arg.to_owned()))?,
             })
         }
-        "s" => {
+        "s" | "s!" => {
             let arg = rest.ok_or(HxError::MissingArgument("ascii search pattern"))?;
             if arg.is_empty() {
                 return Err(HxError::EmptySearch);
             }
             Ok(Command::SearchAscii {
                 pattern: arg.as_bytes().to_vec(),
+                backward: name.ends_with('!'),
             })
         }
-        "S" => {
+        "S" | "S!" => {
             let arg = rest.ok_or(HxError::MissingArgument("hex search pattern"))?;
             Ok(Command::SearchHex {
                 pattern: parse_hex_bytes(arg)?,
+                backward: name.ends_with('!'),
             })
         }
         other => Err(HxError::UnknownCommand(other.to_owned())),

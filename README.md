@@ -38,8 +38,10 @@ When command mode is open, the bottom command box shows live syntax hints and ar
 - `:p` `:paste [num]`: parse clipboard hex text and paste bytes at the cursor; supports spaces, commas, or compact hex
 - `:p!` `:paste! [num]`: paste raw clipboard bytes at the cursor
 - `:p?` `:paste? [num]`: preview parsed clipboard bytes without modifying the document
-- `:s <text>`: search ASCII text
-- `:S <hex>`: search hex bytes, for example `:S 7f 45 4c 46`
+- `:s <text>`: search ASCII text downward
+- `:s! <text>`: search ASCII text upward
+- `:S <hex>`: search hex bytes downward, for example `:S 7f 45 4c 46`
+- `:S! <hex>`: search hex bytes upward
 - `:c` `:copy [bin|b|db|qb] [r|nb|nl]`: copy the current visual selection to the system clipboard
 
 Paste overwrites existing bytes from the cursor and appends the remainder if it runs past the end of the file.

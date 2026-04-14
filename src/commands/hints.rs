@@ -29,21 +29,27 @@ pub fn hint_for(input: &str) -> CommandHint {
         },
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
         | "paste?!" => paste_hint(name, rest, false),
-        "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?"
-        | "pi!?" | "pi?!" | "paste-insert!?" | "paste-insert?!" => {
-            paste_hint(name, rest, true)
-        }
+        "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?" | "pi!?"
+        | "pi?!" | "paste-insert!?" | "paste-insert?!" => paste_hint(name, rest, true),
         "g" | "goto" => CommandHint {
             syntax: format!("{name} <offset>"),
             details: "jump to byte offset; supports decimal or 0x-prefixed hex".to_owned(),
         },
-        "s" => CommandHint {
-            syntax: "s <ascii>".to_owned(),
-            details: "search ASCII text; use n/p to jump next/previous match".to_owned(),
+        "s" | "s!" => CommandHint {
+            syntax: format!("{name} <ascii>"),
+            details: if name.ends_with('!') {
+                "search ASCII text upward; use n/p to jump next/previous match".to_owned()
+            } else {
+                "search ASCII text downward; use n/p to jump next/previous match".to_owned()
+            },
         },
-        "S" => CommandHint {
-            syntax: "S <hex-bytes>".to_owned(),
-            details: "search hex bytes like: S 7f 45 4c 46".to_owned(),
+        "S" | "S!" => CommandHint {
+            syntax: format!("{name} <hex-bytes>"),
+            details: if name.ends_with('!') {
+                "search hex bytes upward like: S! 7f 45 4c 46".to_owned()
+            } else {
+                "search hex bytes downward like: S 7f 45 4c 46".to_owned()
+            },
         },
         "u" | "undo" => CommandHint {
             syntax: format!("{name} [steps]"),
@@ -58,7 +64,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             if suggestions.is_empty() {
                 CommandHint {
                     syntax: "unknown command".to_owned(),
-                    details: "available: q w wq g s S u c p pi".to_owned(),
+                    details: "available: q w wq g s s! S S! u c p pi".to_owned(),
                 }
             } else {
                 CommandHint {
@@ -169,10 +175,42 @@ fn split_command(input: &str) -> (&str, Option<&str>) {
 
 fn known_commands() -> Vec<&'static str> {
     vec![
-        "q", "quit", "q!", "w", "write", "wq", "g", "goto", "s", "S", "u", "undo", "c", "copy",
-        "p", "paste", "p!", "paste!", "p?", "paste?", "p!?", "p?!", "paste!?", "paste?!",
-        "pi", "paste-insert", "pi!", "paste-insert!", "pi?", "paste-insert?", "pi!?", "pi?!",
-        "paste-insert!?", "paste-insert?!",
+        "q",
+        "quit",
+        "q!",
+        "w",
+        "write",
+        "wq",
+        "g",
+        "goto",
+        "s",
+        "s!",
+        "S",
+        "S!",
+        "u",
+        "undo",
+        "c",
+        "copy",
+        "p",
+        "paste",
+        "p!",
+        "paste!",
+        "p?",
+        "paste?",
+        "p!?",
+        "p?!",
+        "paste!?",
+        "paste?!",
+        "pi",
+        "paste-insert",
+        "pi!",
+        "paste-insert!",
+        "pi?",
+        "paste-insert?",
+        "pi!?",
+        "pi?!",
+        "paste-insert!?",
+        "paste-insert?!",
     ]
 }
 
@@ -209,5 +247,11 @@ mod tests {
     fn goto_hint_shows_offset_help() {
         let hint = hint_for("go");
         assert!(hint.syntax.contains("goto"));
+    }
+
+    #[test]
+    fn reverse_search_hint_mentions_upward() {
+        let hint = hint_for("s!");
+        assert!(hint.details.contains("upward"));
     }
 }

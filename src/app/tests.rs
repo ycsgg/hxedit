@@ -151,11 +151,28 @@ fn search_next_and_prev_follow_last_pattern() {
     let mut app = app_with_bytes(b"abc hello xyz hello end");
     app.execute_command(Command::SearchAscii {
         pattern: b"hello".to_vec(),
+        backward: false,
     })
     .unwrap();
     assert_eq!(app.cursor, 4);
 
     app.repeat_search(SearchDirection::Forward).unwrap();
+    assert_eq!(app.cursor, 14);
+
+    app.repeat_search(SearchDirection::Backward).unwrap();
+    assert_eq!(app.cursor, 4);
+}
+
+#[test]
+fn reverse_search_command_searches_upward() {
+    let mut app = app_with_bytes(b"abc hello xyz hello end");
+    app.cursor = app.document.len() - 1;
+    app.execute_command(Command::SearchAscii {
+        pattern: b"hello".to_vec(),
+        backward: true,
+    })
+    .unwrap();
+
     assert_eq!(app.cursor, 14);
 
     app.repeat_search(SearchDirection::Backward).unwrap();
