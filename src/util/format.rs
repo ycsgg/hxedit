@@ -30,13 +30,14 @@ pub fn ascii_char(slot: ByteSlot) -> char {
     }
 }
 
+const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+
 pub fn hex_pair(slot: ByteSlot) -> [char; 2] {
     match slot {
-        ByteSlot::Present(byte) => {
-            let s = format!("{byte:02x}");
-            let mut chars = s.chars();
-            [chars.next().unwrap(), chars.next().unwrap()]
-        }
+        ByteSlot::Present(byte) => [
+            HEX_CHARS[(byte >> 4) as usize] as char,
+            HEX_CHARS[(byte & 0x0f) as usize] as char,
+        ],
         ByteSlot::Deleted => ['X', 'X'],
         ByteSlot::Empty => [' ', ' '],
     }
