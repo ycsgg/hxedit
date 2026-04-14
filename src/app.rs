@@ -151,7 +151,7 @@ impl App {
         let after_config = Instant::now();
         let document = Document::open(&cli.file, &config)?;
         let after_open = Instant::now();
-        let cursor = if document.len() == 0 {
+        let cursor = if document.is_empty() {
             0
         } else {
             config.initial_offset.min(document.len() - 1)

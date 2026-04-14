@@ -1,6 +1,7 @@
 use ratatui::layout::Rect;
 
 use crate::mode::NibblePhase;
+use crate::util::geometry::rect_contains;
 use crate::view::layout::MainColumns;
 
 /// Result of translating a terminal click into a byte selection.
@@ -27,11 +28,11 @@ pub fn hit_test(
         .or_else(|| row_from_point(columns.ascii, x, y))?;
     let row_offset = viewport_top + row as u64 * bytes_per_line as u64;
 
-    let (col, phase) = if contains(columns.gutter, x, y) {
+    let (col, phase) = if rect_contains(columns.gutter, x, y) {
         (0, None)
-    } else if contains(columns.hex, x, y) {
+    } else if rect_contains(columns.hex, x, y) {
         hex_col_from_x(x - columns.hex.x, bytes_per_line)?
-    } else if contains(columns.ascii, x, y) {
+    } else if rect_contains(columns.ascii, x, y) {
         (ascii_col_from_x(x - columns.ascii.x, bytes_per_line)?, None)
     } else {
         return None;
@@ -42,14 +43,7 @@ pub fn hit_test(
 }
 
 fn row_from_point(rect: Rect, x: u16, y: u16) -> Option<usize> {
-    contains(rect, x, y).then_some((y - rect.y) as usize)
-}
-
-fn contains(rect: Rect, x: u16, y: u16) -> bool {
-    x >= rect.x
-        && x < rect.x.saturating_add(rect.width)
-        && y >= rect.y
-        && y < rect.y.saturating_add(rect.height)
+    rect_contains(rect, x, y).then_some((y - rect.y) as usize)
 }
 
 fn ascii_col_from_x(x: u16, bytes_per_line: usize) -> Option<usize> {

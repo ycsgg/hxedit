@@ -82,7 +82,7 @@ impl App {
         }
 
         let line_build_start = profiling.then(Instant::now);
-        let gutter_lines = if self.document.len() == 0 {
+        let gutter_lines = if self.document.is_empty() {
             vec![Line::raw("No data")]
         } else {
             gutter::build(
@@ -91,7 +91,7 @@ impl App {
                 &self.palette,
             )
         };
-        let hex_lines = if self.document.len() == 0 {
+        let hex_lines = if self.document.is_empty() {
             vec![Line::raw("No content")]
         } else {
             hex_grid::build(
@@ -104,7 +104,7 @@ impl App {
                 self.selection_range(),
             )
         };
-        let ascii_lines = if self.document.len() == 0 {
+        let ascii_lines = if self.document.is_empty() {
             vec![Line::raw("")]
         } else {
             ascii_grid::build(

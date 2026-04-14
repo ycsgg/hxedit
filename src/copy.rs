@@ -94,7 +94,7 @@ fn format_raw(bytes: &[u8], format: CopyFormat) -> String {
 
 fn format_numeric(bytes: &[u8], format: CopyFormat, big_endian: bool) -> HxResult<String> {
     let group_size = format.group_size();
-    if group_size > 1 && bytes.len() % group_size != 0 {
+    if group_size > 1 && !bytes.len().is_multiple_of(group_size) {
         return Err(HxError::CopyAlignment(group_size));
     }
 

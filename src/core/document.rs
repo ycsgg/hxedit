@@ -81,6 +81,10 @@ impl Document {
         self.pieces.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.pieces.len() == 0
+    }
+
     /// Number of bytes that would be written on save (display len minus tombstones).
     ///
     /// O(1) — simply subtracts the tombstone count from the piece table length.
@@ -380,7 +384,7 @@ impl Document {
 
     /// Validate and return a display offset for `:goto`.
     pub fn goto(&self, offset: u64) -> HxResult<u64> {
-        if self.len() == 0 {
+        if self.is_empty() {
             return Ok(0);
         }
         if offset >= self.len() {

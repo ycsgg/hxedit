@@ -107,6 +107,10 @@ impl PieceTable {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     /// Returns `true` when no edits have been made: the piece list is a
     /// single `Original` piece covering the entire file.
     pub fn is_identity(&self) -> bool {

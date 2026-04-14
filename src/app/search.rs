@@ -20,7 +20,7 @@ impl App {
         let started_at = Instant::now();
         let found = match direction {
             SearchDirection::Forward => {
-                let start = if self.document.len() == 0 {
+                let start = if self.document.is_empty() {
                     0
                 } else {
                     (self.cursor + 1).min(self.document.len())

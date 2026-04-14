@@ -17,8 +17,6 @@ pub fn ascii_char(slot: ByteSlot) -> char {
         ByteSlot::Present(byte) => {
             if byte.is_ascii_graphic() || byte == b' ' {
                 byte as char
-            } else if byte.is_ascii_whitespace() {
-                '.'
             } else if byte.is_ascii() {
                 '.'
             } else {

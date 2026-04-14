@@ -7,7 +7,7 @@ use crate::util::parse::decode_base64;
 pub fn copy_text(text: &str) -> HxResult<()> {
     #[cfg(target_os = "macos")]
     {
-        return pipe_to_command("pbcopy", &[], text);
+        pipe_to_command("pbcopy", &[], text)
     }
 
     #[cfg(target_os = "windows")]
@@ -35,7 +35,7 @@ pub fn copy_text(text: &str) -> HxResult<()> {
 pub fn read_text() -> HxResult<String> {
     #[cfg(target_os = "macos")]
     {
-        return Ok(String::from_utf8_lossy(&capture_command("pbpaste", &[])?).into_owned());
+        Ok(String::from_utf8_lossy(&capture_command("pbpaste", &[])?).into_owned())
     }
 
     #[cfg(target_os = "windows")]
@@ -77,7 +77,7 @@ pub fn read_raw_bytes() -> HxResult<Vec<u8>> {
             }
         }
 
-        return capture_command("pbpaste", &[]);
+        capture_command("pbpaste", &[])
     }
 
     #[cfg(target_os = "windows")]

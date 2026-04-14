@@ -49,7 +49,7 @@ impl App {
     }
 
     pub(crate) fn scroll_viewport(&mut self, rows: i64) {
-        if self.document.len() == 0 {
+        if self.document.is_empty() {
             return;
         }
         let max_top = self.max_viewport_top();
@@ -65,7 +65,7 @@ impl App {
     }
 
     pub(crate) fn clamp_cursor_into_view(&mut self) {
-        if self.document.len() == 0 {
+        if self.document.is_empty() {
             self.cursor = 0;
             return;
         }
@@ -88,7 +88,7 @@ impl App {
     }
 
     pub(crate) fn max_viewport_top(&self) -> u64 {
-        if self.document.len() == 0 {
+        if self.document.is_empty() {
             return 0;
         }
         let row_size = self.config.bytes_per_line as u64;
@@ -104,7 +104,7 @@ impl App {
     }
 
     pub(crate) fn offset_with_delta(&self, current: u64, delta: i64) -> u64 {
-        if self.document.len() == 0 {
+        if self.document.is_empty() {
             return 0;
         }
         let max = self.cursor_max(self.mode_allows_eof_cursor());
@@ -131,7 +131,7 @@ impl App {
     }
 
     pub(crate) fn cursor_anchor_offset(&self) -> u64 {
-        if self.document.len() == 0 {
+        if self.document.is_empty() {
             0
         } else {
             self.cursor.min(self.document.len() - 1)
@@ -139,7 +139,7 @@ impl App {
     }
 
     fn cursor_max(&self, allow_eof: bool) -> u64 {
-        if self.document.len() == 0 {
+        if self.document.is_empty() {
             0
         } else if allow_eof {
             self.document.len()
@@ -149,7 +149,7 @@ impl App {
     }
 
     fn clamp_offset_with_eof(&self, offset: u64, allow_eof: bool) -> u64 {
-        if self.document.len() == 0 {
+        if self.document.is_empty() {
             0
         } else {
             offset.min(self.cursor_max(allow_eof))

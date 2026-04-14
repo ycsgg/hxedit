@@ -10,7 +10,7 @@ pub fn build(
     rows: &[Vec<ByteSlot>],
     row_offsets: &[u64],
     cursor: u64,
-    mode: Mode,
+    _mode: Mode,
     palette: &Palette,
     bytes_per_line: usize,
     selection: Option<(u64, u64)>,
@@ -36,11 +36,7 @@ pub fn build(
                     spans.push(Span::styled("│", palette.separator));
                 }
             }
-            if matches!(mode, Mode::EditHex { .. }) {
-                Line::from(spans)
-            } else {
-                Line::from(spans)
-            }
+            Line::from(spans)
         })
         .collect()
 }

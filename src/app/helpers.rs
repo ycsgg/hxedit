@@ -14,10 +14,7 @@ pub(crate) fn separator_widget(height: u16, palette: &Palette) -> Paragraph<'sta
 }
 
 pub(crate) fn contains(rect: Rect, x: u16, y: u16) -> bool {
-    x >= rect.x
-        && x < rect.x.saturating_add(rect.width)
-        && y >= rect.y
-        && y < rect.y.saturating_add(rect.height)
+    crate::util::geometry::rect_contains(rect, x, y)
 }
 
 pub(crate) fn parse_paste_payload(text: &str) -> HxResult<(Vec<u8>, PasteSource)> {

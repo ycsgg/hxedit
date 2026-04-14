@@ -8,7 +8,7 @@ use crate::mode::{Mode, NibblePhase};
 
 impl App {
     pub(crate) fn handle_action(&mut self, action: Action) -> Result<()> {
-        let result: crate::error::HxResult<()> = match action.clone() {
+        let result: crate::error::HxResult<()> = match action {
             Action::MoveLeft => self.move_horizontal(-1),
             Action::MoveRight => self.move_horizontal(1),
             Action::MoveUp => self.move_vertical(-1),

@@ -30,7 +30,7 @@ pub fn parse_hex_bytes(input: &str) -> Result<Vec<u8>, HxError> {
     if compact.is_empty() {
         return Err(HxError::EmptySearch);
     }
-    if compact.len() % 2 != 0 {
+    if !compact.len().is_multiple_of(2) {
         return Err(HxError::InvalidHexPattern(input.to_owned()));
     }
 

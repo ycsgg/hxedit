@@ -45,6 +45,10 @@ impl FileView {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn read_range(&mut self, offset: u64, len: usize) -> HxResult<Vec<u8>> {
         Ok(self.cache.read_range(&mut self.file, offset, len)?)
     }
