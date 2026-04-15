@@ -45,4 +45,8 @@ pub enum Command {
         pattern: Vec<u8>,
         backward: bool,
     },
+    Inspector,
+    Format {
+        name: Option<String>,
+    },
 }

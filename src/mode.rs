@@ -22,13 +22,25 @@ pub struct PendingInsert {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Normal,
-    EditHex { phase: NibblePhase },
-    InsertHex { pending: Option<PendingInsert> },
+    EditHex {
+        phase: NibblePhase,
+    },
+    InsertHex {
+        pending: Option<PendingInsert>,
+    },
     Visual,
     Command,
+    /// Inspector panel has focus. Arrow keys navigate fields, Enter edits.
+    Inspector,
+    /// Inspector field is being edited inline.
+    InspectorEdit,
 }
 
 impl Mode {
+    pub fn is_inspector(self) -> bool {
+        matches!(self, Self::Inspector | Self::InspectorEdit)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Normal => "NORMAL",
@@ -36,6 +48,8 @@ impl Mode {
             Self::InsertHex { .. } => "INSERT",
             Self::Visual => "VISUAL",
             Self::Command => "COMMAND",
+            Self::Inspector => "INSPECT",
+            Self::InspectorEdit => "INSPEDIT",
         }
     }
 }

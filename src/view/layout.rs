@@ -9,7 +9,9 @@ pub struct ScreenLayout {
     pub command: Option<Rect>,
 }
 
-/// Fixed three-column layout for the hex viewer body.
+/// Fixed column layout for the hex viewer body.
+///
+/// When show_inspector is true, sep3 and inspector are Some.
 #[derive(Debug, Clone, Copy)]
 pub struct MainColumns {
     pub gutter: Rect,
@@ -17,6 +19,10 @@ pub struct MainColumns {
     pub hex: Rect,
     pub sep2: Rect,
     pub ascii: Rect,
+    /// Inspector separator. Only present when inspector is open.
+    pub sep3: Option<Rect>,
+    /// Inspector panel area. Only present when inspector is open.
+    pub inspector: Option<Rect>,
 }
 
 pub fn split_screen(area: Rect, show_command: bool) -> ScreenLayout {
@@ -42,24 +48,56 @@ pub fn split_screen(area: Rect, show_command: bool) -> ScreenLayout {
     }
 }
 
-pub fn split_main(block: &Block, area: Rect, gutter_width: u16) -> MainColumns {
+pub fn split_main(
+    block: &Block,
+    area: Rect,
+    gutter_width: u16,
+    show_inspector: bool,
+) -> MainColumns {
     let inner = block.inner(area);
-    let sections = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(gutter_width),
-            Constraint::Length(1),
-            Constraint::Fill(3),
-            Constraint::Length(1),
-            Constraint::Fill(2),
-        ])
-        .split(inner);
-    MainColumns {
-        gutter: sections[0],
-        sep1: sections[1],
-        hex: sections[2],
-        sep2: sections[3],
-        ascii: sections[4],
+
+    if show_inspector && inner.width >= 80 {
+        let sections = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(gutter_width),
+                Constraint::Length(1),
+                Constraint::Fill(3),
+                Constraint::Length(1),
+                Constraint::Fill(1),
+                Constraint::Length(1),
+                Constraint::Fill(2),
+            ])
+            .split(inner);
+        MainColumns {
+            gutter: sections[0],
+            sep1: sections[1],
+            hex: sections[2],
+            sep2: sections[3],
+            ascii: sections[4],
+            sep3: Some(sections[5]),
+            inspector: Some(sections[6]),
+        }
+    } else {
+        let sections = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(gutter_width),
+                Constraint::Length(1),
+                Constraint::Fill(3),
+                Constraint::Length(1),
+                Constraint::Fill(2),
+            ])
+            .split(inner);
+        MainColumns {
+            gutter: sections[0],
+            sep1: sections[1],
+            hex: sections[2],
+            sep2: sections[3],
+            ascii: sections[4],
+            sep3: None,
+            inspector: None,
+        }
     }
 }
 

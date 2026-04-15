@@ -14,6 +14,7 @@ fn app_constructs_from_cli() {
         readonly: true,
         no_color: true,
         offset: None,
+        inspector: false,
     };
     App::from_cli(cli).unwrap();
 }

@@ -17,6 +17,17 @@ pub struct Palette {
     pub cursor_nibble: Style,
     pub command_border: Style,
     pub command_hint: Style,
+    // ── Inspector styles ──
+    /// Inspector structure name header.
+    pub inspector_header: Style,
+    /// Inspector normal field name.
+    pub inspector_field: Style,
+    /// Inspector field value.
+    pub inspector_value: Style,
+    /// Inspector currently selected / associated field (highlight).
+    pub inspector_active: Style,
+    /// Inspector field being edited.
+    pub inspector_edit: Style,
 }
 
 impl Palette {
@@ -49,6 +60,16 @@ impl Palette {
                     .add_modifier(Modifier::BOLD),
                 command_border: Style::default().fg(Color::Cyan),
                 command_hint: Style::default().fg(Color::DarkGray),
+                inspector_header: Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+                inspector_field: Style::default().fg(Color::Gray),
+                inspector_value: Style::default().fg(Color::Cyan),
+                inspector_active: Style::default()
+                    .bg(Color::DarkGray)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+                inspector_edit: Style::default().bg(Color::Yellow).fg(Color::Black),
             }
         } else {
             let base = Style::default();
@@ -68,6 +89,11 @@ impl Palette {
                 cursor_nibble: base.add_modifier(Modifier::REVERSED),
                 command_border: base,
                 command_hint: base,
+                inspector_header: base.add_modifier(Modifier::BOLD),
+                inspector_field: base,
+                inspector_value: base,
+                inspector_active: base.add_modifier(Modifier::REVERSED),
+                inspector_edit: base.add_modifier(Modifier::UNDERLINED),
             }
         }
     }

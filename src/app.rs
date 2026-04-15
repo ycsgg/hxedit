@@ -25,6 +25,7 @@ use crate::cli::Cli;
 use crate::config::Config;
 use crate::core::document::Document;
 use crate::core::piece_table::CellId;
+use crate::format::parse::InspectorRow;
 use crate::input::keymap::map_key;
 use crate::mode::Mode;
 use crate::profile::{Profiler, StartupStats};
@@ -40,6 +41,7 @@ pub struct App {
     cursor: u64,
     viewport_top: u64,
     command_buffer: String,
+    command_cursor_pos: usize,
     status_message: String,
     should_quit: bool,
     view_rows: usize,
@@ -52,14 +54,49 @@ pub struct App {
     last_search: Option<SearchState>,
     last_paste: Option<PasteState>,
     profiler: Option<Profiler>,
+    // ── Inspector state ──
+    /// Whether the inspector panel is shown.
+    show_inspector: bool,
+    /// Manual format override for the inspector, e.g. `elf`.
+    inspector_format_override: Option<String>,
+    /// Inspector runtime state. Some when show_inspector == true and format detected.
+    inspector: Option<InspectorState>,
+}
+
+/// Inspector panel runtime state.
+#[derive(Debug)]
+pub(crate) struct InspectorState {
+    /// Detected format name.
+    pub format_name: String,
+    /// Parsed structure value tree.
+    pub structs: Vec<crate::format::parse::StructValue>,
+    /// Flattened render rows (cached, rebuilt after edits).
+    pub rows: Vec<InspectorRow>,
+    /// Vertical scroll offset within the panel.
+    pub scroll_offset: usize,
+    /// Currently selected row index (index into `rows`).
+    pub selected_row: usize,
+    /// If editing a field, the edit state.
+    pub editing: Option<InspectorEdit>,
+}
+
+/// Edit state for a field in the inspector panel.
+#[derive(Debug, Clone)]
+pub(crate) struct InspectorEdit {
+    /// Index of the InspectorRow being edited.
+    pub row_index: usize,
+    /// Text edit buffer.
+    pub buffer: String,
+    /// Cursor position within the buffer.
+    pub cursor_pos: usize,
 }
 
 /// Snapshot of a single cell's replacement state before an edit.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ReplacementUndo {
-    id: CellId,
+    pub(crate) id: CellId,
     /// `None` means the cell had no replacement (base byte was displayed).
-    previous: Option<u8>,
+    pub(crate) previous: Option<u8>,
 }
 
 /// A single reversible edit operation.
@@ -149,7 +186,7 @@ impl App {
         let startup_begin = Instant::now();
         let config = cli.config()?;
         let after_config = Instant::now();
-        let document = Document::open(&cli.file, &config)?;
+        let mut document = Document::open(&cli.file, &config)?;
         let after_open = Instant::now();
         let cursor = if document.is_empty() {
             0
@@ -157,11 +194,39 @@ impl App {
             config.initial_offset.min(document.len() - 1)
         };
         let after_init = Instant::now();
-        Ok(Self {
+
+        // Initial format detection for inspector
+        let (show_inspector, inspector) = if config.inspector {
+            match crate::format::detect::detect_format(&mut document) {
+                Some(def) => {
+                    let name = def.name.clone();
+                    let structs =
+                        crate::format::parse::parse_format(&def, &mut document).unwrap_or_default();
+                    let rows = crate::format::parse::flatten(&structs);
+                    (
+                        true,
+                        Some(InspectorState {
+                            format_name: name,
+                            structs,
+                            rows,
+                            scroll_offset: 0,
+                            selected_row: 0,
+                            editing: None,
+                        }),
+                    )
+                }
+                None => (true, None),
+            }
+        } else {
+            (false, None)
+        };
+
+        let mut app = Self {
             palette: Palette::new(config.color),
             viewport_top: align_offset(cursor, config.bytes_per_line),
             mode: Mode::Normal,
             command_buffer: String::new(),
+            command_cursor_pos: 0,
             status_message: String::new(),
             should_quit: false,
             view_rows: 1,
@@ -184,7 +249,13 @@ impl App {
             document,
             cursor,
             config,
-        })
+            show_inspector,
+            inspector_format_override: None,
+            inspector,
+        };
+
+        app.sync_inspector_to_cursor();
+        Ok(app)
     }
 
     pub fn run(&mut self) -> Result<()> {

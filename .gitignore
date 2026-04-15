@@ -2,3 +2,10 @@ ref/
 target/
 *.swp
 prof
+tgbot
+*.md
+!README.md
+*.log
+test.png
+test.zip
+test.elf

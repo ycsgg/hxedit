@@ -9,8 +9,11 @@ impl App {
         let return_mode = self.command_return_mode.unwrap_or(Mode::Normal);
         let command = parse_command(&self.command_buffer)?;
         self.command_buffer.clear();
+        self.command_cursor_pos = 0;
         self.execute_command(command)?;
-        self.mode = return_mode;
+        if matches!(self.mode, Mode::Command) {
+            self.mode = self.normalize_mode(return_mode);
+        }
         self.command_return_mode = None;
         Ok(())
     }
@@ -28,6 +31,7 @@ impl App {
                 let (saved, profile) = self.document.save(path)?;
                 self.undo_stack.clear();
                 self.cursor = self.clamp_offset(self.cursor);
+                self.refresh_inspector();
                 self.status_message = format!("wrote {} [{}]", saved.display(), profile);
                 Ok(())
             }
@@ -35,6 +39,7 @@ impl App {
                 let (saved, profile) = self.document.save(path)?;
                 self.undo_stack.clear();
                 self.cursor = self.clamp_offset(self.cursor);
+                self.refresh_inspector();
                 self.status_message = format!("wrote {} [{}]", saved.display(), profile);
                 self.should_quit = true;
                 Ok(())
@@ -56,6 +61,43 @@ impl App {
                 limit,
             } => self.paste_from_clipboard(raw, preview, limit, true),
             Command::Copy { format, display } => self.copy_selection(format, display),
+            Command::Inspector => {
+                let from_inspector = self
+                    .command_return_mode
+                    .is_some_and(|mode| mode.is_inspector());
+                if !self.show_inspector {
+                    self.show_inspector = true;
+                    self.refresh_inspector();
+                    self.mode = Mode::Inspector;
+                } else if !from_inspector {
+                    self.mode = Mode::Inspector;
+                    self.sync_inspector_to_cursor();
+                } else {
+                    self.mode = Mode::Normal;
+                    self.show_inspector = false;
+                    self.inspector = None;
+                }
+                Ok(())
+            }
+            Command::Format { name } => {
+                self.show_inspector = true;
+                if let Some(name) = name {
+                    if crate::format::detect::detect_by_name(&name, &mut self.document).is_some() {
+                        self.inspector_format_override = Some(name.to_lowercase());
+                        self.refresh_inspector();
+                        self.mode = Mode::Inspector;
+                        self.status_message = format!("format: {}", name);
+                    } else {
+                        self.status_message = format!("unknown or mismatched format: {}", name);
+                    }
+                } else {
+                    self.inspector_format_override = None;
+                    self.refresh_inspector();
+                    self.mode = Mode::Inspector;
+                    self.status_message = "format: auto".to_owned();
+                }
+                Ok(())
+            }
             Command::SearchAscii { pattern, backward } => {
                 let search = SearchState {
                     kind: SearchKind::Ascii,

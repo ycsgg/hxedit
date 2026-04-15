@@ -57,6 +57,8 @@ impl App {
             self.mode = Mode::Normal;
         }
 
+        self.refresh_inspector();
+
         if undone == 0 {
             self.status_message = "nothing to undo".to_owned();
         } else if undone == 1 {

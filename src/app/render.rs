@@ -11,7 +11,9 @@ use crate::core::document::ByteSlot;
 use crate::mode::Mode;
 use crate::profile::{FrameStats, RenderMainStats};
 use crate::util::format::offset_width;
-use crate::view::{ascii_grid, command_line, gutter, hex_grid, layout, status};
+use crate::view::{
+    ascii_grid, command_line, gutter, hex_grid, inspector as inspector_view, layout, status,
+};
 
 impl App {
     pub(crate) fn render(&mut self, frame: &mut ratatui::Frame<'_>) {
@@ -56,7 +58,12 @@ impl App {
     ) -> RenderMainStats {
         let mut stats = RenderMainStats::default();
         let block = Block::default().borders(Borders::ALL);
-        let columns = layout::split_main(&block, area, offset_width(self.document.len()) as u16);
+        let columns = layout::split_main(
+            &block,
+            area,
+            offset_width(self.document.len()) as u16,
+            self.show_inspector,
+        );
         self.last_columns = Some(columns);
         frame.render_widget(block, area);
 
@@ -136,6 +143,56 @@ impl App {
             columns.sep2,
         );
         frame.render_widget(Paragraph::new(ascii_lines), columns.ascii);
+
+        // Render inspector panel (if present)
+        if let (Some(sep3), Some(inspector_area)) = (columns.sep3, columns.inspector) {
+            frame.render_widget(separator_widget(columns.gutter.height, &self.palette), sep3);
+            if let Some(insp) = &self.inspector {
+                let editing = insp
+                    .editing
+                    .as_ref()
+                    .map(|e| (e.buffer.as_str(), e.cursor_pos));
+                let all_lines = inspector_view::build_wrapped(
+                    &insp.rows,
+                    insp.selected_row,
+                    editing,
+                    inspector_area.width,
+                    &self.palette,
+                );
+                let visible_height = inspector_area.height.saturating_sub(1) as usize;
+                let visible_start = insp.scroll_offset.min(all_lines.len());
+                let visible_end = (visible_start + visible_height).min(all_lines.len());
+                let mut lines = vec![Line::styled(
+                    format!("Format: {}", insp.format_name),
+                    self.palette.inspector_header,
+                )];
+                lines.extend(
+                    all_lines[visible_start..visible_end]
+                        .iter()
+                        .map(|line| line.line.clone()),
+                );
+                frame.render_widget(Paragraph::new(lines), inspector_area);
+
+                if self.mode == Mode::InspectorEdit {
+                    if let Some((visible_row, cursor_col)) =
+                        all_lines.iter().enumerate().find_map(|(visual_idx, line)| {
+                            (visual_idx >= visible_start && line.cursor_col.is_some())
+                                .then(|| (visual_idx - visible_start, line.cursor_col.unwrap_or(0)))
+                        })
+                    {
+                        if visible_row < self.inspector_visible_rows() {
+                            frame.set_cursor_position((
+                                inspector_area.x + cursor_col,
+                                inspector_area.y + 1 + visible_row as u16,
+                            ));
+                        }
+                    }
+                }
+            } else {
+                frame.render_widget(Paragraph::new("No format detected"), inspector_area);
+            }
+        }
+
         if let Some(start) = widget_draw_start {
             stats.widget_draw = start.elapsed();
         }
@@ -171,6 +228,10 @@ impl App {
             height: area.height.saturating_sub(2),
         };
         frame.render_widget(widget, area);
-        frame.set_cursor_position((inner.x + 1 + self.command_buffer.len() as u16, inner.y));
+        let cursor_cols = self.command_buffer
+            [..self.command_cursor_pos.min(self.command_buffer.len())]
+            .chars()
+            .count() as u16;
+        frame.set_cursor_position((inner.x + 1 + cursor_cols, inner.y));
     }
 }
