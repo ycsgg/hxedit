@@ -32,9 +32,15 @@ pub enum Mode {
     Command,
     /// Inspector panel has focus. Arrow keys navigate fields, Enter edits.
     Inspector,
+    /// Inspector field is being edited inline.
+    InspectorEdit,
 }
 
 impl Mode {
+    pub fn is_inspector(self) -> bool {
+        matches!(self, Self::Inspector | Self::InspectorEdit)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Normal => "NORMAL",
@@ -43,6 +49,7 @@ impl Mode {
             Self::Visual => "VISUAL",
             Self::Command => "COMMAND",
             Self::Inspector => "INSPECT",
+            Self::InspectorEdit => "INSPEDIT",
         }
     }
 }

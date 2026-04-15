@@ -14,6 +14,6 @@ pub fn map_key(mode: Mode, key: KeyEvent) -> Option<Action> {
         Mode::EditHex { .. } | Mode::InsertHex { .. } => edit::map(key),
         Mode::Visual => visual::map(key),
         Mode::Command => command::map(key),
-        Mode::Inspector => inspector::map(key),
+        Mode::Inspector | Mode::InspectorEdit => inspector::map(key),
     }
 }

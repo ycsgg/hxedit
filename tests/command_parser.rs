@@ -102,3 +102,21 @@ fn rejects_invalid_commands() {
     assert!(parse_command("S 0xz1").is_err());
     assert!(parse_command("unknown").is_err());
 }
+
+#[test]
+fn parses_uppercase_hex_search_patterns() {
+    assert_eq!(
+        parse_command("S DE AD BE EF").unwrap(),
+        Command::SearchHex {
+            pattern: vec![0xde, 0xad, 0xbe, 0xef],
+            backward: false,
+        }
+    );
+    assert_eq!(
+        parse_command("S 7F 45 4C 46").unwrap(),
+        Command::SearchHex {
+            pattern: vec![0x7f, 0x45, 0x4c, 0x46],
+            backward: false,
+        }
+    );
+}

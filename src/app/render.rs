@@ -173,7 +173,7 @@ impl App {
                 );
                 frame.render_widget(Paragraph::new(lines), inspector_area);
 
-                if self.mode == Mode::Inspector {
+                if self.mode == Mode::InspectorEdit {
                     if let Some((visible_row, cursor_col)) =
                         all_lines.iter().enumerate().find_map(|(visual_idx, line)| {
                             (visual_idx >= visible_start && line.cursor_col.is_some())
@@ -228,6 +228,10 @@ impl App {
             height: area.height.saturating_sub(2),
         };
         frame.render_widget(widget, area);
-        frame.set_cursor_position((inner.x + 1 + self.command_buffer.len() as u16, inner.y));
+        let cursor_cols = self.command_buffer
+            [..self.command_cursor_pos.min(self.command_buffer.len())]
+            .chars()
+            .count() as u16;
+        frame.set_cursor_position((inner.x + 1 + cursor_cols, inner.y));
     }
 }

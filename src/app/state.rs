@@ -192,7 +192,8 @@ impl App {
             | Mode::Normal
             | Mode::Visual
             | Mode::Command
-            | Mode::Inspector => Ok(()),
+            | Mode::Inspector
+            | Mode::InspectorEdit => Ok(()),
         }
     }
 
@@ -206,7 +207,11 @@ impl App {
                 self.selection_anchor = Some(self.cursor);
                 self.mode = Mode::Visual;
             }
-            Mode::EditHex { .. } | Mode::InsertHex { .. } | Mode::Command | Mode::Inspector => {}
+            Mode::EditHex { .. }
+            | Mode::InsertHex { .. }
+            | Mode::Command
+            | Mode::Inspector
+            | Mode::InspectorEdit => {}
         }
         Ok(())
     }
@@ -234,7 +239,8 @@ impl App {
                 self.mode = Mode::Normal;
             }
             Mode::Command => {
-                self.mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
+                let return_mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
+                self.mode = self.normalize_mode(return_mode);
             }
             Mode::InsertHex { .. } => {
                 self.commit_pending_insert()?;
@@ -245,6 +251,12 @@ impl App {
                     inspector.editing = None;
                 }
                 self.mode = Mode::Normal;
+            }
+            Mode::InspectorEdit => {
+                if let Some(inspector) = self.inspector.as_mut() {
+                    inspector.editing = None;
+                }
+                self.mode = Mode::Inspector;
             }
             Mode::EditHex { .. } | Mode::Normal => {
                 self.mode = Mode::Normal;
@@ -305,6 +317,22 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn normalize_mode(&self, mode: Mode) -> Mode {
+        match mode {
+            Mode::Inspector | Mode::InspectorEdit if !self.show_inspector => Mode::Normal,
+            Mode::InspectorEdit
+                if self
+                    .inspector
+                    .as_ref()
+                    .and_then(|inspector| inspector.editing.as_ref())
+                    .is_none() =>
+            {
+                Mode::Inspector
+            }
+            other => other,
+        }
+    }
+
     pub(crate) fn selection_range(&self) -> Option<(u64, u64)> {
         let anchor = self.selection_anchor?;
         Some((anchor.min(self.cursor), anchor.max(self.cursor)))
@@ -315,10 +343,13 @@ impl App {
             self.show_inspector = true;
             self.refresh_inspector();
             self.mode = Mode::Inspector;
-        } else if !matches!(self.mode, Mode::Inspector) {
+        } else if !self.mode.is_inspector() {
             self.mode = Mode::Inspector;
             self.sync_inspector_to_cursor();
         } else {
+            if let Some(inspector) = self.inspector.as_mut() {
+                inspector.editing = None;
+            }
             self.mode = Mode::Normal;
             self.show_inspector = false;
             self.inspector = None;
@@ -402,7 +433,7 @@ impl App {
 
     /// Sync inspector selection to the current hex cursor when hex has focus.
     pub(crate) fn sync_inspector_to_cursor(&mut self) {
-        if matches!(self.mode, Mode::Inspector) {
+        if self.mode.is_inspector() {
             return;
         }
         let Some(inspector) = self.inspector.as_mut() else {
@@ -530,6 +561,7 @@ impl App {
         }
 
         self.refresh_inspector();
+        self.mode = Mode::Inspector;
         self.sync_cursor_to_inspector();
         self.status_message = format!("edited field at 0x{:x}", abs_offset);
         Ok(())

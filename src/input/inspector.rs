@@ -16,7 +16,7 @@ pub fn map(key: KeyEvent) -> Option<Action> {
         // Begin / submit edit
         KeyCode::Enter => Some(Action::InspectorEnter),
 
-        // Exit inspector mode back to normal
+        // Leave current inspector sub-mode (edit -> inspector, inspector -> normal)
         KeyCode::Esc => Some(Action::LeaveMode),
 
         // Toggle inspector panel / focus

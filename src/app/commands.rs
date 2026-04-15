@@ -9,12 +9,10 @@ impl App {
         let return_mode = self.command_return_mode.unwrap_or(Mode::Normal);
         let command = parse_command(&self.command_buffer)?;
         self.command_buffer.clear();
+        self.command_cursor_pos = 0;
         self.execute_command(command)?;
         if matches!(self.mode, Mode::Command) {
-            self.mode = match return_mode {
-                Mode::Inspector if !self.show_inspector => Mode::Normal,
-                other => other,
-            };
+            self.mode = self.normalize_mode(return_mode);
         }
         self.command_return_mode = None;
         Ok(())
@@ -64,7 +62,9 @@ impl App {
             } => self.paste_from_clipboard(raw, preview, limit, true),
             Command::Copy { format, display } => self.copy_selection(format, display),
             Command::Inspector => {
-                let from_inspector = self.command_return_mode == Some(Mode::Inspector);
+                let from_inspector = self
+                    .command_return_mode
+                    .is_some_and(|mode| mode.is_inspector());
                 if !self.show_inspector {
                     self.show_inspector = true;
                     self.refresh_inspector();

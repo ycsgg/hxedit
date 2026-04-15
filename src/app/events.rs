@@ -47,6 +47,7 @@ impl App {
                 self.command_return_mode = Some(return_mode);
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
+                self.command_cursor_pos = 0;
                 Ok(())
             }
             Action::LeaveMode => self.leave_mode(),
@@ -70,17 +71,52 @@ impl App {
             },
             Action::EditBackspace => self.edit_backspace(),
             Action::CommandChar(c) => {
-                self.command_buffer.push(c);
+                let pos = self.command_cursor_pos.min(self.command_buffer.len());
+                self.command_buffer.insert(pos, c);
+                self.command_cursor_pos = pos + c.len_utf8();
+                Ok(())
+            }
+            Action::CommandLeft => {
+                self.command_cursor_pos =
+                    prev_char_boundary(&self.command_buffer, self.command_cursor_pos);
+                Ok(())
+            }
+            Action::CommandRight => {
+                self.command_cursor_pos =
+                    next_char_boundary(&self.command_buffer, self.command_cursor_pos);
+                Ok(())
+            }
+            Action::CommandHome => {
+                self.command_cursor_pos = 0;
+                Ok(())
+            }
+            Action::CommandEnd => {
+                self.command_cursor_pos = self.command_buffer.len();
+                Ok(())
+            }
+            Action::CommandDelete => {
+                if self.command_cursor_pos < self.command_buffer.len() {
+                    let next = next_char_boundary(&self.command_buffer, self.command_cursor_pos);
+                    self.command_buffer
+                        .replace_range(self.command_cursor_pos..next, "");
+                }
                 Ok(())
             }
             Action::CommandBackspace => {
-                self.command_buffer.pop();
+                if self.command_cursor_pos > 0 {
+                    let prev = prev_char_boundary(&self.command_buffer, self.command_cursor_pos);
+                    self.command_buffer
+                        .replace_range(prev..self.command_cursor_pos, "");
+                    self.command_cursor_pos = prev;
+                }
                 Ok(())
             }
             Action::CommandSubmit => self.submit_command(),
             Action::CommandCancel => {
                 self.command_buffer.clear();
-                self.mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
+                self.command_cursor_pos = 0;
+                let return_mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
+                self.mode = self.normalize_mode(return_mode);
                 Ok(())
             }
             Action::ForceQuit => {
@@ -146,6 +182,7 @@ impl App {
                             buffer: display.clone(),
                             cursor_pos: display.len(),
                         });
+                        self.mode = Mode::InspectorEdit;
                     }
                 }
                 Ok(())
@@ -220,7 +257,16 @@ impl App {
             Ok(()) => {
                 self.ensure_cursor_visible();
                 self.sync_inspector_to_cursor();
-                if !matches!(action, Action::CommandChar(_) | Action::CommandBackspace) {
+                if !matches!(
+                    action,
+                    Action::CommandChar(_)
+                        | Action::CommandLeft
+                        | Action::CommandRight
+                        | Action::CommandHome
+                        | Action::CommandEnd
+                        | Action::CommandDelete
+                        | Action::CommandBackspace
+                ) {
                     self.clear_error_if_command_done();
                 }
                 Ok(())
@@ -272,7 +318,7 @@ impl App {
                 if columns.inspector.is_some_and(|area| {
                     crate::app::helpers::contains(area, mouse_event.column, mouse_event.row)
                 }) {
-                    if !matches!(self.mode, Mode::Inspector) {
+                    if !self.mode.is_inspector() {
                         self.leave_mode()?;
                     }
                     self.mode = Mode::Inspector;
@@ -309,7 +355,7 @@ impl App {
                         return Ok(());
                     }
 
-                    if matches!(self.mode, Mode::Inspector) {
+                    if self.mode.is_inspector() {
                         self.leave_mode()?;
                     }
                     if matches!(self.mode, Mode::InsertHex { .. }) {
@@ -328,13 +374,16 @@ impl App {
                         }
                         Mode::Command => {
                             self.command_buffer.clear();
-                            self.mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
+                            self.command_cursor_pos = 0;
+                            let return_mode =
+                                self.command_return_mode.take().unwrap_or(Mode::Normal);
+                            self.mode = self.normalize_mode(return_mode);
                         }
                         Mode::Visual => {
                             self.selection_anchor = None;
                             self.mode = Mode::Normal;
                         }
-                        Mode::Normal | Mode::Inspector => {}
+                        Mode::Normal | Mode::Inspector | Mode::InspectorEdit => {}
                     }
                     self.ensure_cursor_visible();
                     self.sync_inspector_to_cursor();
@@ -401,4 +450,146 @@ fn next_char_boundary(text: &str, cursor_pos: usize) -> usize {
         .nth(1)
         .map(|(idx, _)| start + idx)
         .unwrap_or(text.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::action::Action;
+    use crate::cli::Cli;
+    use crate::format::parse::{FieldValue, StructValue};
+    use crate::format::types::{FieldDef, FieldType};
+
+    fn app_with_len(len: usize) -> App {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("sample.bin");
+        fs::write(&file, vec![0_u8; len]).unwrap();
+        let cli = Cli {
+            file,
+            bytes_per_line: 16,
+            page_size: 4096,
+            cache_pages: 8,
+            profile: false,
+            readonly: false,
+            no_color: true,
+            offset: None,
+            inspector: false,
+        };
+        let mut app = App::from_cli(cli).unwrap();
+        app.view_rows = 4;
+        app
+    }
+
+    fn app_with_inspector_field() -> App {
+        let mut app = app_with_len(4);
+        let field = FieldDef {
+            name: "entry".to_owned(),
+            offset: 0,
+            field_type: FieldType::U8,
+            description: String::new(),
+            editable: true,
+        };
+        let structs = vec![StructValue {
+            name: "Header".to_owned(),
+            base_offset: 0,
+            fields: vec![FieldValue {
+                def: field,
+                abs_offset: 0,
+                raw_bytes: vec![0],
+                display: "0x00".to_owned(),
+                size: 1,
+            }],
+            children: Vec::new(),
+        }];
+        let rows = crate::format::parse::flatten(&structs);
+        app.show_inspector = true;
+        app.inspector = Some(crate::app::InspectorState {
+            format_name: "TEST".to_owned(),
+            structs,
+            rows,
+            scroll_offset: 0,
+            selected_row: 1,
+            editing: None,
+        });
+        app.mode = Mode::Inspector;
+        app
+    }
+
+    #[test]
+    fn command_cursor_can_move_and_insert_in_middle() {
+        let mut app = app_with_len(4);
+        app.handle_action(Action::EnterCommand).unwrap();
+        app.handle_action(Action::CommandChar('a')).unwrap();
+        app.handle_action(Action::CommandChar('b')).unwrap();
+        app.handle_action(Action::CommandChar('c')).unwrap();
+        app.handle_action(Action::CommandLeft).unwrap();
+        app.handle_action(Action::CommandLeft).unwrap();
+        app.handle_action(Action::CommandChar('X')).unwrap();
+
+        assert_eq!(app.command_buffer, "aXbc");
+        assert_eq!(app.command_cursor_pos, 2);
+    }
+
+    #[test]
+    fn command_backspace_respects_cursor_position() {
+        let mut app = app_with_len(4);
+        app.handle_action(Action::EnterCommand).unwrap();
+        app.handle_action(Action::CommandChar('a')).unwrap();
+        app.handle_action(Action::CommandChar('b')).unwrap();
+        app.handle_action(Action::CommandChar('c')).unwrap();
+        app.handle_action(Action::CommandLeft).unwrap();
+        app.handle_action(Action::CommandBackspace).unwrap();
+
+        assert_eq!(app.command_buffer, "ac");
+        assert_eq!(app.command_cursor_pos, 1);
+    }
+
+    #[test]
+    fn command_delete_home_and_end_respect_cursor_position() {
+        let mut app = app_with_len(4);
+        app.handle_action(Action::EnterCommand).unwrap();
+        app.handle_action(Action::CommandChar('a')).unwrap();
+        app.handle_action(Action::CommandChar('b')).unwrap();
+        app.handle_action(Action::CommandChar('c')).unwrap();
+        app.handle_action(Action::CommandChar('d')).unwrap();
+
+        app.handle_action(Action::CommandHome).unwrap();
+        assert_eq!(app.command_cursor_pos, 0);
+
+        app.handle_action(Action::CommandRight).unwrap();
+        app.handle_action(Action::CommandRight).unwrap();
+        app.handle_action(Action::CommandDelete).unwrap();
+
+        assert_eq!(app.command_buffer, "abd");
+        assert_eq!(app.command_cursor_pos, 2);
+
+        app.handle_action(Action::CommandEnd).unwrap();
+        assert_eq!(app.command_cursor_pos, app.command_buffer.len());
+    }
+
+    #[test]
+    fn inspector_escape_returns_to_inspector_mode() {
+        let mut app = app_with_inspector_field();
+
+        app.handle_action(Action::InspectorEnter).unwrap();
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert!(app
+            .inspector
+            .as_ref()
+            .and_then(|inspector| inspector.editing.as_ref())
+            .is_some());
+
+        app.handle_action(Action::LeaveMode).unwrap();
+
+        assert_eq!(app.mode, Mode::Inspector);
+        assert!(app
+            .inspector
+            .as_ref()
+            .and_then(|inspector| inspector.editing.as_ref())
+            .is_none());
+    }
 }
