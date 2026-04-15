@@ -31,6 +31,10 @@ pub struct Cli {
 
     #[arg(long, value_name = "OFFSET")]
     pub offset: Option<String>,
+
+    /// Open with format inspector panel
+    #[arg(long)]
+    pub inspector: bool,
 }
 
 impl Cli {
@@ -46,6 +50,7 @@ impl Cli {
                 Some(value) => parse_offset(value)?,
                 None => 0,
             },
+            inspector: self.inspector,
         })
     }
 }

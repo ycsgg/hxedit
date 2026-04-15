@@ -7,6 +7,7 @@ pub struct Config {
     pub readonly: bool,
     pub color: bool,
     pub initial_offset: u64,
+    pub inspector: bool,
 }
 
 impl Default for Config {
@@ -19,6 +20,7 @@ impl Default for Config {
             readonly: false,
             color: true,
             initial_offset: 0,
+            inspector: false,
         }
     }
 }

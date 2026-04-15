@@ -3,6 +3,7 @@ pub mod byte_style;
 pub mod command_line;
 pub mod gutter;
 pub mod hex_grid;
+pub mod inspector;
 pub mod layout;
 pub mod palette;
 pub mod status;

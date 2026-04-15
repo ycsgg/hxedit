@@ -30,6 +30,10 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         "u" | "undo" => Ok(Command::Undo {
             steps: parse_undo_steps(rest)?,
         }),
+        "insp" | "inspector" => Ok(Command::Inspector),
+        "format" => Ok(Command::Format {
+            name: rest.filter(|value| !value.is_empty()).map(str::to_owned),
+        }),
         "g" | "goto" => {
             let arg = rest.ok_or(HxError::MissingArgument("offset"))?;
             Ok(Command::Goto {
@@ -141,5 +145,30 @@ fn parse_paste(name: &str, input: Option<&str>, insert: bool) -> HxResult<Comman
             preview,
             limit,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inspector_aliases_parse() {
+        assert_eq!(parse_command("insp").unwrap(), Command::Inspector);
+        assert_eq!(parse_command("inspector").unwrap(), Command::Inspector);
+    }
+
+    #[test]
+    fn format_command_accepts_optional_name() {
+        assert_eq!(
+            parse_command("format").unwrap(),
+            Command::Format { name: None }
+        );
+        assert_eq!(
+            parse_command("format elf").unwrap(),
+            Command::Format {
+                name: Some("elf".to_owned())
+            }
+        );
     }
 }

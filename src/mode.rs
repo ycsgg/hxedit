@@ -22,10 +22,16 @@ pub struct PendingInsert {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Normal,
-    EditHex { phase: NibblePhase },
-    InsertHex { pending: Option<PendingInsert> },
+    EditHex {
+        phase: NibblePhase,
+    },
+    InsertHex {
+        pending: Option<PendingInsert>,
+    },
     Visual,
     Command,
+    /// Inspector panel has focus. Arrow keys navigate fields, Enter edits.
+    Inspector,
 }
 
 impl Mode {
@@ -36,6 +42,7 @@ impl Mode {
             Self::InsertHex { .. } => "INSERT",
             Self::Visual => "VISUAL",
             Self::Command => "COMMAND",
+            Self::Inspector => "INSPECT",
         }
     }
 }

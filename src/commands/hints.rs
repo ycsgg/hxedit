@@ -27,6 +27,14 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "wq".to_owned(),
             details: "save current file and quit".to_owned(),
         },
+        "insp" | "inspector" => CommandHint {
+            syntax: "insp | inspector".to_owned(),
+            details: "toggle format inspector panel".to_owned(),
+        },
+        "format" => CommandHint {
+            syntax: "format [elf|png|zip]".to_owned(),
+            details: "auto-detect format when omitted, or force a built-in inspector".to_owned(),
+        },
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
         | "paste?!" => paste_hint(name, rest, false),
         "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?" | "pi!?"
@@ -64,7 +72,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             if suggestions.is_empty() {
                 CommandHint {
                     syntax: "unknown command".to_owned(),
-                    details: "available: q w wq g s s! S S! u c p pi".to_owned(),
+                    details: "available: q w wq g s s! S S! u c p pi insp format".to_owned(),
                 }
             } else {
                 CommandHint {
@@ -189,6 +197,9 @@ fn known_commands() -> Vec<&'static str> {
         "S!",
         "u",
         "undo",
+        "insp",
+        "inspector",
+        "format",
         "c",
         "copy",
         "p",
@@ -253,5 +264,11 @@ mod tests {
     fn reverse_search_hint_mentions_upward() {
         let hint = hint_for("s!");
         assert!(hint.details.contains("upward"));
+    }
+
+    #[test]
+    fn inspector_hint_mentions_panel() {
+        let hint = hint_for("insp");
+        assert!(hint.details.contains("inspector"));
     }
 }

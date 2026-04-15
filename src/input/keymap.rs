@@ -1,7 +1,7 @@
 use crossterm::event::{KeyEvent, KeyEventKind};
 
 use crate::action::Action;
-use crate::input::{command, edit, normal, visual};
+use crate::input::{command, edit, inspector, normal, visual};
 use crate::mode::Mode;
 
 pub fn map_key(mode: Mode, key: KeyEvent) -> Option<Action> {
@@ -14,5 +14,6 @@ pub fn map_key(mode: Mode, key: KeyEvent) -> Option<Action> {
         Mode::EditHex { .. } | Mode::InsertHex { .. } => edit::map(key),
         Mode::Visual => visual::map(key),
         Mode::Command => command::map(key),
+        Mode::Inspector => inspector::map(key),
     }
 }

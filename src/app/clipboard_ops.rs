@@ -118,6 +118,7 @@ impl App {
         }
         self.cursor =
             self.clamp_cursor_for_mode(cursor_before + written.saturating_sub(1) as u64, self.mode);
+        self.refresh_inspector();
         Ok(written)
     }
 
@@ -144,6 +145,7 @@ impl App {
             cursor_before + bytes.len().saturating_sub(1) as u64,
             self.mode,
         );
+        self.refresh_inspector();
         Ok(bytes.len())
     }
 }

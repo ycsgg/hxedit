@@ -21,6 +21,7 @@ fn app_with_len(len: usize) -> App {
         readonly: false,
         no_color: true,
         offset: None,
+        inspector: false,
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 4;
@@ -40,6 +41,7 @@ fn app_with_bytes(bytes: &[u8]) -> App {
         readonly: false,
         no_color: true,
         offset: None,
+        inspector: false,
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 4;
