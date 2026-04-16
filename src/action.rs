@@ -56,4 +56,6 @@ pub enum Action {
     InspectorEnd,
     /// Inspector editing: delete character at cursor.
     InspectorDelete,
+    /// Inspector mode: toggle collapse/expand of current struct header.
+    InspectorToggleCollapse,
 }

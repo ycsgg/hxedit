@@ -18,7 +18,12 @@ pub fn map(key: KeyEvent) -> Option<Action> {
         KeyCode::End => Some(Action::InspectorEnd),
         KeyCode::Delete => Some(Action::InspectorDelete),
 
-        // Begin / submit edit
+        // Space: toggle collapse/expand on the selected header. When a field is
+        // being edited the space still reaches the buffer via Char(' ').
+        KeyCode::Char(' ') => Some(Action::InspectorToggleCollapse),
+
+        // Begin / submit edit, or toggle collapse when a header is selected
+        // (the branching happens in the event handler so this map stays simple).
         KeyCode::Enter => Some(Action::InspectorEnter),
 
         // Leave current inspector sub-mode (edit -> inspector, inspector -> normal)

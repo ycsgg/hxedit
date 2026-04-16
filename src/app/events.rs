@@ -167,6 +167,20 @@ impl App {
                 self.handle_inspector_enter()?;
                 Ok(true)
             }
+            Action::InspectorToggleCollapse => {
+                // While a field is being edited the space key should reach the
+                // edit buffer, not toggle collapse. Redirect to Char(' ').
+                if self
+                    .inspector
+                    .as_ref()
+                    .is_some_and(|inspector| inspector.editing.is_some())
+                {
+                    self.insert_inspector_char(' ');
+                } else {
+                    self.toggle_inspector_collapse();
+                }
+                Ok(true)
+            }
             Action::InspectorChar(c) => {
                 self.insert_inspector_char(c);
                 Ok(true)
@@ -287,7 +301,11 @@ impl App {
                 }
             }
 
-            if matches!(inspector.rows.get(target), Some(InspectorRow::Field { .. })) {
+            if inspector
+                .rows
+                .get(target)
+                .is_some_and(crate::app::inspector_state::is_selectable)
+            {
                 inspector.selected_row = target;
                 break;
             }
@@ -304,37 +322,41 @@ impl App {
             return self.submit_inspector_edit();
         }
 
-        if let Some(row) = inspector.rows.get(inspector.selected_row) {
-            match row {
-                InspectorRow::Field {
-                    editable: true,
-                    display,
-                    ..
-                } => {
-                    inspector.editing = Some(crate::app::InspectorEdit {
-                        row_index: inspector.selected_row,
-                        buffer: display.clone(),
-                        cursor_pos: display.len(),
-                    });
-                    self.mode = Mode::InspectorEdit;
-                    if let Some(warning) = self.inspector_edit_warning() {
-                        self.set_warning_status(warning);
-                    }
+        let Some(row) = inspector.rows.get(inspector.selected_row).cloned() else {
+            return Ok(());
+        };
+
+        match row {
+            InspectorRow::Field {
+                editable: true,
+                display,
+                ..
+            } => {
+                inspector.editing = Some(crate::app::InspectorEdit {
+                    row_index: inspector.selected_row,
+                    buffer: display.clone(),
+                    cursor_pos: display.len(),
+                });
+                self.mode = Mode::InspectorEdit;
+                if let Some(warning) = self.inspector_edit_warning() {
+                    self.set_warning_status(warning);
                 }
-                InspectorRow::Field {
-                    editable: false,
-                    name,
-                    ..
-                } => {
-                    let format_name = inspector.format_name.clone();
-                    let field_name = name.clone();
-                    let _ = inspector;
-                    self.set_info_status(
-                        self.inspector_read_only_message(&format_name, &field_name),
-                    );
-                }
-                InspectorRow::Header { .. } => {}
             }
+            InspectorRow::Field {
+                editable: false,
+                name,
+                ..
+            } => {
+                let format_name = inspector.format_name.clone();
+                self.set_info_status(self.inspector_read_only_message(&format_name, &name));
+            }
+            InspectorRow::Header {
+                has_children: true, ..
+            } => {
+                // Header Enter = toggle — consistent with ImHex / file tree UIs.
+                self.toggle_inspector_collapse();
+            }
+            InspectorRow::Header { .. } => {}
         }
         Ok(())
     }
@@ -458,7 +480,8 @@ mod tests {
             }],
             children: Vec::new(),
         }];
-        let rows = crate::format::parse::flatten(&structs);
+        let collapsed_nodes = std::collections::BTreeSet::new();
+        let rows = crate::format::parse::flatten(&structs, &collapsed_nodes);
         app.show_inspector = true;
         app.inspector = Some(crate::app::InspectorState {
             format_name: format_name.to_owned(),
@@ -467,6 +490,7 @@ mod tests {
             scroll_offset: 0,
             selected_row: 1,
             editing: None,
+            collapsed_nodes,
         });
         app.mode = Mode::Inspector;
         app
@@ -732,5 +756,162 @@ mod tests {
         assert_eq!(app.command_buffer, "goto 0x1");
         app.handle_action(Action::CommandHistoryNext);
         assert_eq!(app.command_buffer, "und");
+    }
+
+    fn app_with_nested_inspector() -> App {
+        let mut app = app_with_len(8);
+        let parent_field = FieldDef {
+            name: "parent_byte".to_owned(),
+            offset: 0,
+            field_type: FieldType::U8,
+            description: String::new(),
+            editable: true,
+        };
+        let child_field = FieldDef {
+            name: "child_byte".to_owned(),
+            offset: 0,
+            field_type: FieldType::U8,
+            description: String::new(),
+            editable: true,
+        };
+        let structs = vec![StructValue {
+            name: "Parent".to_owned(),
+            base_offset: 0,
+            fields: vec![FieldValue {
+                def: parent_field,
+                abs_offset: 0,
+                raw_bytes: vec![0],
+                display: "0x00".to_owned(),
+                size: 1,
+            }],
+            children: vec![StructValue {
+                name: "Child".to_owned(),
+                base_offset: 4,
+                fields: vec![FieldValue {
+                    def: child_field,
+                    abs_offset: 4,
+                    raw_bytes: vec![0],
+                    display: "0x00".to_owned(),
+                    size: 1,
+                }],
+                children: Vec::new(),
+            }],
+        }];
+        let collapsed_nodes = std::collections::BTreeSet::new();
+        let rows = crate::format::parse::flatten(&structs, &collapsed_nodes);
+        app.show_inspector = true;
+        app.inspector = Some(crate::app::InspectorState {
+            format_name: "TEST".to_owned(),
+            structs,
+            rows,
+            scroll_offset: 0,
+            selected_row: 0,
+            editing: None,
+            collapsed_nodes,
+        });
+        app.mode = Mode::Inspector;
+        app
+    }
+
+    #[test]
+    fn toggle_collapse_hides_child_struct_and_its_fields() {
+        let mut app = app_with_nested_inspector();
+        // Layout: [0]=Parent header, [1]=parent_byte, [2]=Child header, [3]=child_byte
+        let inspector = app.inspector.as_ref().unwrap();
+        assert_eq!(inspector.rows.len(), 4);
+        assert_eq!(inspector.selected_row, 0); // Parent header
+
+        // Collapse Parent (node_id=0) — fields AND child go away.
+        app.handle_action(Action::InspectorToggleCollapse);
+
+        let inspector = app.inspector.as_ref().unwrap();
+        assert_eq!(inspector.rows.len(), 1);
+        assert!(matches!(
+            inspector.rows[0],
+            InspectorRow::Header {
+                collapsed: true,
+                ..
+            }
+        ));
+        assert!(inspector.collapsed_nodes.contains(&0));
+    }
+
+    #[test]
+    fn toggle_collapse_twice_restores_original_rows() {
+        let mut app = app_with_nested_inspector();
+        let before = app.inspector.as_ref().unwrap().rows.len();
+
+        app.handle_action(Action::InspectorToggleCollapse);
+        app.handle_action(Action::InspectorToggleCollapse);
+
+        let after = app.inspector.as_ref().unwrap().rows.len();
+        assert_eq!(before, after);
+        assert!(app.inspector.as_ref().unwrap().collapsed_nodes.is_empty());
+    }
+
+    #[test]
+    fn header_enter_toggles_collapse_when_not_editing() {
+        let mut app = app_with_nested_inspector();
+        // selected_row starts at 0 (Parent header).
+        app.handle_action(Action::InspectorEnter);
+
+        let inspector = app.inspector.as_ref().unwrap();
+        assert!(inspector.collapsed_nodes.contains(&0));
+        assert_eq!(app.mode, Mode::Inspector);
+    }
+
+    #[test]
+    fn space_during_edit_inserts_into_buffer_instead_of_toggling() {
+        let mut app = app_with_inspector_field();
+        app.handle_action(Action::InspectorEnter);
+        assert_eq!(app.mode, Mode::InspectorEdit);
+
+        let before_buf = app
+            .inspector
+            .as_ref()
+            .and_then(|i| i.editing.as_ref())
+            .map(|e| e.buffer.clone())
+            .unwrap();
+
+        app.handle_action(Action::InspectorToggleCollapse);
+
+        let after = app
+            .inspector
+            .as_ref()
+            .and_then(|i| i.editing.as_ref())
+            .map(|e| e.buffer.clone())
+            .unwrap();
+        assert_eq!(after.len(), before_buf.len() + 1);
+        assert!(after.ends_with(' '));
+    }
+
+    #[test]
+    fn navigation_stops_on_collapsible_header() {
+        let mut app = app_with_nested_inspector();
+        // Start on Parent header (row 0). Down should land on parent_byte (1),
+        // then Child header (2), then child_byte (3).
+        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 0);
+
+        app.handle_action(Action::InspectorDown);
+        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 1);
+
+        app.handle_action(Action::InspectorDown);
+        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 2);
+        assert!(matches!(
+            app.inspector.as_ref().unwrap().rows[2],
+            InspectorRow::Header { .. }
+        ));
+    }
+
+    #[test]
+    fn toggle_on_non_header_row_is_noop() {
+        let mut app = app_with_nested_inspector();
+        // Move selection to the field row (row 1).
+        app.handle_action(Action::InspectorDown);
+        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 1);
+
+        app.handle_action(Action::InspectorToggleCollapse);
+
+        assert!(app.inspector.as_ref().unwrap().collapsed_nodes.is_empty());
     }
 }

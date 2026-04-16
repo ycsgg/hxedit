@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -93,6 +94,8 @@ pub(crate) struct InspectorState {
     pub selected_row: usize,
     /// If editing a field, the edit state.
     pub editing: Option<InspectorEdit>,
+    /// Node ids whose children are hidden. Indexed by pre-order struct walk.
+    pub collapsed_nodes: BTreeSet<usize>,
 }
 
 /// Edit state for a field in the inspector panel.

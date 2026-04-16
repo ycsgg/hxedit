@@ -70,13 +70,34 @@ pub fn build_wrapped(
 
     for (row_index, row) in state_rows.iter().enumerate() {
         match row {
-            InspectorRow::Header { name, depth } => {
+            InspectorRow::Header {
+                name,
+                depth,
+                collapsed,
+                has_children,
+                ..
+            } => {
                 let indent = "  ".repeat(*depth);
-                let title = format!("{}── {} ──", indent, name);
+                let fold_indicator = if *has_children {
+                    if *collapsed {
+                        "▶ "
+                    } else {
+                        "▼ "
+                    }
+                } else {
+                    "  "
+                };
+                let title = format!("{}{}{}", indent, fold_indicator, name);
+                let is_selected = row_index == selected_row;
+                let header_style = if is_selected && *has_children {
+                    palette.inspector_active
+                } else {
+                    palette.inspector_header
+                };
                 for chunk in wrap_text(&title, width) {
                     out.push(RenderedInspectorLine {
                         row_index,
-                        line: Line::styled(chunk, palette.inspector_header),
+                        line: Line::styled(chunk, header_style),
                         cursor_col: None,
                     });
                 }
@@ -316,5 +337,92 @@ mod tests {
             &Palette::new(ColorLevel::Basic),
         );
         assert!(lines.iter().any(|line| line.cursor_col.is_some()));
+    }
+
+    #[test]
+    fn collapsed_header_renders_right_arrow_indicator() {
+        let lines = build_wrapped(
+            &[InspectorRow::Header {
+                name: "Section".into(),
+                depth: 0,
+                node_id: 0,
+                collapsed: true,
+                has_children: true,
+            }],
+            0,
+            None,
+            40,
+            &Palette::new(ColorLevel::Basic),
+        );
+        let text = lines
+            .iter()
+            .map(|line| {
+                line.line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.clone())
+                    .collect::<String>()
+            })
+            .collect::<String>();
+        assert!(text.contains("▶"), "expected `▶` in {:?}", text);
+        assert!(text.contains("Section"));
+    }
+
+    #[test]
+    fn expanded_header_renders_down_arrow_indicator() {
+        let lines = build_wrapped(
+            &[InspectorRow::Header {
+                name: "Section".into(),
+                depth: 0,
+                node_id: 0,
+                collapsed: false,
+                has_children: true,
+            }],
+            0,
+            None,
+            40,
+            &Palette::new(ColorLevel::Basic),
+        );
+        let text = lines
+            .iter()
+            .map(|line| {
+                line.line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.clone())
+                    .collect::<String>()
+            })
+            .collect::<String>();
+        assert!(text.contains("▼"), "expected `▼` in {:?}", text);
+    }
+
+    #[test]
+    fn header_without_children_renders_no_arrow() {
+        let lines = build_wrapped(
+            &[InspectorRow::Header {
+                name: "Empty".into(),
+                depth: 0,
+                node_id: 0,
+                collapsed: false,
+                has_children: false,
+            }],
+            0,
+            None,
+            40,
+            &Palette::new(ColorLevel::Basic),
+        );
+        let text = lines
+            .iter()
+            .map(|line| {
+                line.line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.clone())
+                    .collect::<String>()
+            })
+            .collect::<String>();
+        assert!(!text.contains("▶"));
+        assert!(!text.contains("▼"));
+        assert!(text.contains("Empty"));
     }
 }

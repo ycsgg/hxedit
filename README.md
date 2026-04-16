@@ -78,8 +78,9 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 ### Inspector
 
 - `t` / `Tab` — toggle inspector panel
-- `j` `k` / `Up` `Down` — move between fields
-- `Enter` — start or submit field edit
+- `j` `k` / `Up` `Down` — move between fields and headers
+- `Space` / `Enter` on a header — collapse or expand the section (`▶` collapsed, `▼` expanded)
+- `Enter` on a field — start or submit field edit
 - `Esc` — leave edit or inspector
 
 ## Commands
@@ -165,6 +166,7 @@ Hashes the visual selection if active, otherwise the entire file.
 
 - Supports ELF, PNG, and ZIP formats
 - Works best on a wide terminal; shows a warning if the terminal is too narrow
+- Nested sections (e.g. ELF Program Headers) are collapsed by default; use `Space` / `Enter` on a header to expand
 - Editable fields can be modified, but PNG/ZIP edits show warnings since structure consistency is not automatically repaired
 - Read-only fields report that they are view-only
 

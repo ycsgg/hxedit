@@ -1,6 +1,7 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 use crate::app::App;
+use crate::format::parse::InspectorRow;
 use crate::mode::{Mode, NibblePhase};
 use crate::util::geometry::rect_contains;
 
@@ -71,7 +72,27 @@ impl App {
                                 .map(|line| line.row_index)
                             {
                                 self.set_inspector_selected_row(row_index);
-                                self.sync_cursor_to_inspector();
+                                // Clicking a collapsible header toggles it — the
+                                // keyboard path is Enter/Space; mouse users get
+                                // the same affordance through the indicator click.
+                                let clicked_collapsible_header = self
+                                    .inspector
+                                    .as_ref()
+                                    .and_then(|inspector| inspector.rows.get(row_index))
+                                    .is_some_and(|row| {
+                                        matches!(
+                                            row,
+                                            InspectorRow::Header {
+                                                has_children: true,
+                                                ..
+                                            }
+                                        )
+                                    });
+                                if clicked_collapsible_header {
+                                    self.toggle_inspector_collapse();
+                                } else {
+                                    self.sync_cursor_to_inspector();
+                                }
                             }
                         }
                         return;

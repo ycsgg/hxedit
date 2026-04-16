@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::core::document::{ByteSlot, Document};
 use crate::error::HxResult;
 use crate::format::types::*;
@@ -37,8 +39,18 @@ pub struct StructValue {
 /// Flattened from the StructValue tree for rendering.
 #[derive(Debug, Clone)]
 pub enum InspectorRow {
-    /// Structure header line, e.g. "── ELF Header ────".
-    Header { name: String, depth: usize },
+    /// Structure header line, e.g. "▼ ELF Header".
+    Header {
+        name: String,
+        depth: usize,
+        /// Stable-within-a-flatten id assigned by pre-order struct walk.
+        /// Used to track collapse state across rebuilds of the row list.
+        node_id: usize,
+        /// Whether the struct's children are currently hidden.
+        collapsed: bool,
+        /// Whether this struct has any fields or nested structs to collapse.
+        has_children: bool,
+    },
     /// Field line.
     Field {
         /// Global index in the StructValue tree, used for locating during edits.
@@ -58,34 +70,124 @@ pub enum InspectorRow {
 }
 
 /// Flatten a StructValue tree into a list of renderable rows.
-pub fn flatten(structs: &[StructValue]) -> Vec<InspectorRow> {
-    fn walk(sv: &StructValue, depth: usize, rows: &mut Vec<InspectorRow>, idx: &mut usize) {
-        rows.push(InspectorRow::Header {
-            name: sv.name.clone(),
-            depth,
-        });
-        for fv in &sv.fields {
-            rows.push(InspectorRow::Field {
-                field_index: *idx,
-                name: fv.def.name.clone(),
-                display: fv.display.clone(),
-                abs_offset: fv.abs_offset,
-                size: fv.size,
-                depth: depth + 1,
-                editable: fv.def.editable,
-            });
-            *idx += 1;
-        }
-        for child in &sv.children {
-            walk(child, depth + 1, rows, idx);
-        }
-    }
+///
+/// `collapsed_nodes` lists the `node_id`s whose descendants should be hidden.
+/// `node_id` is assigned by pre-order struct walk, so it's stable as long as
+/// the struct tree shape does not change across rebuilds.
+pub fn flatten(structs: &[StructValue], collapsed_nodes: &BTreeSet<usize>) -> Vec<InspectorRow> {
     let mut rows = Vec::new();
-    let mut idx = 0;
+    let mut field_idx: usize = 0;
+    let mut node_counter: usize = 0;
     for sv in structs {
-        walk(sv, 0, &mut rows, &mut idx);
+        walk(
+            sv,
+            0,
+            &mut rows,
+            &mut field_idx,
+            &mut node_counter,
+            collapsed_nodes,
+        );
     }
     rows
+}
+
+/// Compute the initial collapsed-nodes set for a freshly parsed tree.
+///
+/// Every struct at `depth >= default_collapsed_depth` is marked collapsed.
+/// Structs without any fields or children are skipped — collapsing them would
+/// be a no-op and would only confuse later navigation.
+pub fn initial_collapsed_nodes(
+    structs: &[StructValue],
+    default_collapsed_depth: usize,
+) -> BTreeSet<usize> {
+    fn visit(
+        sv: &StructValue,
+        depth: usize,
+        counter: &mut usize,
+        default_collapsed_depth: usize,
+        out: &mut BTreeSet<usize>,
+    ) {
+        let node_id = *counter;
+        *counter += 1;
+        let has_children = !sv.fields.is_empty() || !sv.children.is_empty();
+        if has_children && depth >= default_collapsed_depth {
+            out.insert(node_id);
+        }
+        for child in &sv.children {
+            visit(child, depth + 1, counter, default_collapsed_depth, out);
+        }
+    }
+    let mut out = BTreeSet::new();
+    let mut counter = 0;
+    for sv in structs {
+        visit(sv, 0, &mut counter, default_collapsed_depth, &mut out);
+    }
+    out
+}
+
+fn walk(
+    sv: &StructValue,
+    depth: usize,
+    rows: &mut Vec<InspectorRow>,
+    field_idx: &mut usize,
+    node_counter: &mut usize,
+    collapsed_nodes: &BTreeSet<usize>,
+) {
+    let node_id = *node_counter;
+    *node_counter += 1;
+
+    let has_children = !sv.fields.is_empty() || !sv.children.is_empty();
+    let collapsed = has_children && collapsed_nodes.contains(&node_id);
+
+    rows.push(InspectorRow::Header {
+        name: sv.name.clone(),
+        depth,
+        node_id,
+        collapsed,
+        has_children,
+    });
+
+    if collapsed {
+        // Still bump field_idx and node_counter so that field_index stays
+        // consistent with find_field_def's pre-order walk and node_id stays
+        // consistent across rebuilds.
+        count_skipped(sv, field_idx, node_counter);
+        return;
+    }
+
+    for fv in &sv.fields {
+        rows.push(InspectorRow::Field {
+            field_index: *field_idx,
+            name: fv.def.name.clone(),
+            display: fv.display.clone(),
+            abs_offset: fv.abs_offset,
+            size: fv.size,
+            depth: depth + 1,
+            editable: fv.def.editable,
+        });
+        *field_idx += 1;
+    }
+
+    for child in &sv.children {
+        walk(
+            child,
+            depth + 1,
+            rows,
+            field_idx,
+            node_counter,
+            collapsed_nodes,
+        );
+    }
+}
+
+/// Advance `field_idx` and `node_counter` for a collapsed subtree so that
+/// both counters remain consistent with an uncollapsed walk of the same tree.
+fn count_skipped(sv: &StructValue, field_idx: &mut usize, node_counter: &mut usize) {
+    *field_idx += sv.fields.len();
+    for child in &sv.children {
+        *node_counter += 1;
+        count_skipped(child, field_idx, node_counter);
+    }
 }
 
 /// Read bytes from the document at the given offset and length.
@@ -334,5 +436,176 @@ pub fn format_value(field_type: &FieldType, raw: &[u8]) -> String {
                 format!("{} [{}]", base, active.join(" | "))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn field(name: &str, offset: u64) -> FieldValue {
+        FieldValue {
+            def: FieldDef {
+                name: name.to_owned(),
+                offset,
+                field_type: FieldType::U8,
+                description: String::new(),
+                editable: true,
+            },
+            abs_offset: offset,
+            raw_bytes: vec![0],
+            display: "0x00".to_owned(),
+            size: 1,
+        }
+    }
+
+    fn sample_tree() -> Vec<StructValue> {
+        // Header
+        //   ├─ f0
+        //   ├─ f1
+        //   └─ Child1
+        //        ├─ c0
+        //        └─ c1
+        // Second
+        //   └─ s0
+        vec![
+            StructValue {
+                name: "Header".into(),
+                base_offset: 0,
+                fields: vec![field("f0", 0), field("f1", 1)],
+                children: vec![StructValue {
+                    name: "Child1".into(),
+                    base_offset: 2,
+                    fields: vec![field("c0", 2), field("c1", 3)],
+                    children: vec![],
+                }],
+            },
+            StructValue {
+                name: "Second".into(),
+                base_offset: 4,
+                fields: vec![field("s0", 4)],
+                children: vec![],
+            },
+        ]
+    }
+
+    #[test]
+    fn flatten_with_empty_collapsed_set_expands_all() {
+        let tree = sample_tree();
+        let rows = flatten(&tree, &BTreeSet::new());
+        // 3 headers + 5 fields = 8 rows
+        assert_eq!(rows.len(), 8);
+        assert!(matches!(
+            rows[0],
+            InspectorRow::Header { ref name, collapsed: false, has_children: true, .. } if name == "Header"
+        ));
+        assert!(matches!(
+            rows[3],
+            InspectorRow::Header { ref name, collapsed: false, has_children: true, .. } if name == "Child1"
+        ));
+        assert!(matches!(
+            rows[6],
+            InspectorRow::Header { ref name, collapsed: false, has_children: true, .. } if name == "Second"
+        ));
+    }
+
+    #[test]
+    fn flatten_with_collapsed_root_hides_children() {
+        let tree = sample_tree();
+        let mut set = BTreeSet::new();
+        set.insert(0); // Header
+        let rows = flatten(&tree, &set);
+        // Header (collapsed, no visible fields) + Second + s0 = 3 rows
+        assert_eq!(rows.len(), 3);
+        assert!(matches!(
+            rows[0],
+            InspectorRow::Header { ref name, collapsed: true, has_children: true, .. } if name == "Header"
+        ));
+        assert!(matches!(
+            rows[1],
+            InspectorRow::Header { ref name, collapsed: false, .. } if name == "Second"
+        ));
+    }
+
+    #[test]
+    fn flatten_preserves_field_index_across_collapsed_nodes() {
+        let tree = sample_tree();
+        // Collapse only the first top-level; Second's field should still be index 4.
+        let mut set = BTreeSet::new();
+        set.insert(0);
+        let rows = flatten(&tree, &set);
+        let InspectorRow::Field { field_index, .. } = rows
+            .iter()
+            .find(|r| matches!(r, InspectorRow::Field { name, .. } if name == "s0"))
+            .cloned()
+            .unwrap()
+        else {
+            panic!("expected field");
+        };
+        assert_eq!(field_index, 4);
+    }
+
+    #[test]
+    fn flatten_collapses_nested_child_independently() {
+        let tree = sample_tree();
+        let mut set = BTreeSet::new();
+        set.insert(1); // Child1
+        let rows = flatten(&tree, &set);
+        // Header + f0 + f1 + Child1 (collapsed) + Second + s0 = 6
+        assert_eq!(rows.len(), 6);
+        let child1_idx = rows
+            .iter()
+            .position(|r| matches!(r, InspectorRow::Header { name, .. } if name == "Child1"))
+            .unwrap();
+        assert!(matches!(
+            rows[child1_idx],
+            InspectorRow::Header {
+                collapsed: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn initial_collapsed_nodes_hides_deep_structs() {
+        let tree = sample_tree();
+        let set = initial_collapsed_nodes(&tree, 1);
+        // depth 1 = Child1 only
+        assert_eq!(set.len(), 1);
+        assert!(set.contains(&1));
+    }
+
+    #[test]
+    fn initial_collapsed_nodes_never_collapses_childless_struct() {
+        let tree = vec![StructValue {
+            name: "Empty".into(),
+            base_offset: 0,
+            fields: vec![],
+            children: vec![],
+        }];
+        let set = initial_collapsed_nodes(&tree, 0);
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn flatten_node_id_is_stable_under_reflatten() {
+        let tree = sample_tree();
+        let first = flatten(&tree, &BTreeSet::new());
+        let second = flatten(&tree, &BTreeSet::new());
+        let ids_a: Vec<_> = first
+            .iter()
+            .filter_map(|r| match r {
+                InspectorRow::Header { node_id, name, .. } => Some((node_id, name.clone())),
+                _ => None,
+            })
+            .collect();
+        let ids_b: Vec<_> = second
+            .iter()
+            .filter_map(|r| match r {
+                InspectorRow::Header { node_id, name, .. } => Some((node_id, name.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids_a, ids_b);
     }
 }

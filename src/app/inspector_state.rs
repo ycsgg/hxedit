@@ -7,6 +7,11 @@ use crate::mode::Mode;
 use crate::view::inspector as inspector_view;
 use crate::view::layout::MIN_INSPECTOR_WIDTH;
 
+/// Structs at this depth (and deeper) are collapsed on first build. `1` keeps
+/// top-level structs expanded so the user sees where the file starts, but
+/// hides Program Headers / nested sections behind a `▶` until they click in.
+const DEFAULT_COLLAPSED_DEPTH: usize = 1;
+
 impl App {
     fn supported_inspector_formats() -> &'static str {
         "ELF / PNG / ZIP"
@@ -189,6 +194,10 @@ impl App {
             .inspector
             .as_ref()
             .and_then(|state| field_offset_for_row(&state.rows, state.selected_row));
+        let previous_collapsed = self
+            .inspector
+            .as_ref()
+            .map(|state| state.collapsed_nodes.clone());
 
         let detected = if let Some(name) = self.inspector_format_override.as_deref() {
             format::detect::detect_by_name(name, &mut self.document)
@@ -199,11 +208,14 @@ impl App {
         if let Some(def) = detected {
             match format::parse::parse_format(&def, &mut self.document) {
                 Ok(structs) => {
-                    let rows = format::parse::flatten(&structs);
+                    let collapsed_nodes = previous_collapsed.unwrap_or_else(|| {
+                        format::parse::initial_collapsed_nodes(&structs, DEFAULT_COLLAPSED_DEPTH)
+                    });
+                    let rows = format::parse::flatten(&structs, &collapsed_nodes);
                     let selected_row = previous_selected_offset
                         .and_then(|offset| find_row_covering_offset(&rows, offset))
                         .or_else(|| find_row_covering_offset(&rows, self.cursor))
-                        .unwrap_or_else(|| first_field_row(&rows));
+                        .unwrap_or_else(|| first_selectable_row(&rows));
 
                     self.inspector = Some(InspectorState {
                         format_name: def.name,
@@ -212,6 +224,7 @@ impl App {
                         scroll_offset: previous_scroll,
                         selected_row,
                         editing: None,
+                        collapsed_nodes,
                     });
                     self.inspector_error = None;
                     self.ensure_inspector_selection_visible();
@@ -253,18 +266,33 @@ impl App {
         }
     }
 
-    /// Move the hex cursor to the currently selected inspector field.
+    /// Move the hex cursor to the currently selected inspector row.
+    ///
+    /// For field rows this lands on the field's absolute offset; for header
+    /// rows (when a collapsible header is selected) the cursor moves to the
+    /// struct's `base_offset` so the user's eye tracks the block boundary.
     pub(crate) fn sync_cursor_to_inspector(&mut self) {
         self.ensure_inspector_selection_visible();
         let Some(inspector) = self.inspector.as_ref() else {
             return;
         };
-        if let Some(InspectorRow::Field { abs_offset, .. }) =
-            inspector.rows.get(inspector.selected_row)
-        {
-            self.cursor = *abs_offset;
-            self.ensure_cursor_visible();
-        }
+        let Some(row) = inspector.rows.get(inspector.selected_row) else {
+            return;
+        };
+        let abs_offset = match row {
+            InspectorRow::Field { abs_offset, .. } => *abs_offset,
+            InspectorRow::Header {
+                node_id,
+                has_children: true,
+                ..
+            } => match base_offset_for_node(&inspector.structs, *node_id) {
+                Some(off) => off,
+                None => return,
+            },
+            InspectorRow::Header { .. } => return,
+        };
+        self.cursor = abs_offset;
+        self.ensure_cursor_visible();
     }
 
     /// Ensure the selected inspector row stays within the visible panel window.
@@ -312,17 +340,58 @@ impl App {
         };
     }
 
-    /// Select a row in the inspector, preferring field rows over headers.
+    /// Select a row in the inspector, preferring selectable rows (fields and
+    /// collapsible headers) over decorative headers.
     pub(crate) fn set_inspector_selected_row(&mut self, target_row: usize) {
         let Some(inspector) = self.inspector.as_mut() else {
             return;
         };
-        let Some(row) = nearest_field_row(&inspector.rows, target_row) else {
+        let Some(row) = nearest_selectable_row(&inspector.rows, target_row) else {
             return;
         };
         inspector.selected_row = row;
         inspector.editing = None;
         self.ensure_inspector_selection_visible();
+    }
+
+    /// Toggle collapse state of the currently selected collapsible header row.
+    /// No-op when the selection is on a field or a non-collapsible header.
+    pub(crate) fn toggle_inspector_collapse(&mut self) {
+        let Some(inspector) = self.inspector.as_mut() else {
+            return;
+        };
+        let Some(row) = inspector.rows.get(inspector.selected_row) else {
+            return;
+        };
+
+        let node_id = match row {
+            InspectorRow::Header {
+                node_id,
+                has_children: true,
+                ..
+            } => *node_id,
+            _ => return,
+        };
+
+        if !inspector.collapsed_nodes.insert(node_id) {
+            inspector.collapsed_nodes.remove(&node_id);
+        }
+
+        inspector.rows = format::parse::flatten(&inspector.structs, &inspector.collapsed_nodes);
+        inspector.editing = None;
+
+        if let Some(new_pos) = inspector
+            .rows
+            .iter()
+            .position(|r| matches!(r, InspectorRow::Header { node_id: nid, .. } if *nid == node_id))
+        {
+            inspector.selected_row = new_pos;
+        } else {
+            inspector.selected_row = first_selectable_row(&inspector.rows);
+        }
+
+        self.ensure_inspector_selection_visible();
+        self.sync_cursor_to_inspector();
     }
 
     /// Commit the current inspector edit back into the document.
@@ -415,10 +484,8 @@ impl App {
     }
 }
 
-fn first_field_row(rows: &[InspectorRow]) -> usize {
-    rows.iter()
-        .position(|row| matches!(row, InspectorRow::Field { .. }))
-        .unwrap_or(0)
+fn first_selectable_row(rows: &[InspectorRow]) -> usize {
+    rows.iter().position(is_selectable).unwrap_or(0)
 }
 
 fn field_offset_for_row(rows: &[InspectorRow], row_index: usize) -> Option<u64> {
@@ -437,19 +504,54 @@ fn find_row_covering_offset(rows: &[InspectorRow], offset: u64) -> Option<usize>
     })
 }
 
-fn nearest_field_row(rows: &[InspectorRow], target_row: usize) -> Option<usize> {
+fn nearest_selectable_row(rows: &[InspectorRow], target_row: usize) -> Option<usize> {
     let target_row = target_row.min(rows.len().saturating_sub(1));
-    if matches!(rows.get(target_row), Some(InspectorRow::Field { .. })) {
+    if rows.get(target_row).is_some_and(is_selectable) {
         return Some(target_row);
     }
-    for row in target_row..rows.len() {
-        if matches!(rows.get(row), Some(InspectorRow::Field { .. })) {
-            return Some(row);
-        }
+    if let Some(row) = (target_row..rows.len()).find(|&r| rows.get(r).is_some_and(is_selectable)) {
+        return Some(row);
     }
-    for row in (0..target_row).rev() {
-        if matches!(rows.get(row), Some(InspectorRow::Field { .. })) {
-            return Some(row);
+    (0..target_row)
+        .rev()
+        .find(|&r| rows.get(r).is_some_and(is_selectable))
+}
+
+/// A row is user-selectable when it represents actionable content: a field,
+/// or a collapsible header that toggles child visibility.
+pub(crate) fn is_selectable(row: &InspectorRow) -> bool {
+    matches!(
+        row,
+        InspectorRow::Field { .. }
+            | InspectorRow::Header {
+                has_children: true,
+                ..
+            }
+    )
+}
+
+/// Look up the `base_offset` of the struct at `target_node_id`.
+///
+/// Node ids are assigned during the same pre-order walk that `flatten()` uses,
+/// so this traversal matches what the row list saw.
+fn base_offset_for_node(structs: &[StructValue], target_node_id: usize) -> Option<u64> {
+    fn visit(sv: &StructValue, counter: &mut usize, target: usize) -> Option<u64> {
+        let id = *counter;
+        *counter += 1;
+        if id == target {
+            return Some(sv.base_offset);
+        }
+        for child in &sv.children {
+            if let Some(off) = visit(child, counter, target) {
+                return Some(off);
+            }
+        }
+        None
+    }
+    let mut counter = 0;
+    for sv in structs {
+        if let Some(off) = visit(sv, &mut counter, target_node_id) {
+            return Some(off);
         }
     }
     None
