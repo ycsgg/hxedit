@@ -111,15 +111,32 @@ impl App {
         stats
     }
 
-    pub(crate) fn render_status(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
-        let path_display = self.document.path().to_string_lossy();
+    pub(crate) fn render_status(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let path_display = self.document.path().to_string_lossy().into_owned();
+        let (selection_span, selection_logical_len) = match self.selection_range() {
+            Some((start, end)) => {
+                let logical_len = match self.document.logical_bytes(start, end) {
+                    Ok(bytes) => Some(bytes.len() as u64),
+                    Err(err) => {
+                        self.report_render_error(format!(
+                            "status selection read failed at 0x{start:x}..0x{end:x}: {err}"
+                        ));
+                        None
+                    }
+                };
+                (Some(end - start + 1), logical_len)
+            }
+            None => (None, None),
+        };
         let line = status::build(
             status::StatusInfo {
                 mode: self.mode,
                 path: &path_display,
                 cursor: self.cursor,
-                len: self.document.len(),
-                selection_len: self.selection_range().map(|(start, end)| end - start + 1),
+                display_len: self.document.len(),
+                visible_len: self.document.visible_len(),
+                selection_span,
+                selection_logical_len,
                 paste_info: self.last_paste.as_ref().map(|state| state.summary.as_str()),
                 dirty: self.document.is_dirty(),
                 message: &self.status_message,

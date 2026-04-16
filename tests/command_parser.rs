@@ -85,6 +85,13 @@ fn parses_basic_commands() {
         }
     );
     assert_eq!(
+        parse_command("copy b64").unwrap(),
+        Command::Copy {
+            format: CopyFormat::Byte,
+            display: CopyDisplay::Base64,
+        }
+    );
+    assert_eq!(
         parse_command("s hello").unwrap(),
         Command::SearchAscii {
             pattern: b"hello".to_vec(),

@@ -42,6 +42,7 @@ pub enum CopyDisplay {
     Raw,
     NumericBig,
     NumericLittle,
+    Base64,
 }
 
 impl CopyDisplay {
@@ -50,6 +51,7 @@ impl CopyDisplay {
             "r" | "raw" => Some(Self::Raw),
             "nb" => Some(Self::NumericBig),
             "nl" => Some(Self::NumericLittle),
+            "b64" | "base64" => Some(Self::Base64),
             _ => None,
         }
     }
@@ -59,6 +61,7 @@ impl CopyDisplay {
             Self::Raw => "raw",
             Self::NumericBig => "nb",
             Self::NumericLittle => "nl",
+            Self::Base64 => "b64",
         }
     }
 }
@@ -72,6 +75,7 @@ pub fn format_selection(
         CopyDisplay::Raw => Ok(format_raw(bytes, format)),
         CopyDisplay::NumericBig => format_numeric(bytes, format, true),
         CopyDisplay::NumericLittle => format_numeric(bytes, format, false),
+        CopyDisplay::Base64 => Ok(format_base64(bytes)),
     }
 }
 
@@ -133,6 +137,32 @@ fn hex_group(bytes: &[u8]) -> String {
     out
 }
 
+fn format_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let packed = (b0 << 16) | (b1 << 8) | b2;
+
+        out.push(TABLE[((packed >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((packed >> 12) & 0x3f) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[((packed >> 6) & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(packed & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +220,13 @@ mod tests {
             ),
             Err(HxError::CopyAlignment(2))
         ));
+    }
+
+    #[test]
+    fn formats_base64_output() {
+        assert_eq!(
+            format_selection(&[0x48, 0x69], CopyFormat::Byte, CopyDisplay::Base64).unwrap(),
+            "SGk="
+        );
     }
 }

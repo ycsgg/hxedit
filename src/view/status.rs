@@ -8,8 +8,10 @@ pub(crate) struct StatusInfo<'a> {
     pub mode: Mode,
     pub path: &'a str,
     pub cursor: u64,
-    pub len: u64,
-    pub selection_len: Option<u64>,
+    pub display_len: u64,
+    pub visible_len: u64,
+    pub selection_span: Option<u64>,
+    pub selection_logical_len: Option<u64>,
     pub paste_info: Option<&'a str>,
     pub dirty: bool,
     pub message: &'a str,
@@ -25,13 +27,23 @@ pub(crate) fn build(info: StatusInfo<'_>, palette: &Palette) -> Line<'static> {
         Span::raw("  "),
         Span::styled(format!("offset 0x{:x}", info.cursor), palette.status),
         Span::raw("  "),
-        Span::styled(format!("len {}", info.len), palette.status),
+        Span::styled(format!("len {}", info.display_len), palette.status),
+        Span::raw("  "),
+        Span::styled(format!("vis {}", info.visible_len), palette.status),
     ];
 
-    if let Some(selection_len) = info.selection_len {
+    if let Some(selection_span) = info.selection_span {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
-            format!("sel {}", selection_len),
+            format!("sel(span) {}", selection_span),
+            palette.status,
+        ));
+    }
+
+    if let Some(selection_logical_len) = info.selection_logical_len {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("sel(logical) {}", selection_logical_len),
             palette.status,
         ));
     }
@@ -82,8 +94,10 @@ mod tests {
                 },
                 path: "sample.bin",
                 cursor: 0,
-                len: 1,
-                selection_len: None,
+                display_len: 1,
+                visible_len: 1,
+                selection_span: None,
+                selection_logical_len: None,
                 paste_info: None,
                 dirty: false,
                 message: "png edit may break crc",
@@ -109,8 +123,10 @@ mod tests {
                 },
                 path: "sample.bin",
                 cursor: 0,
-                len: 1,
-                selection_len: None,
+                display_len: 1,
+                visible_len: 1,
+                selection_span: None,
+                selection_logical_len: None,
                 paste_info: None,
                 dirty: false,
                 message: "document is read-only",
@@ -124,5 +140,37 @@ mod tests {
         assert_eq!(error_span.style.fg, Some(Color::White));
         assert_eq!(error_span.style.bg, Some(Color::Red));
         assert!(error_span.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn status_line_includes_visible_and_logical_selection_lengths() {
+        let palette = Palette::new(false);
+        let line = build(
+            StatusInfo {
+                mode: Mode::Normal,
+                path: "sample.bin",
+                cursor: 0x10,
+                display_len: 12,
+                visible_len: 10,
+                selection_span: Some(4),
+                selection_logical_len: Some(3),
+                paste_info: None,
+                dirty: false,
+                message: "",
+                message_level: StatusLevel::Info,
+                readonly: false,
+            },
+            &palette,
+        );
+
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(text.contains("len 12"));
+        assert!(text.contains("vis 10"));
+        assert!(text.contains("sel(span) 4"));
+        assert!(text.contains("sel(logical) 3"));
     }
 }

@@ -105,15 +105,15 @@ fn copy_hint(name: &str, rest: Option<&str>) -> CommandHint {
                 format = Some(token);
                 continue;
             }
-            if display.is_none() && matches!(token, "r" | "raw" | "nb" | "nl") {
+            if display.is_none() && matches!(token, "r" | "raw" | "nb" | "nl" | "b64" | "base64") {
                 display = Some(token);
             }
         }
     }
 
     let remaining = match (format.is_some(), display.is_some()) {
-        (false, false) => "[bin|b|db|qb] [r|nb|nl]",
-        (true, false) => "[r|nb|nl]",
+        (false, false) => "[bin|b|db|qb] [r|nb|nl|b64]",
+        (true, false) => "[r|nb|nl|b64]",
         (false, true) => "[bin|b|db|qb]",
         (true, true) => "",
     };
@@ -131,7 +131,7 @@ fn copy_hint(name: &str, rest: Option<&str>) -> CommandHint {
     CommandHint {
         syntax,
         details:
-            "fmt: bin=binary b=byte(default) db=2-byte qb=4-byte; disp: r=raw(default) nb=big-endian nums nl=little-endian nums"
+            "fmt: bin=binary b=byte(default) db=2-byte qb=4-byte; disp: r=raw(default) nb=big-endian nums nl=little-endian nums b64=base64"
                 .to_owned(),
     }
 }
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn copy_hint_shows_remaining_args() {
         let hint = hint_for("copy db");
-        assert_eq!(hint.syntax, "copy [r|nb|nl]");
+        assert_eq!(hint.syntax, "copy [r|nb|nl|b64]");
     }
 
     #[test]

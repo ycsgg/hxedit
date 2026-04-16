@@ -246,6 +246,7 @@ Search now wraps around automatically:
 
 - `:p? [!] [num]` `:paste? [!] [num]`
   - preview overwrite-paste without modifying the document
+  - preview now shows parse source, requested/used length, a head-byte preview, and overwrite/insert effect
 
 - `:pi [!] [num]` `:paste-insert [!] [num]`
   - insert-paste at the cursor
@@ -256,7 +257,7 @@ Search now wraps around automatically:
 
 ### Copy
 
-- `:c [bin|b|db|qb] [r|nb|nl]`
+- `:c [bin|b|db|qb] [r|nb|nl|b64]`
   - copy the current visual selection to the system clipboard as formatted text
 
 Format options:
@@ -284,10 +285,27 @@ Display options:
 - `nl`
   - little-endian numeric output
 
+- `b64`
+  - base64 output for the logical selected bytes
+
 Current limitation:
 
 - copy is text-oriented
 - there is no raw binary clipboard copy yet
+
+## Status Bar
+
+- `len`
+  - display length including tombstones
+
+- `vis`
+  - bytes that would actually be written on save
+
+- `sel(span)`
+  - selected display-slot span
+
+- `sel(logical)`
+  - selected logical byte count after skipping tombstones
 
 ### Inspector
 
@@ -328,9 +346,6 @@ Current limitation:
 
 - save is rewrite-only
 - overwrite paste truncates at EOF
-- no redo yet
-- no command history yet
-- no wrap-around search yet
 - unwritable files now auto-fallback to readonly with a status warning
 - copy is text-only, not raw-binary
 
