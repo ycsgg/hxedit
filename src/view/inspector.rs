@@ -63,8 +63,8 @@ pub fn build_wrapped(
             max_name_len = max_name_len.max(name_len.min(field_name_area_width));
         }
     }
-    
-    max_name_len = max_name_len + 1; // 字段名和字段值之间至少留1个字符的间隔
+
+    max_name_len += 1; // 字段名和字段值之间至少留1个字符的间隔
 
     let mut out = Vec::new();
 

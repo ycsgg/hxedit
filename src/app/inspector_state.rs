@@ -74,6 +74,10 @@ impl App {
     }
 
     pub(crate) fn focus_inspector_or_warn(&mut self) -> bool {
+        self.focus_inspector_or_warn_with_toggle(false)
+    }
+
+    fn focus_inspector_or_warn_with_toggle(&mut self, is_toggle_attempt: bool) -> bool {
         if !self.inspector_panel_visible() {
             if let Some(inspector) = self.inspector.as_mut() {
                 inspector.editing = None;
@@ -88,6 +92,14 @@ impl App {
             return false;
         }
         if self.inspector.is_none() {
+            // 没有检测到格式
+            if is_toggle_attempt {
+                // 用户再次按 Tab/`:insp` 尝试切换，关闭 inspector
+                self.mode = Mode::Normal;
+                self.show_inspector = false;
+                self.clear_status();
+                return false;
+            }
             self.mode = Mode::Normal;
             self.set_warning_status(self.no_format_detected_message());
             return false;
@@ -117,9 +129,9 @@ impl App {
         if !self.show_inspector {
             self.show_inspector = true;
             self.refresh_inspector();
-            self.focus_inspector_or_warn();
+            self.focus_inspector_or_warn_with_toggle(false);
         } else if !self.mode.is_inspector() {
-            self.focus_inspector_or_warn();
+            self.focus_inspector_or_warn_with_toggle(true);
         } else {
             if let Some(inspector) = self.inspector.as_mut() {
                 inspector.editing = None;

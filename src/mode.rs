@@ -41,6 +41,10 @@ impl Mode {
         matches!(self, Self::Inspector | Self::InspectorEdit)
     }
 
+    pub fn is_normal(self) -> bool {
+        matches!(self, Self::Normal)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Normal => "NORMAL",
