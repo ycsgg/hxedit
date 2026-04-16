@@ -2,13 +2,17 @@ use std::io;
 use std::time::{Duration, Instant};
 
 mod clipboard_ops;
+mod command_input;
 mod commands;
+mod editing_state;
 mod events;
 mod helpers;
+mod inspector_state;
+mod mode_state;
+mod mouse;
 mod navigation;
 mod render;
 mod search;
-mod state;
 #[cfg(test)]
 mod tests;
 mod undo;
