@@ -118,8 +118,9 @@ fn write_pieces(document: &mut Document, target: &Path) -> HxResult<SaveProfile>
                         bytes_written += read_len;
                         fast_chunks += 1;
                     } else {
-                        // Slow path: per-byte tombstone/replacement check.
+                        // Slow path: buffer the survivors, then one write_all.
                         slow_chunks += 1;
+                        let mut buf = Vec::with_capacity(raw.len());
                         for (i, &base) in raw.iter().enumerate() {
                             let id = CellId::Original(cell_off + i as u64);
                             if need_tombstone_scan && document.is_tombstone(id) {
@@ -130,9 +131,10 @@ fn write_pieces(document: &mut Document, target: &Path) -> HxResult<SaveProfile>
                             } else {
                                 base
                             };
-                            writer.write_all(&[byte])?;
-                            bytes_written += 1;
+                            buf.push(byte);
                         }
+                        writer.write_all(&buf)?;
+                        bytes_written += buf.len() as u64;
                     }
 
                     file_off += read_len;
@@ -153,6 +155,7 @@ fn write_pieces(document: &mut Document, target: &Path) -> HxResult<SaveProfile>
                     writer.write_all(data)?;
                     bytes_written += data.len() as u64;
                 } else {
+                    let mut buf = Vec::with_capacity(data.len());
                     for (i, &base) in data.iter().enumerate() {
                         let id = CellId::Add(piece.start + i as u64);
                         if need_tombstone_scan && document.is_tombstone(id) {
@@ -163,9 +166,10 @@ fn write_pieces(document: &mut Document, target: &Path) -> HxResult<SaveProfile>
                         } else {
                             base
                         };
-                        writer.write_all(&[byte])?;
-                        bytes_written += 1;
+                        buf.push(byte);
                     }
+                    writer.write_all(&buf)?;
+                    bytes_written += buf.len() as u64;
                 }
             }
         }
