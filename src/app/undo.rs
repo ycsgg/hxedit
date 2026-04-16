@@ -61,11 +61,11 @@ impl App {
         self.refresh_inspector();
 
         if undone == 0 {
-            self.status_message = "nothing to undo".to_owned();
+            self.set_info_status("nothing to undo");
         } else if undone == 1 {
-            self.status_message = "undid 1 action".to_owned();
+            self.set_info_status("undid 1 action");
         } else {
-            self.status_message = format!("undid {undone} actions");
+            self.set_info_status(format!("undid {undone} actions"));
         }
 
         Ok(())

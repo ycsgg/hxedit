@@ -45,6 +45,9 @@ pub fn save_rewrite(document: &mut Document, target: &Path) -> HxResult<SaveProf
     if target == document.path() {
         let tmp = temp_path_for(target);
         let profile = write_pieces(document, &tmp)?;
+        if let Ok(metadata) = fs::metadata(target) {
+            fs::set_permissions(&tmp, metadata.permissions())?;
+        }
         fs::rename(&tmp, target)?;
         return Ok(profile);
     }

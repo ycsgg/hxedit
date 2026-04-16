@@ -35,12 +35,12 @@ impl App {
         let bytes = self.document.logical_bytes(start, end)?;
         let text = format_selection(&bytes, format, display)?;
         clipboard::copy_text(&text)?;
-        self.status_message = format!(
+        self.set_info_status(format!(
             "copied {} bytes [{} {}]",
             bytes.len(),
             format.label(),
             display.label()
-        );
+        ));
         Ok(())
     }
 
@@ -68,17 +68,21 @@ impl App {
         let overwrite_truncated = !insert && self.overwrite_paste_truncates(bytes.len());
 
         if preview {
-            self.status_message = if bytes.is_empty() {
-                "paste preview: no bytes".to_owned()
+            if bytes.is_empty() {
+                self.set_info_status("paste preview: no bytes");
             } else if overwrite_truncated {
-                format!(
+                self.set_warning_status(format!(
                     "paste preview [{} {} bytes; overwrite truncates at EOF]",
                     source.label(),
                     bytes.len()
-                )
+                ));
             } else {
-                format!("paste preview [{} {} bytes]", source.label(), bytes.len())
-            };
+                self.set_info_status(format!(
+                    "paste preview [{} {} bytes]",
+                    source.label(),
+                    bytes.len()
+                ));
+            }
             return Ok(());
         }
 
@@ -87,31 +91,39 @@ impl App {
         if insert {
             let pasted = self.apply_paste_insert(&bytes)?;
             if pasted == 0 {
-                self.status_message = "paste produced no bytes".to_owned();
+                self.set_info_status("paste produced no bytes");
             } else {
-                self.status_message = format!("{mode_label} {} bytes [{}]", pasted, source.label());
+                self.set_info_status(format!(
+                    "{mode_label} {} bytes [{}]",
+                    pasted,
+                    source.label()
+                ));
             }
         } else {
             let pasted = self.apply_paste_overwrite(&bytes)?;
             if pasted == 0 {
-                self.status_message = if overwrite_truncated {
-                    format!(
+                if overwrite_truncated {
+                    self.set_warning_status(format!(
                         "paste produced no bytes [{}] (cursor at EOF; overwrite truncates)",
                         source.label()
-                    )
+                    ));
                 } else {
-                    "paste produced no bytes".to_owned()
-                };
+                    self.set_info_status("paste produced no bytes");
+                }
             } else {
-                self.status_message = if overwrite_truncated {
-                    format!(
+                if overwrite_truncated {
+                    self.set_warning_status(format!(
                         "{mode_label} {} bytes [{}] (truncated at EOF)",
                         pasted,
                         source.label()
-                    )
+                    ));
                 } else {
-                    format!("{mode_label} {} bytes [{}]", pasted, source.label())
-                };
+                    self.set_info_status(format!(
+                        "{mode_label} {} bytes [{}]",
+                        pasted,
+                        source.label()
+                    ));
+                }
             }
         }
         Ok(())

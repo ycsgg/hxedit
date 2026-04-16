@@ -6,6 +6,7 @@ pub struct Palette {
     pub separator: Style,
     pub status: Style,
     pub warning: Style,
+    pub error: Style,
     pub dirty: Style,
     pub selection: Style,
     pub deleted: Style,
@@ -41,6 +42,10 @@ impl Palette {
                 warning: Style::default()
                     .bg(Color::Yellow)
                     .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
+                error: Style::default()
+                    .bg(Color::Red)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
                 dirty: Style::default()
                     .fg(Color::Yellow)
@@ -85,6 +90,9 @@ impl Palette {
                 warning: base
                     .add_modifier(Modifier::BOLD)
                     .add_modifier(Modifier::UNDERLINED),
+                error: base
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::REVERSED),
                 dirty: base.add_modifier(Modifier::BOLD),
                 selection: base.add_modifier(Modifier::REVERSED),
                 deleted: base,

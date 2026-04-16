@@ -49,6 +49,7 @@ pub struct App {
     command_buffer: String,
     command_cursor_pos: usize,
     status_message: String,
+    status_level: StatusLevel,
     should_quit: bool,
     view_rows: usize,
     last_columns: Option<layout::MainColumns>,
@@ -191,6 +192,13 @@ pub(crate) enum SearchDirection {
     Backward,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StatusLevel {
+    Info,
+    Warning,
+    Error,
+}
+
 impl SearchDirection {
     fn label(self) -> &'static str {
         match self {
@@ -201,6 +209,28 @@ impl SearchDirection {
 }
 
 impl App {
+    pub(crate) fn clear_status(&mut self) {
+        self.status_message.clear();
+        self.status_level = StatusLevel::Info;
+    }
+
+    pub(crate) fn set_status(&mut self, level: StatusLevel, message: impl Into<String>) {
+        self.status_message = message.into();
+        self.status_level = level;
+    }
+
+    pub(crate) fn set_info_status(&mut self, message: impl Into<String>) {
+        self.set_status(StatusLevel::Info, message);
+    }
+
+    pub(crate) fn set_warning_status(&mut self, message: impl Into<String>) {
+        self.set_status(StatusLevel::Warning, message);
+    }
+
+    pub(crate) fn set_error_status(&mut self, message: impl Into<String>) {
+        self.set_status(StatusLevel::Error, message);
+    }
+
     pub fn from_cli(cli: Cli) -> Result<Self> {
         let startup_begin = Instant::now();
         let config = cli.config()?;
@@ -221,7 +251,16 @@ impl App {
             mode: Mode::Normal,
             command_buffer: String::new(),
             command_cursor_pos: 0,
-            status_message: String::new(),
+            status_message: if document.is_readonly() && !config.readonly {
+                "opened read-only; no write permission".to_owned()
+            } else {
+                String::new()
+            },
+            status_level: if document.is_readonly() && !config.readonly {
+                StatusLevel::Warning
+            } else {
+                StatusLevel::Info
+            },
             should_quit: false,
             view_rows: 1,
             last_columns: None,

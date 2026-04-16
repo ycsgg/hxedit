@@ -8,9 +8,9 @@ impl App {
     pub(crate) fn submit_command(&mut self) -> HxResult<()> {
         let return_mode = self.command_return_mode.unwrap_or(Mode::Normal);
         let command = parse_command(&self.command_buffer)?;
+        self.execute_command(command)?;
         self.command_buffer.clear();
         self.command_cursor_pos = 0;
-        self.execute_command(command)?;
         if matches!(self.mode, Mode::Command) {
             self.mode = self.normalize_mode(return_mode);
         }
@@ -70,7 +70,7 @@ impl App {
         self.undo_stack.clear();
         self.cursor = self.clamp_offset(self.cursor);
         self.refresh_inspector();
-        self.status_message = format!("wrote {} [{}]", saved.display(), profile);
+        self.set_info_status(format!("wrote {} [{}]", saved.display(), profile));
         self.should_quit = should_quit;
         Ok(())
     }
@@ -78,7 +78,7 @@ impl App {
     fn execute_goto_command(&mut self, target: GotoTarget) -> HxResult<()> {
         let offset = self.resolve_goto_target(target)?;
         self.cursor = self.document.goto(offset)?;
-        self.status_message = format!("goto 0x{:x}", self.cursor);
+        self.set_info_status(format!("goto 0x{:x}", self.cursor));
         Ok(())
     }
 
@@ -137,7 +137,7 @@ impl App {
                 self.inspector_format_override = None;
                 self.refresh_inspector();
                 if self.focus_inspector_or_warn() {
-                    self.status_message = "format: auto".to_owned();
+                    self.set_info_status("format: auto");
                 }
             }
         }
@@ -148,10 +148,10 @@ impl App {
             self.inspector_format_override = Some(name.to_lowercase());
             self.refresh_inspector();
             if self.focus_inspector_or_warn() {
-                self.status_message = format!("format: {}", name);
+                self.set_info_status(format!("format: {}", name));
             }
         } else {
-            self.status_message = format!("unknown or mismatched format: {}", name);
+            self.set_error_status(format!("unknown or mismatched format: {}", name));
         }
     }
 

@@ -6,7 +6,7 @@ use crate::error::HxResult;
 impl App {
     pub(crate) fn repeat_search(&mut self, direction: SearchDirection) -> HxResult<()> {
         let Some(search) = self.last_search.clone() else {
-            self.status_message = "no active search".to_owned();
+            self.set_info_status("no active search");
             return Ok(());
         };
         self.run_search(&search, direction)
@@ -45,9 +45,9 @@ impl App {
 
         if let Some(found) = found {
             self.cursor = found;
-            self.status_message = format!("found {} at 0x{:x}", search.kind.label(), found);
+            self.set_info_status(format!("found {} at 0x{:x}", search.kind.label(), found));
         } else {
-            self.status_message = format!("{} pattern not found", search.kind.label());
+            self.set_info_status(format!("{} pattern not found", search.kind.label()));
         }
 
         Ok(())

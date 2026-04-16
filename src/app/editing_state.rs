@@ -23,7 +23,7 @@ impl App {
             self.mode,
         );
         self.refresh_inspector();
-        self.status_message = format!("deleted 0x{:x}", self.cursor);
+        self.set_info_status(format!("deleted 0x{:x}", self.cursor));
         Ok(())
     }
 
@@ -45,7 +45,7 @@ impl App {
         self.selection_anchor = None;
         self.mode = Mode::Normal;
         self.refresh_inspector();
-        self.status_message = format!("deleted selection {} bytes", end - start + 1);
+        self.set_info_status(format!("deleted selection {} bytes", end - start + 1));
         Ok(())
     }
 
@@ -87,7 +87,7 @@ impl App {
             self.push_undo_step(vec![EditOp::Insert { offset, len: 1 }], offset, self.mode);
         }
 
-        self.status_message = format!("edited 0x{:x}", offset);
+        self.set_info_status(format!("edited 0x{:x}", offset));
         self.mode = match phase {
             NibblePhase::High => Mode::EditHex {
                 phase: NibblePhase::Low,
@@ -128,7 +128,7 @@ impl App {
                     }),
                 };
                 self.refresh_inspector();
-                self.status_message = format!("inserted 0x{:x}", offset);
+                self.set_info_status(format!("inserted 0x{:x}", offset));
             }
             Some(pending) => {
                 self.document
@@ -136,7 +136,7 @@ impl App {
                 self.commit_pending_insert();
                 self.cursor = pending.offset + 1;
                 self.refresh_inspector();
-                self.status_message = format!("inserted 0x{:x}", pending.offset);
+                self.set_info_status(format!("inserted 0x{:x}", pending.offset));
             }
         }
 
@@ -152,7 +152,7 @@ impl App {
                     self.cursor = pending.offset;
                     self.mode = Mode::InsertHex { pending: None };
                     self.refresh_inspector();
-                    self.status_message = format!("deleted 0x{:x}", pending.offset);
+                    self.set_info_status(format!("deleted 0x{:x}", pending.offset));
                     return Ok(());
                 }
 
@@ -172,7 +172,7 @@ impl App {
                 );
                 self.cursor = delete_offset;
                 self.refresh_inspector();
-                self.status_message = format!("deleted 0x{:x}", delete_offset);
+                self.set_info_status(format!("deleted 0x{:x}", delete_offset));
                 Ok(())
             }
             Mode::EditHex { .. }
@@ -217,7 +217,7 @@ impl App {
         self.document.delete_range_real(pending.offset, 1)?;
         self.cursor = pending.offset;
         self.mode = Mode::InsertHex { pending: None };
-        self.status_message = "undid 1 action".to_owned();
+        self.set_info_status("undid 1 action");
         Ok(true)
     }
 

@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::{App, StatusLevel};
 use crate::mode::Mode;
 
 impl App {
@@ -21,12 +21,8 @@ impl App {
     }
 
     pub(crate) fn clear_error_if_command_done(&mut self) {
-        let is_error = self.status_message.starts_with("invalid")
-            || self.status_message.starts_with("unknown")
-            || self.status_message.starts_with("missing")
-            || self.status_message.contains("outside");
-        if !matches!(self.mode, Mode::Command) && is_error {
-            self.status_message.clear();
+        if !matches!(self.mode, Mode::Command) && self.status_level == StatusLevel::Error {
+            self.clear_status();
         }
     }
 

@@ -47,6 +47,7 @@ Useful CLI flags:
 
 - `--readonly`
   - open without write access
+  - if omitted and the file cannot be opened writable, hxedit now falls back to read-only automatically
 
 - `--offset <n|0xhex>`
   - start at a specific byte offset
@@ -158,6 +159,9 @@ cargo run -- --readonly --offset 0x100 --inspector some.bin
 - `Left` `Right` `Home` `End` `Delete` `Backspace`
   - edit the command buffer
 
+- failed commands keep the current command buffer
+  - for example, `:q` on a dirty buffer stays editable instead of clearing input
+
 ### Inspector
 
 - `j` `k` or `Up` `Down`
@@ -190,6 +194,7 @@ cargo run -- --readonly --offset 0x100 --inspector some.bin
 
 - `:w <path>` `:write <path>`
   - save as and switch the buffer to the new path
+  - this still works from a readonly session because it writes a new target
 
 - `:wq`
   - save and quit
@@ -313,7 +318,7 @@ Current limitation:
 - no redo yet
 - no command history yet
 - no wrap-around search yet
-- opening an unwritable file does not auto-fallback to readonly
+- unwritable files now auto-fallback to readonly with a status warning
 - copy is text-only, not raw-binary
 
 ## Profiling

@@ -21,16 +21,16 @@ impl App {
     }
 
     fn warn_inspector_too_narrow(&mut self) {
-        self.status_message = match self.current_main_inner_width() {
-            Some(current) => format!(
-                "warning: inspector hidden; terminal too narrow (current {} columns, need {}+)",
+        match self.current_main_inner_width() {
+            Some(current) => self.set_warning_status(format!(
+                "inspector hidden; terminal too narrow (current {} columns, need {}+)",
                 current, MIN_INSPECTOR_WIDTH
-            ),
-            None => format!(
-                "warning: inspector hidden; terminal too narrow (need {}+ columns)",
+            )),
+            None => self.set_warning_status(format!(
+                "inspector hidden; terminal too narrow (need {}+ columns)",
                 MIN_INSPECTOR_WIDTH
-            ),
-        };
+            )),
+        }
     }
 
     pub(crate) fn inspector_panel_visible(&self) -> bool {
@@ -66,10 +66,8 @@ impl App {
 
     pub(crate) fn inspector_edit_warning(&self) -> Option<&'static str> {
         match self.inspector.as_ref()?.format_name.as_str() {
-            "PNG" => Some("warning: PNG inspector edits do not repair CRC or chunk consistency"),
-            "ZIP" => {
-                Some("warning: ZIP inspector edits do not repair header or descriptor consistency")
-            }
+            "PNG" => Some("PNG inspector edits do not repair CRC or chunk consistency"),
+            "ZIP" => Some("ZIP inspector edits do not repair header or descriptor consistency"),
             _ => None,
         }
     }
@@ -172,7 +170,7 @@ impl App {
                     }
                     self.inspector = None;
                     self.inspector_error = Some(message.clone());
-                    self.status_message = message;
+                    self.set_error_status(message);
                     if matches!(self.mode, Mode::InspectorEdit) {
                         self.mode = Mode::Inspector;
                     }
@@ -316,11 +314,11 @@ impl App {
         self.refresh_inspector();
         self.mode = Mode::Inspector;
         self.sync_cursor_to_inspector();
-        self.status_message = if let Some(warning) = self.inspector_edit_warning() {
-            format!("edited field at 0x{:x}; {}", abs_offset, warning)
+        if let Some(warning) = self.inspector_edit_warning() {
+            self.set_warning_status(format!("edited field at 0x{:x}; {}", abs_offset, warning));
         } else {
-            format!("edited field at 0x{:x}", abs_offset)
-        };
+            self.set_info_status(format!("edited field at 0x{:x}", abs_offset));
+        }
         Ok(())
     }
 

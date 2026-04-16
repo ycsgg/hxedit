@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 mod edit;
@@ -56,11 +57,28 @@ pub struct Document {
 impl Document {
     /// Open a document from disk with the given configuration.
     pub fn open(path: &Path, config: &Config) -> HxResult<Self> {
-        let view = FileView::open(path, config.readonly, config.page_size, config.cache_pages)?;
+        let (view, readonly) =
+            match FileView::open(path, config.readonly, config.page_size, config.cache_pages) {
+                Ok(view) => (view, config.readonly),
+                Err(err)
+                    if !config.readonly
+                        && matches!(
+                            &err,
+                            HxError::OpenPath { source, .. }
+                                if source.kind() == ErrorKind::PermissionDenied
+                        ) =>
+                {
+                    (
+                        FileView::open(path, true, config.page_size, config.cache_pages)?,
+                        true,
+                    )
+                }
+                Err(err) => return Err(err),
+            };
         let original_len = view.len();
         Ok(Self {
             path: path.to_path_buf(),
-            readonly: config.readonly,
+            readonly,
             page_size: config.page_size,
             cache_pages: config.cache_pages,
             original_len,
@@ -114,7 +132,7 @@ impl Document {
     /// state and reloads the file.
     pub fn save(&mut self, path: Option<PathBuf>) -> HxResult<(PathBuf, save::SaveProfile)> {
         let target = path.unwrap_or_else(|| self.path.clone());
-        if target == self.path && self.readonly {
+        if self.readonly && target == self.path {
             return Err(HxError::ReadOnly);
         }
 

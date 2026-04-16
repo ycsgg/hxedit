@@ -200,7 +200,7 @@ impl App {
                 }
             }
             Err(err) => {
-                self.status_message = err.to_string();
+                self.set_error_status(err.to_string());
             }
         }
     }
@@ -303,7 +303,7 @@ impl App {
             });
             self.mode = Mode::InspectorEdit;
             if let Some(warning) = self.inspector_edit_warning() {
-                self.status_message = warning.to_owned();
+                self.set_warning_status(warning);
             }
         }
         Ok(())
@@ -521,7 +521,8 @@ mod tests {
         app.handle_action(Action::InspectorEnter);
 
         assert_eq!(app.mode, Mode::InspectorEdit);
-        assert!(app.status_message.contains("warning: PNG inspector edits"));
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("PNG inspector edits"));
     }
 
     #[test]
@@ -540,6 +541,7 @@ mod tests {
         app.ensure_inspector_mode_visible();
 
         assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
         assert!(app.status_message.contains("too narrow"));
         assert!(app.status_message.contains("current 36 columns"));
     }
@@ -562,6 +564,7 @@ mod tests {
 
         assert_eq!(app.mode, Mode::Normal);
         assert!(app.show_inspector);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
         assert!(app.status_message.contains("too narrow"));
         assert!(app.status_message.contains("current 36 columns"));
     }
@@ -584,5 +587,25 @@ mod tests {
 
         assert_eq!(app.mode, Mode::Inspector);
         assert!(!app.status_message.contains("too narrow"));
+    }
+
+    #[test]
+    fn failed_command_keeps_command_buffer_for_editing() {
+        let mut app = app_with_len(1);
+        app.mode = Mode::EditHex {
+            phase: NibblePhase::High,
+        };
+        app.edit_nibble(0xa).unwrap();
+        app.mode = Mode::Normal;
+
+        app.handle_action(Action::EnterCommand);
+        app.handle_action(Action::CommandChar('q'));
+        app.handle_action(Action::CommandSubmit);
+
+        assert_eq!(app.mode, Mode::Command);
+        assert_eq!(app.command_buffer, "q");
+        assert_eq!(app.command_cursor_pos, 1);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Error);
+        assert!(app.status_message.contains("unsaved changes"));
     }
 }

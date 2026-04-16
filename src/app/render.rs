@@ -123,6 +123,7 @@ impl App {
                 paste_info: self.last_paste.as_ref().map(|state| state.summary.as_str()),
                 dirty: self.document.is_dirty(),
                 message: &self.status_message,
+                message_level: self.status_level,
                 readonly: self.document.is_readonly(),
             },
             &self.palette,
@@ -153,7 +154,7 @@ impl App {
         }
         self.last_render_error = Some(message.clone());
         if self.status_message.is_empty() {
-            self.status_message = message;
+            self.set_error_status(message);
         }
     }
 

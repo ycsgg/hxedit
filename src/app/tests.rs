@@ -2,7 +2,7 @@ use std::fs;
 
 use tempfile::tempdir;
 
-use crate::app::{App, SearchDirection};
+use crate::app::{App, SearchDirection, StatusLevel};
 use crate::cli::Cli;
 use crate::commands::types::{Command, GotoTarget};
 use crate::core::document::ByteSlot;
@@ -46,6 +46,38 @@ fn app_with_bytes(bytes: &[u8]) -> App {
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 4;
     app
+}
+
+#[test]
+fn app_falls_back_to_readonly_when_write_open_is_denied() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("readonly.bin");
+    fs::write(&file, [0x11_u8, 0x22]).unwrap();
+
+    let original_perms = fs::metadata(&file).unwrap().permissions();
+    let mut readonly_perms = original_perms.clone();
+    readonly_perms.set_readonly(true);
+    fs::set_permissions(&file, readonly_perms).unwrap();
+
+    let cli = Cli {
+        file: file.clone(),
+        bytes_per_line: 16,
+        page_size: 4096,
+        cache_pages: 8,
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let app = App::from_cli(cli).unwrap();
+
+    assert!(app.document.is_readonly());
+    assert_eq!(app.status_level, StatusLevel::Warning);
+    assert!(app.status_message.contains("opened read-only"));
+
+    drop(app);
+    fs::set_permissions(&file, original_perms).unwrap();
 }
 
 #[test]
@@ -111,6 +143,61 @@ fn command_undo_can_rewind_multiple_changes() {
     assert_eq!(app.mode, Mode::Normal);
     assert_eq!(app.cursor, 0);
     assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
+}
+
+#[test]
+fn readonly_mode_allows_save_as_new_path() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("sample.bin");
+    fs::write(&file, [0x11_u8, 0x22]).unwrap();
+
+    let cli = Cli {
+        file,
+        bytes_per_line: 16,
+        page_size: 4096,
+        cache_pages: 8,
+        profile: false,
+        readonly: true,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let mut app = App::from_cli(cli).unwrap();
+    let target = dir.path().join("copy.bin");
+
+    app.execute_command(Command::Write {
+        path: Some(target.clone()),
+    })
+    .expect("readonly save-as should succeed");
+
+    assert_eq!(fs::read(&target).unwrap(), [0x11_u8, 0x22]);
+    assert!(app.document.is_readonly());
+}
+
+#[test]
+fn readonly_mode_rejects_save_in_place() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("sample.bin");
+    fs::write(&file, [0x11_u8, 0x22]).unwrap();
+
+    let cli = Cli {
+        file,
+        bytes_per_line: 16,
+        page_size: 4096,
+        cache_pages: 8,
+        profile: false,
+        readonly: true,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let mut app = App::from_cli(cli).unwrap();
+
+    let err = app
+        .execute_command(Command::Write { path: None })
+        .expect_err("readonly in-place save should fail");
+
+    assert_eq!(err.to_string(), "document is read-only");
 }
 
 #[test]
