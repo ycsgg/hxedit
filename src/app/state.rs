@@ -353,6 +353,7 @@ impl App {
             self.mode = Mode::Normal;
             self.show_inspector = false;
             self.inspector = None;
+            self.inspector_error = None;
         }
     }
 
@@ -410,24 +411,41 @@ impl App {
         };
 
         if let Some(def) = detected {
-            let structs = format::parse::parse_format(&def, &mut self.document).unwrap_or_default();
-            let rows = format::parse::flatten(&structs);
-            let selected_row = previous_selected_offset
-                .and_then(|offset| find_row_covering_offset(&rows, offset))
-                .or_else(|| find_row_covering_offset(&rows, self.cursor))
-                .unwrap_or_else(|| first_field_row(&rows));
+            match format::parse::parse_format(&def, &mut self.document) {
+                Ok(structs) => {
+                    let rows = format::parse::flatten(&structs);
+                    let selected_row = previous_selected_offset
+                        .and_then(|offset| find_row_covering_offset(&rows, offset))
+                        .or_else(|| find_row_covering_offset(&rows, self.cursor))
+                        .unwrap_or_else(|| first_field_row(&rows));
 
-            self.inspector = Some(InspectorState {
-                format_name: def.name,
-                structs,
-                rows,
-                scroll_offset: previous_scroll,
-                selected_row,
-                editing: None,
-            });
-            self.ensure_inspector_selection_visible();
+                    self.inspector = Some(InspectorState {
+                        format_name: def.name,
+                        structs,
+                        rows,
+                        scroll_offset: previous_scroll,
+                        selected_row,
+                        editing: None,
+                    });
+                    self.inspector_error = None;
+                    self.ensure_inspector_selection_visible();
+                }
+                Err(err) => {
+                    let message = format!("inspector parse failed [{}]: {}", def.name, err);
+                    if self.inspector_error.as_deref() != Some(message.as_str()) {
+                        eprintln!("{message}");
+                    }
+                    self.inspector = None;
+                    self.inspector_error = Some(message.clone());
+                    self.status_message = message;
+                    if matches!(self.mode, Mode::InspectorEdit) {
+                        self.mode = Mode::Inspector;
+                    }
+                }
+            }
         } else {
             self.inspector = None;
+            self.inspector_error = None;
         }
     }
 

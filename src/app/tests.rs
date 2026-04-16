@@ -182,29 +182,27 @@ fn reverse_search_command_searches_upward() {
 }
 
 #[test]
-fn paste_overwrites_and_appends_past_eof() {
+fn paste_overwrite_replaces_existing_bytes_in_place() {
     let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
     app.cursor = 1;
-    assert_eq!(app.apply_paste_bytes(&[0xaa, 0xbb, 0xcc]).unwrap(), 3);
-    assert_eq!(app.document.len(), 4);
+    assert_eq!(app.apply_paste_overwrite(&[0xaa, 0xbb]).unwrap(), 2);
+    assert_eq!(app.document.len(), 3);
     assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
     assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
-    assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Present(0xcc));
 }
 
 #[test]
-fn undo_reverts_entire_paste_as_one_action() {
+fn undo_reverts_overwrite_paste_as_one_action() {
     let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
     app.cursor = 1;
-    app.apply_paste_bytes(&[0xaa, 0xbb, 0xcc]).unwrap();
+    app.apply_paste_overwrite(&[0xaa, 0xbb]).unwrap();
     app.undo(1, true).unwrap();
 
     assert_eq!(app.document.len(), 3);
     assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0x22));
     assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x33));
-    assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Empty);
 }
 
 #[test]

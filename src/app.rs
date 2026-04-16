@@ -9,6 +9,8 @@ mod navigation;
 mod render;
 mod search;
 mod state;
+#[cfg(test)]
+mod tests;
 mod undo;
 
 use anyhow::Result;
@@ -61,6 +63,10 @@ pub struct App {
     inspector_format_override: Option<String>,
     /// Inspector runtime state. Some when show_inspector == true and format detected.
     inspector: Option<InspectorState>,
+    /// Distinguishes “no detected format” from “detected but failed to parse”.
+    inspector_error: Option<String>,
+    /// Last non-fatal render read error already surfaced to stderr.
+    last_render_error: Option<String>,
 }
 
 /// Inspector panel runtime state.
@@ -186,7 +192,7 @@ impl App {
         let startup_begin = Instant::now();
         let config = cli.config()?;
         let after_config = Instant::now();
-        let mut document = Document::open(&cli.file, &config)?;
+        let document = Document::open(&cli.file, &config)?;
         let after_open = Instant::now();
         let cursor = if document.is_empty() {
             0
@@ -195,32 +201,7 @@ impl App {
         };
         let after_init = Instant::now();
 
-        // Initial format detection for inspector
-        let (show_inspector, inspector) = if config.inspector {
-            match crate::format::detect::detect_format(&mut document) {
-                Some(def) => {
-                    let name = def.name.clone();
-                    let structs =
-                        crate::format::parse::parse_format(&def, &mut document).unwrap_or_default();
-                    let rows = crate::format::parse::flatten(&structs);
-                    (
-                        true,
-                        Some(InspectorState {
-                            format_name: name,
-                            structs,
-                            rows,
-                            scroll_offset: 0,
-                            selected_row: 0,
-                            editing: None,
-                        }),
-                    )
-                }
-                None => (true, None),
-            }
-        } else {
-            (false, None)
-        };
-
+        let show_inspector = config.inspector;
         let mut app = Self {
             palette: Palette::new(config.color),
             viewport_top: align_offset(cursor, config.bytes_per_line),
@@ -251,9 +232,14 @@ impl App {
             config,
             show_inspector,
             inspector_format_override: None,
-            inspector,
+            inspector: None,
+            inspector_error: None,
+            last_render_error: None,
         };
 
+        if app.show_inspector {
+            app.refresh_inspector();
+        }
         app.sync_inspector_to_cursor();
         Ok(app)
     }

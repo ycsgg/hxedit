@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::commands::types::Command;
+use crate::commands::{split_command, types::Command};
 use crate::copy::{CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
 use crate::util::parse::{parse_hex_bytes, parse_offset};
@@ -37,7 +37,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         "g" | "goto" => {
             let arg = rest.ok_or(HxError::MissingArgument("offset"))?;
             Ok(Command::Goto {
-                offset: parse_offset(arg).map_err(|_| HxError::InvalidOffset(arg.to_owned()))?,
+                offset: parse_offset(arg)?,
             })
         }
         "s" | "s!" => {
@@ -58,15 +58,6 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             })
         }
         other => Err(HxError::UnknownCommand(other.to_owned())),
-    }
-}
-
-fn split_command(input: &str) -> (&str, Option<&str>) {
-    if let Some(idx) = input.find(char::is_whitespace) {
-        let (name, tail) = input.split_at(idx);
-        (name, Some(tail.trim()))
-    } else {
-        (input, None)
     }
 }
 

@@ -1,31 +1,28 @@
-use anyhow::{anyhow, Result};
+use crate::error::{HxError, HxResult};
 
-use crate::error::HxError;
-
-pub fn parse_offset(input: &str) -> Result<u64> {
+pub fn parse_offset(input: &str) -> HxResult<u64> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err(HxError::InvalidOffset(input.to_owned()).into());
+        return Err(HxError::InvalidOffset(input.to_owned()));
     }
 
     if let Some(hex) = trimmed
         .strip_prefix("0x")
         .or_else(|| trimmed.strip_prefix("0X"))
     {
-        return u64::from_str_radix(hex, 16)
-            .map_err(|_| HxError::InvalidOffset(input.to_owned()).into());
+        return u64::from_str_radix(hex, 16).map_err(|_| HxError::InvalidOffset(input.to_owned()));
     }
 
     trimmed
         .parse::<u64>()
-        .map_err(|_| anyhow!(HxError::InvalidOffset(input.to_owned())))
+        .map_err(|_| HxError::InvalidOffset(input.to_owned()))
 }
 
 pub fn parse_hex_nibble(c: char) -> Option<u8> {
     c.to_digit(16).map(|value| value as u8)
 }
 
-pub fn parse_hex_bytes(input: &str) -> Result<Vec<u8>, HxError> {
+pub fn parse_hex_bytes(input: &str) -> HxResult<Vec<u8>> {
     let compact: String = input.chars().filter(|c| !c.is_whitespace()).collect();
     if compact.is_empty() {
         return Err(HxError::EmptySearch);
@@ -48,7 +45,7 @@ pub fn parse_hex_bytes(input: &str) -> Result<Vec<u8>, HxError> {
     Ok(out)
 }
 
-pub fn parse_hex_stream(input: &str) -> Result<Vec<u8>, HxError> {
+pub fn parse_hex_stream(input: &str) -> HxResult<Vec<u8>> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(HxError::InvalidHexPattern(input.to_owned()));
@@ -78,14 +75,14 @@ pub fn parse_hex_stream(input: &str) -> Result<Vec<u8>, HxError> {
     }
 }
 
-pub fn parse_paste_text_bytes(input: &str) -> Result<Vec<u8>, HxError> {
+pub fn parse_paste_text_bytes(input: &str) -> HxResult<Vec<u8>> {
     if let Ok(hex) = parse_hex_stream(input) {
         return Ok(hex);
     }
     decode_base64(input).map_err(|_| HxError::InvalidPasteData(input.trim().to_owned()))
 }
 
-pub fn decode_base64(input: &str) -> Result<Vec<u8>, HxError> {
+pub fn decode_base64(input: &str) -> HxResult<Vec<u8>> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(HxError::InvalidPasteData(input.to_owned()));
@@ -135,7 +132,7 @@ pub fn decode_base64(input: &str) -> Result<Vec<u8>, HxError> {
     Ok(out)
 }
 
-fn decode_base64_chunk(chunk: &[u8; 4], out: &mut Vec<u8>) -> Result<(), HxError> {
+fn decode_base64_chunk(chunk: &[u8; 4], out: &mut Vec<u8>) -> HxResult<()> {
     if chunk[0] == 64 || chunk[1] == 64 {
         return Err(HxError::InvalidPasteData("invalid base64 chunk".to_owned()));
     }

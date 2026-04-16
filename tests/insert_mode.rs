@@ -318,15 +318,15 @@ fn search_does_not_match_across_tombstone() {
     doc.delete_byte(2).unwrap(); // tombstone 'c'
 
     // "bc" should not match because 'c' is tombstoned
-    let found = doc.search_forward(0, &[b'b', b'c']).unwrap();
+    let found = doc.search_forward(0, b"bc").unwrap();
     assert_eq!(found, None);
 
     // But "ab" still matches
-    let found = doc.search_forward(0, &[b'a', b'b']).unwrap();
+    let found = doc.search_forward(0, b"ab").unwrap();
     assert_eq!(found, Some(0));
 
     // And "de" still matches (across the tombstone gap)
-    let found = doc.search_forward(0, &[b'd', b'e']).unwrap();
+    let found = doc.search_forward(0, b"de").unwrap();
     assert_eq!(found, Some(3));
 }
 

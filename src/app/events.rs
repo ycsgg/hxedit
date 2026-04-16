@@ -1,284 +1,19 @@
-use anyhow::Result;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 use crate::action::Action;
 use crate::app::App;
-use crate::error::HxError;
+use crate::error::{HxError, HxResult};
 use crate::format::parse::InspectorRow;
-use crate::mode::{Mode, NibblePhase};
+use crate::mode::Mode;
+use crate::mode::NibblePhase;
 
 impl App {
-    pub(crate) fn handle_action(&mut self, action: Action) -> Result<()> {
-        let result: crate::error::HxResult<()> = match action {
-            Action::MoveLeft => self.move_horizontal(-1),
-            Action::MoveRight => self.move_horizontal(1),
-            Action::MoveUp => self.move_vertical(-1),
-            Action::MoveDown => self.move_vertical(1),
-            Action::PageUp => self.move_vertical(-(self.view_rows as i64)),
-            Action::PageDown => self.move_vertical(self.view_rows as i64),
-            Action::RowStart => self.move_row_edge(false),
-            Action::RowEnd => self.move_row_edge(true),
-            Action::ToggleVisual => self.toggle_visual(),
-            Action::EnterInsert => {
-                if self.document.is_readonly() {
-                    Err(HxError::ReadOnly)
-                } else {
-                    self.mode = Mode::InsertHex { pending: None };
-                    Ok(())
-                }
-            }
-            Action::EnterReplace => {
-                if self.document.is_readonly() {
-                    Err(HxError::ReadOnly)
-                } else {
-                    self.mode = Mode::EditHex {
-                        phase: NibblePhase::High,
-                    };
-                    Ok(())
-                }
-            }
-            Action::EnterCommand => {
-                let return_mode = if matches!(self.mode, Mode::InsertHex { .. }) {
-                    self.commit_pending_insert()?;
-                    Mode::Normal
-                } else {
-                    self.mode
-                };
-                self.command_return_mode = Some(return_mode);
-                self.mode = Mode::Command;
-                self.command_buffer.clear();
-                self.command_cursor_pos = 0;
-                Ok(())
-            }
-            Action::LeaveMode => self.leave_mode(),
-            Action::DeleteByte => self.delete_at_cursor_or_selection(),
-            Action::SearchNext => self.repeat_search(crate::app::SearchDirection::Forward),
-            Action::SearchPrev => self.repeat_search(crate::app::SearchDirection::Backward),
-            Action::Undo(steps) => {
-                if self.undo_pending_insert()? {
-                    if steps > 1 {
-                        self.undo(steps - 1, true)
-                    } else {
-                        Ok(())
-                    }
-                } else {
-                    self.undo(steps, true)
-                }
-            }
-            Action::EditHex(value) => match self.mode {
-                Mode::InsertHex { .. } => self.insert_nibble(value),
-                _ => self.edit_nibble(value),
-            },
-            Action::EditBackspace => self.edit_backspace(),
-            Action::CommandChar(c) => {
-                let pos = self.command_cursor_pos.min(self.command_buffer.len());
-                self.command_buffer.insert(pos, c);
-                self.command_cursor_pos = pos + c.len_utf8();
-                Ok(())
-            }
-            Action::CommandLeft => {
-                self.command_cursor_pos =
-                    prev_char_boundary(&self.command_buffer, self.command_cursor_pos);
-                Ok(())
-            }
-            Action::CommandRight => {
-                self.command_cursor_pos =
-                    next_char_boundary(&self.command_buffer, self.command_cursor_pos);
-                Ok(())
-            }
-            Action::CommandHome => {
-                self.command_cursor_pos = 0;
-                Ok(())
-            }
-            Action::CommandEnd => {
-                self.command_cursor_pos = self.command_buffer.len();
-                Ok(())
-            }
-            Action::CommandDelete => {
-                if self.command_cursor_pos < self.command_buffer.len() {
-                    let next = next_char_boundary(&self.command_buffer, self.command_cursor_pos);
-                    self.command_buffer
-                        .replace_range(self.command_cursor_pos..next, "");
-                }
-                Ok(())
-            }
-            Action::CommandBackspace => {
-                if self.command_cursor_pos > 0 {
-                    let prev = prev_char_boundary(&self.command_buffer, self.command_cursor_pos);
-                    self.command_buffer
-                        .replace_range(prev..self.command_cursor_pos, "");
-                    self.command_cursor_pos = prev;
-                }
-                Ok(())
-            }
-            Action::CommandSubmit => self.submit_command(),
-            Action::CommandCancel => {
-                self.command_buffer.clear();
-                self.command_cursor_pos = 0;
-                let return_mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
-                self.mode = self.normalize_mode(return_mode);
-                Ok(())
-            }
-            Action::ForceQuit => {
-                self.should_quit = true;
-                Ok(())
-            }
-            Action::ToggleInspector => {
-                self.toggle_inspector_mode();
-                Ok(())
-            }
-            Action::InspectorUp => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if inspector.editing.is_some() {
-                        return Ok(());
-                    }
-                    let mut target = inspector.selected_row;
-                    loop {
-                        if target == 0 {
-                            break;
-                        }
-                        target -= 1;
-                        if matches!(inspector.rows.get(target), Some(InspectorRow::Field { .. })) {
-                            inspector.selected_row = target;
-                            break;
-                        }
-                    }
-                    self.sync_cursor_to_inspector();
-                }
-                Ok(())
-            }
-            Action::InspectorDown => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if inspector.editing.is_some() {
-                        return Ok(());
-                    }
-                    let mut target = inspector.selected_row;
-                    loop {
-                        target += 1;
-                        if target >= inspector.rows.len() {
-                            break;
-                        }
-                        if matches!(inspector.rows.get(target), Some(InspectorRow::Field { .. })) {
-                            inspector.selected_row = target;
-                            break;
-                        }
-                    }
-                    self.sync_cursor_to_inspector();
-                }
-                Ok(())
-            }
-            Action::InspectorEnter => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if inspector.editing.is_some() {
-                        self.submit_inspector_edit()?;
-                    } else if let Some(InspectorRow::Field {
-                        editable: true,
-                        display,
-                        ..
-                    }) = inspector.rows.get(inspector.selected_row)
-                    {
-                        inspector.editing = Some(crate::app::InspectorEdit {
-                            row_index: inspector.selected_row,
-                            buffer: display.clone(),
-                            cursor_pos: display.len(),
-                        });
-                        self.mode = Mode::InspectorEdit;
-                    }
-                }
-                Ok(())
-            }
-            Action::InspectorChar(c) => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if let Some(edit) = inspector.editing.as_mut() {
-                        edit.buffer.insert(edit.cursor_pos, c);
-                        edit.cursor_pos += c.len_utf8();
-                    } else if c == 't' {
-                        self.toggle_inspector_mode();
-                    }
-                }
-                Ok(())
-            }
-            Action::InspectorBackspace => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if let Some(edit) = inspector.editing.as_mut() {
-                        if edit.cursor_pos > 0 {
-                            edit.cursor_pos = prev_char_boundary(&edit.buffer, edit.cursor_pos);
-                            edit.buffer.remove(edit.cursor_pos);
-                        }
-                    }
-                }
-                Ok(())
-            }
-            Action::InspectorLeft => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if let Some(edit) = inspector.editing.as_mut() {
-                        edit.cursor_pos = prev_char_boundary(&edit.buffer, edit.cursor_pos);
-                    }
-                }
-                Ok(())
-            }
-            Action::InspectorRight => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if let Some(edit) = inspector.editing.as_mut() {
-                        edit.cursor_pos = next_char_boundary(&edit.buffer, edit.cursor_pos);
-                    }
-                }
-                Ok(())
-            }
-            Action::InspectorHome => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if let Some(edit) = inspector.editing.as_mut() {
-                        edit.cursor_pos = 0;
-                    }
-                }
-                Ok(())
-            }
-            Action::InspectorEnd => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if let Some(edit) = inspector.editing.as_mut() {
-                        edit.cursor_pos = edit.buffer.len();
-                    }
-                }
-                Ok(())
-            }
-            Action::InspectorDelete => {
-                if let Some(inspector) = self.inspector.as_mut() {
-                    if let Some(edit) = inspector.editing.as_mut() {
-                        if edit.cursor_pos < edit.buffer.len() {
-                            edit.buffer.remove(edit.cursor_pos);
-                        }
-                    }
-                }
-                Ok(())
-            }
-        };
-
-        match result {
-            Ok(()) => {
-                self.ensure_cursor_visible();
-                self.sync_inspector_to_cursor();
-                if !matches!(
-                    action,
-                    Action::CommandChar(_)
-                        | Action::CommandLeft
-                        | Action::CommandRight
-                        | Action::CommandHome
-                        | Action::CommandEnd
-                        | Action::CommandDelete
-                        | Action::CommandBackspace
-                ) {
-                    self.clear_error_if_command_done();
-                }
-                Ok(())
-            }
-            Err(err) => {
-                self.status_message = err.to_string();
-                Ok(())
-            }
-        }
+    pub(crate) fn handle_action(&mut self, action: Action) -> HxResult<()> {
+        let result = self.dispatch_action(action);
+        self.finish_action(action, result)
     }
 
-    pub(crate) fn handle_mouse(&mut self, mouse_event: MouseEvent) -> Result<()> {
+    pub(crate) fn handle_mouse(&mut self, mouse_event: MouseEvent) -> HxResult<()> {
         match mouse_event.kind {
             MouseEventKind::ScrollUp => {
                 let over_inspector = self
@@ -430,6 +165,328 @@ impl App {
             _ => Ok(()),
         }
     }
+}
+
+impl App {
+    fn dispatch_action(&mut self, action: Action) -> HxResult<()> {
+        if let Some(result) = self.handle_navigation_action(action) {
+            return result;
+        }
+        if let Some(result) = self.handle_command_action(action) {
+            return result;
+        }
+        if let Some(result) = self.handle_inspector_action(action) {
+            return result;
+        }
+        self.handle_editor_action(action)
+    }
+
+    fn handle_navigation_action(&mut self, action: Action) -> Option<HxResult<()>> {
+        let result = match action {
+            Action::MoveLeft => self.move_horizontal(-1),
+            Action::MoveRight => self.move_horizontal(1),
+            Action::MoveUp => self.move_vertical(-1),
+            Action::MoveDown => self.move_vertical(1),
+            Action::PageUp => self.move_vertical(-(self.view_rows as i64)),
+            Action::PageDown => self.move_vertical(self.view_rows as i64),
+            Action::RowStart => self.move_row_edge(false),
+            Action::RowEnd => self.move_row_edge(true),
+            _ => return None,
+        };
+        Some(result)
+    }
+
+    fn handle_editor_action(&mut self, action: Action) -> HxResult<()> {
+        match action {
+            Action::ToggleVisual => self.toggle_visual(),
+            Action::EnterInsert => self.enter_hex_mode(true),
+            Action::EnterReplace => self.enter_hex_mode(false),
+            Action::EnterCommand => self.enter_command_mode(),
+            Action::LeaveMode => self.leave_mode(),
+            Action::DeleteByte => self.delete_at_cursor_or_selection(),
+            Action::SearchNext => self.repeat_search(crate::app::SearchDirection::Forward),
+            Action::SearchPrev => self.repeat_search(crate::app::SearchDirection::Backward),
+            Action::Undo(steps) => self.handle_undo_action(steps),
+            Action::EditHex(value) => self.handle_edit_hex_action(value),
+            Action::EditBackspace => self.edit_backspace(),
+            Action::ForceQuit => {
+                self.should_quit = true;
+                Ok(())
+            }
+            Action::ToggleInspector => {
+                self.toggle_inspector_mode();
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn handle_command_action(&mut self, action: Action) -> Option<HxResult<()>> {
+        let result = match action {
+            Action::CommandChar(c) => self.insert_command_char(c),
+            Action::CommandLeft => {
+                self.command_cursor_pos =
+                    prev_char_boundary(&self.command_buffer, self.command_cursor_pos);
+                Ok(())
+            }
+            Action::CommandRight => {
+                self.command_cursor_pos =
+                    next_char_boundary(&self.command_buffer, self.command_cursor_pos);
+                Ok(())
+            }
+            Action::CommandHome => {
+                self.command_cursor_pos = 0;
+                Ok(())
+            }
+            Action::CommandEnd => {
+                self.command_cursor_pos = self.command_buffer.len();
+                Ok(())
+            }
+            Action::CommandDelete => self.delete_command_char(),
+            Action::CommandBackspace => self.backspace_command_char(),
+            Action::CommandSubmit => self.submit_command(),
+            Action::CommandCancel => self.cancel_command_input(),
+            _ => return None,
+        };
+        Some(result)
+    }
+
+    fn handle_inspector_action(&mut self, action: Action) -> Option<HxResult<()>> {
+        let result = match action {
+            Action::InspectorUp => self.move_inspector_selection(true),
+            Action::InspectorDown => self.move_inspector_selection(false),
+            Action::InspectorEnter => self.handle_inspector_enter(),
+            Action::InspectorChar(c) => self.insert_inspector_char(c),
+            Action::InspectorBackspace => self.backspace_inspector_char(),
+            Action::InspectorLeft => self.move_inspector_cursor(true),
+            Action::InspectorRight => self.move_inspector_cursor(false),
+            Action::InspectorHome => self.set_inspector_cursor(true),
+            Action::InspectorEnd => self.set_inspector_cursor(false),
+            Action::InspectorDelete => self.delete_inspector_char(),
+            _ => return None,
+        };
+        Some(result)
+    }
+
+    fn finish_action(&mut self, action: Action, result: HxResult<()>) -> HxResult<()> {
+        match result {
+            Ok(()) => {
+                self.ensure_cursor_visible();
+                self.sync_inspector_to_cursor();
+                if !is_command_edit_action(action) {
+                    self.clear_error_if_command_done();
+                }
+                Ok(())
+            }
+            Err(err) => {
+                self.status_message = err.to_string();
+                Ok(())
+            }
+        }
+    }
+
+    fn enter_hex_mode(&mut self, insert: bool) -> HxResult<()> {
+        if self.document.is_readonly() {
+            return Err(HxError::ReadOnly);
+        }
+        self.mode = if insert {
+            Mode::InsertHex { pending: None }
+        } else {
+            Mode::EditHex {
+                phase: NibblePhase::High,
+            }
+        };
+        Ok(())
+    }
+
+    fn enter_command_mode(&mut self) -> HxResult<()> {
+        let return_mode = if matches!(self.mode, Mode::InsertHex { .. }) {
+            self.commit_pending_insert()?;
+            Mode::Normal
+        } else {
+            self.mode
+        };
+        self.command_return_mode = Some(return_mode);
+        self.mode = Mode::Command;
+        self.command_buffer.clear();
+        self.command_cursor_pos = 0;
+        Ok(())
+    }
+
+    fn handle_undo_action(&mut self, steps: usize) -> HxResult<()> {
+        if self.undo_pending_insert()? {
+            if steps > 1 {
+                self.undo(steps - 1, true)
+            } else {
+                Ok(())
+            }
+        } else {
+            self.undo(steps, true)
+        }
+    }
+
+    fn handle_edit_hex_action(&mut self, value: u8) -> HxResult<()> {
+        match self.mode {
+            Mode::InsertHex { .. } => self.insert_nibble(value),
+            _ => self.edit_nibble(value),
+        }
+    }
+
+    fn insert_command_char(&mut self, c: char) -> HxResult<()> {
+        let pos = self.command_cursor_pos.min(self.command_buffer.len());
+        self.command_buffer.insert(pos, c);
+        self.command_cursor_pos = pos + c.len_utf8();
+        Ok(())
+    }
+
+    fn delete_command_char(&mut self) -> HxResult<()> {
+        if self.command_cursor_pos < self.command_buffer.len() {
+            let next = next_char_boundary(&self.command_buffer, self.command_cursor_pos);
+            self.command_buffer
+                .replace_range(self.command_cursor_pos..next, "");
+        }
+        Ok(())
+    }
+
+    fn backspace_command_char(&mut self) -> HxResult<()> {
+        if self.command_cursor_pos > 0 {
+            let prev = prev_char_boundary(&self.command_buffer, self.command_cursor_pos);
+            self.command_buffer
+                .replace_range(prev..self.command_cursor_pos, "");
+            self.command_cursor_pos = prev;
+        }
+        Ok(())
+    }
+
+    fn cancel_command_input(&mut self) -> HxResult<()> {
+        self.command_buffer.clear();
+        self.command_cursor_pos = 0;
+        let return_mode = self.command_return_mode.take().unwrap_or(Mode::Normal);
+        self.mode = self.normalize_mode(return_mode);
+        Ok(())
+    }
+
+    fn move_inspector_selection(&mut self, upward: bool) -> HxResult<()> {
+        let Some(inspector) = self.inspector.as_mut() else {
+            return Ok(());
+        };
+        if inspector.editing.is_some() {
+            return Ok(());
+        }
+
+        let mut target = inspector.selected_row;
+        loop {
+            if upward {
+                if target == 0 {
+                    break;
+                }
+                target -= 1;
+            } else {
+                target += 1;
+                if target >= inspector.rows.len() {
+                    break;
+                }
+            }
+
+            if matches!(inspector.rows.get(target), Some(InspectorRow::Field { .. })) {
+                inspector.selected_row = target;
+                break;
+            }
+        }
+
+        self.sync_cursor_to_inspector();
+        Ok(())
+    }
+
+    fn handle_inspector_enter(&mut self) -> HxResult<()> {
+        let Some(inspector) = self.inspector.as_mut() else {
+            return Ok(());
+        };
+        if inspector.editing.is_some() {
+            return self.submit_inspector_edit();
+        }
+
+        if let Some(InspectorRow::Field {
+            editable: true,
+            display,
+            ..
+        }) = inspector.rows.get(inspector.selected_row)
+        {
+            inspector.editing = Some(crate::app::InspectorEdit {
+                row_index: inspector.selected_row,
+                buffer: display.clone(),
+                cursor_pos: display.len(),
+            });
+            self.mode = Mode::InspectorEdit;
+        }
+        Ok(())
+    }
+
+    fn insert_inspector_char(&mut self, c: char) -> HxResult<()> {
+        if let Some(inspector) = self.inspector.as_mut() {
+            if let Some(edit) = inspector.editing.as_mut() {
+                edit.buffer.insert(edit.cursor_pos, c);
+                edit.cursor_pos += c.len_utf8();
+            } else if c == 't' {
+                self.toggle_inspector_mode();
+            }
+        }
+        Ok(())
+    }
+
+    fn backspace_inspector_char(&mut self) -> HxResult<()> {
+        if let Some(edit) = self.inspector_edit_mut() {
+            if edit.cursor_pos > 0 {
+                edit.cursor_pos = prev_char_boundary(&edit.buffer, edit.cursor_pos);
+                edit.buffer.remove(edit.cursor_pos);
+            }
+        }
+        Ok(())
+    }
+
+    fn move_inspector_cursor(&mut self, left: bool) -> HxResult<()> {
+        if let Some(edit) = self.inspector_edit_mut() {
+            edit.cursor_pos = if left {
+                prev_char_boundary(&edit.buffer, edit.cursor_pos)
+            } else {
+                next_char_boundary(&edit.buffer, edit.cursor_pos)
+            };
+        }
+        Ok(())
+    }
+
+    fn set_inspector_cursor(&mut self, home: bool) -> HxResult<()> {
+        if let Some(edit) = self.inspector_edit_mut() {
+            edit.cursor_pos = if home { 0 } else { edit.buffer.len() };
+        }
+        Ok(())
+    }
+
+    fn delete_inspector_char(&mut self) -> HxResult<()> {
+        if let Some(edit) = self.inspector_edit_mut() {
+            if edit.cursor_pos < edit.buffer.len() {
+                edit.buffer.remove(edit.cursor_pos);
+            }
+        }
+        Ok(())
+    }
+
+    fn inspector_edit_mut(&mut self) -> Option<&mut crate::app::InspectorEdit> {
+        self.inspector.as_mut()?.editing.as_mut()
+    }
+}
+
+fn is_command_edit_action(action: Action) -> bool {
+    matches!(
+        action,
+        Action::CommandChar(_)
+            | Action::CommandLeft
+            | Action::CommandRight
+            | Action::CommandHome
+            | Action::CommandEnd
+            | Action::CommandDelete
+            | Action::CommandBackspace
+    )
 }
 
 fn prev_char_boundary(text: &str, cursor_pos: usize) -> usize {

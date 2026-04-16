@@ -407,7 +407,6 @@ impl Document {
         let has_tombstones = self.has_tombstones();
         let has_replacements = self.has_replacements();
         let mut matcher = KmpMatcher::new(pattern);
-        let pattern_len = pattern.len() as u64;
         let mut piece_display_start = 0_u64;
 
         for piece in pieces {
@@ -423,7 +422,6 @@ impl Document {
                 piece_display_start,
                 local_start,
                 &mut matcher,
-                pattern_len,
                 has_tombstones,
                 has_replacements,
             )? {
@@ -555,7 +553,6 @@ impl Document {
         piece_display_start: u64,
         local_start: u64,
         matcher: &mut KmpMatcher<'_>,
-        pattern_len: u64,
         has_tombstones: bool,
         has_replacements: bool,
     ) -> HxResult<Option<u64>> {
@@ -579,9 +576,7 @@ impl Document {
             );
 
             if !need_tombstone_scan && !need_replacement_scan {
-                if let Some(found) =
-                    scan_bytes_forward(&raw, display_offset, matcher, pattern_len)
-                {
+                if let Some(found) = scan_bytes_forward(&raw, display_offset, matcher) {
                     return Ok(Some(found));
                 }
             } else {
@@ -597,7 +592,9 @@ impl Document {
                         base
                     };
                     if matcher.feed(byte) {
-                        return Ok(Some(display_offset + idx as u64 + 1 - pattern_len));
+                        return Ok(Some(
+                            display_offset + idx as u64 + 1 - matcher.pattern_len(),
+                        ));
                     }
                 }
             }
@@ -797,17 +794,20 @@ impl<'a> KmpMatcher<'a> {
     fn reset(&mut self) {
         self.matched = 0;
     }
+
+    fn pattern_len(&self) -> u64 {
+        self.pattern.len() as u64
+    }
 }
 
 fn scan_bytes_forward(
     bytes: &[u8],
     display_offset: u64,
     matcher: &mut KmpMatcher<'_>,
-    pattern_len: u64,
 ) -> Option<u64> {
     for (idx, &byte) in bytes.iter().enumerate() {
         if matcher.feed(byte) {
-            return Some(display_offset + idx as u64 + 1 - pattern_len);
+            return Some(display_offset + idx as u64 + 1 - matcher.pattern_len());
         }
     }
     None

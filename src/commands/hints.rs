@@ -1,3 +1,5 @@
+use crate::commands::split_command;
+
 #[derive(Debug, Clone)]
 pub struct CommandHint {
     pub syntax: String,
@@ -169,15 +171,6 @@ fn paste_hint(name: &str, rest: Option<&str>, insert: bool) -> CommandHint {
             "overwrite existing bytes from cursor. default parses as hex/base64. ! pastes raw bytes. num limits pasted bytes."
                 .to_owned()
         },
-    }
-}
-
-fn split_command(input: &str) -> (&str, Option<&str>) {
-    if let Some(idx) = input.find(char::is_whitespace) {
-        let (name, tail) = input.split_at(idx);
-        (name, Some(tail.trim()))
-    } else {
-        (input, None)
     }
 }
 
