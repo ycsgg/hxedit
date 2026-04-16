@@ -82,11 +82,11 @@ mod tests {
     use super::{build, StatusInfo};
     use crate::app::StatusLevel;
     use crate::mode::{Mode, NibblePhase};
-    use crate::view::palette::Palette;
+    use crate::view::palette::{ColorLevel, Palette};
 
     #[test]
     fn warning_messages_use_warning_style() {
-        let palette = Palette::new(true);
+        let palette = Palette::new(ColorLevel::Basic);
         let line = build(
             StatusInfo {
                 mode: Mode::EditHex {
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn error_messages_use_error_style() {
-        let palette = Palette::new(true);
+        let palette = Palette::new(ColorLevel::Basic);
         let line = build(
             StatusInfo {
                 mode: Mode::EditHex {
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn status_line_includes_visible_and_logical_selection_lengths() {
-        let palette = Palette::new(false);
+        let palette = Palette::new(ColorLevel::NoColor);
         let line = build(
             StatusInfo {
                 mode: Mode::Normal,

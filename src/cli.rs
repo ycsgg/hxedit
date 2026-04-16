@@ -5,6 +5,8 @@ use clap::Parser;
 use crate::config::Config;
 use crate::util::parse::parse_offset;
 
+use crate::view::palette::ColorLevel;
+
 #[derive(Debug, Parser)]
 #[command(name = "hxedit", version, about = "Hex editor for the terminal")]
 pub struct Cli {
@@ -45,7 +47,7 @@ impl Cli {
             cache_pages: self.cache_pages.max(4),
             profile: self.profile,
             readonly: self.readonly,
-            color: !self.no_color,
+            color_level: ColorLevel::detect(self.no_color),
             initial_offset: match &self.offset {
                 Some(value) => parse_offset(value)?,
                 None => 0,

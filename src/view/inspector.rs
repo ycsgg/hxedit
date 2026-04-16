@@ -255,7 +255,7 @@ fn char_count(text: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::palette::Palette;
+    use crate::view::palette::{ColorLevel, Palette};
 
     #[test]
     fn field_value_wraps_to_multiple_visual_lines() {
@@ -272,7 +272,7 @@ mod tests {
             0,
             None,
             20,
-            &Palette::new(true),
+            &Palette::new(ColorLevel::Basic),
         );
         assert!(lines.len() > 1);
         assert!(lines.iter().all(|line| line.row_index == 0));
@@ -293,7 +293,7 @@ mod tests {
             0,
             Some(("abcdefghijklmnop", 12)),
             20,
-            &Palette::new(true),
+            &Palette::new(ColorLevel::Basic),
         );
         assert!(lines.iter().skip(1).any(|line| line.cursor_col.is_some()));
     }
@@ -313,7 +313,7 @@ mod tests {
             0,
             Some(("abcdefghijklmnop", 2)),
             20,
-            &Palette::new(true),
+            &Palette::new(ColorLevel::Basic),
         );
         assert!(lines.iter().any(|line| line.cursor_col.is_some()));
     }

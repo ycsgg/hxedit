@@ -254,7 +254,7 @@ impl App {
 
         let show_inspector = config.inspector;
         let mut app = Self {
-            palette: Palette::new(config.color),
+            palette: Palette::new(config.color_level),
             viewport_top: align_offset(cursor, config.bytes_per_line),
             mode: Mode::Normal,
             command_buffer: String::new(),

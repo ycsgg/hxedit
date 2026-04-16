@@ -1,3 +1,5 @@
+use crate::view::palette::ColorLevel;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub bytes_per_line: usize,
@@ -5,7 +7,7 @@ pub struct Config {
     pub cache_pages: usize,
     pub profile: bool,
     pub readonly: bool,
-    pub color: bool,
+    pub color_level: ColorLevel,
     pub initial_offset: u64,
     pub inspector: bool,
 }
@@ -18,7 +20,7 @@ impl Default for Config {
             cache_pages: 128,
             profile: false,
             readonly: false,
-            color: true,
+            color_level: ColorLevel::detect(false),
             initial_offset: 0,
             inspector: false,
         }

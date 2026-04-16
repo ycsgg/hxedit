@@ -69,6 +69,13 @@ Useful CLI flags:
 
 - `--no-color`
   - disable color styling
+  - also disabled automatically when the `NO_COLOR` environment variable is set
+
+hxedit auto-detects terminal color support and selects the best palette:
+- true-color (RGB) when the terminal supports 16 million colors
+- 256-color (indexed) when the terminal supports 256 colors
+- 16-color (ANSI named) when only basic color support is detected
+- no color when the terminal has no color support or `--no-color` / `NO_COLOR` is set
 
 Examples:
 
