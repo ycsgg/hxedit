@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 
@@ -23,13 +23,26 @@ impl CacheStats {
     }
 }
 
+/// A cached page along with its last-touched generation counter.
+#[derive(Debug)]
+struct CachedPage {
+    data: Vec<u8>,
+    last_used: u64,
+}
+
 /// Small page cache to avoid repeated seek/read calls while scrolling.
+///
+/// LRU is approximated via a monotonic generation counter: every hit or miss
+/// bumps `generation` and stores it on the touched page. Eviction scans the
+/// (capacity-bounded) entries to drop the oldest. This keeps touch O(1) — the
+/// hot path during sequential scrolling — and pays an O(capacity) tax only
+/// when we evict, which happens at most once per miss.
 #[derive(Debug)]
 pub struct PageCache {
     page_size: usize,
     capacity: usize,
-    entries: HashMap<u64, Vec<u8>>,
-    order: VecDeque<u64>,
+    entries: HashMap<u64, CachedPage>,
+    generation: u64,
     stats: CacheStats,
 }
 
@@ -39,14 +52,14 @@ impl PageCache {
             page_size,
             capacity,
             entries: HashMap::new(),
-            order: VecDeque::new(),
+            generation: 0,
             stats: CacheStats::default(),
         }
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
-        self.order.clear();
+        self.generation = 0;
     }
 
     pub fn stats(&self) -> CacheStats {
@@ -62,17 +75,16 @@ impl PageCache {
         let start_page = offset / self.page_size as u64;
         let end_page = (offset + len.saturating_sub(1) as u64) / self.page_size as u64;
 
-        // Ensure all needed pages are loaded into the cache.
         for page_idx in start_page..=end_page {
             self.ensure_loaded(file, page_idx)?;
         }
 
-        // Now borrow immutably to assemble the result without cloning pages.
         let mut out = Vec::with_capacity(len);
         for page_idx in start_page..=end_page {
-            let Some(page) = self.entries.get(&page_idx) else {
+            let Some(entry) = self.entries.get(&page_idx) else {
                 break;
             };
+            let page = &entry.data;
             let page_start = page_idx * self.page_size as u64;
             let slice_start = if offset > page_start {
                 (offset - page_start) as usize
@@ -90,11 +102,11 @@ impl PageCache {
         Ok(out)
     }
 
-    /// Ensure a page is present in the cache, loading it from disk if needed.
     fn ensure_loaded(&mut self, file: &mut File, page_idx: u64) -> io::Result<()> {
-        if self.entries.contains_key(&page_idx) {
+        if let Some(entry) = self.entries.get_mut(&page_idx) {
             self.stats.page_hits += 1;
-            self.touch(page_idx);
+            self.generation += 1;
+            entry.last_used = self.generation;
             return Ok(());
         }
 
@@ -105,23 +117,25 @@ impl PageCache {
         let read = file.read(&mut buf)?;
         buf.truncate(read);
 
-        self.entries.insert(page_idx, buf);
-        self.touch(page_idx);
+        self.generation += 1;
+        self.entries.insert(
+            page_idx,
+            CachedPage {
+                data: buf,
+                last_used: self.generation,
+            },
+        );
         self.evict_if_needed();
         Ok(())
     }
 
-    fn touch(&mut self, page_idx: u64) {
-        if let Some(pos) = self.order.iter().position(|idx| *idx == page_idx) {
-            self.order.remove(pos);
-        }
-        self.order.push_back(page_idx);
-    }
-
     fn evict_if_needed(&mut self) {
         while self.entries.len() > self.capacity {
-            if let Some(oldest) = self.order.pop_front() {
-                self.entries.remove(&oldest);
+            if let Some((&victim, _)) = self.entries.iter().min_by_key(|(_, entry)| entry.last_used)
+            {
+                self.entries.remove(&victim);
+            } else {
+                break;
             }
         }
     }
