@@ -304,20 +304,36 @@ impl App {
             return self.submit_inspector_edit();
         }
 
-        if let Some(InspectorRow::Field {
-            editable: true,
-            display,
-            ..
-        }) = inspector.rows.get(inspector.selected_row)
-        {
-            inspector.editing = Some(crate::app::InspectorEdit {
-                row_index: inspector.selected_row,
-                buffer: display.clone(),
-                cursor_pos: display.len(),
-            });
-            self.mode = Mode::InspectorEdit;
-            if let Some(warning) = self.inspector_edit_warning() {
-                self.set_warning_status(warning);
+        if let Some(row) = inspector.rows.get(inspector.selected_row) {
+            match row {
+                InspectorRow::Field {
+                    editable: true,
+                    display,
+                    ..
+                } => {
+                    inspector.editing = Some(crate::app::InspectorEdit {
+                        row_index: inspector.selected_row,
+                        buffer: display.clone(),
+                        cursor_pos: display.len(),
+                    });
+                    self.mode = Mode::InspectorEdit;
+                    if let Some(warning) = self.inspector_edit_warning() {
+                        self.set_warning_status(warning);
+                    }
+                }
+                InspectorRow::Field {
+                    editable: false,
+                    name,
+                    ..
+                } => {
+                    let format_name = inspector.format_name.clone();
+                    let field_name = name.clone();
+                    let _ = inspector;
+                    self.set_info_status(
+                        self.inspector_read_only_message(&format_name, &field_name),
+                    );
+                }
+                InspectorRow::Header { .. } => {}
             }
         }
         Ok(())
@@ -418,13 +434,17 @@ mod tests {
     }
 
     fn app_with_inspector_field_for(format_name: &str) -> App {
+        app_with_inspector_field_editable(format_name, true)
+    }
+
+    fn app_with_inspector_field_editable(format_name: &str, editable: bool) -> App {
         let mut app = app_with_len(4);
         let field = FieldDef {
             name: "entry".to_owned(),
             offset: 0,
             field_type: FieldType::U8,
             description: String::new(),
-            editable: true,
+            editable,
         };
         let structs = vec![StructValue {
             name: "Header".to_owned(),
@@ -609,6 +629,62 @@ mod tests {
 
         assert_eq!(app.mode, Mode::Inspector);
         assert!(!app.status_message.contains("too narrow"));
+    }
+
+    #[test]
+    fn entering_inspector_without_detected_format_stays_in_normal_with_hint() {
+        let mut app = app_with_len(8);
+        app.mode = Mode::Normal;
+        app.last_columns = Some(crate::view::layout::MainColumns {
+            gutter: Rect::new(0, 0, 8, 4),
+            sep1: Rect::new(8, 0, 1, 4),
+            hex: Rect::new(9, 0, 90, 4),
+            sep2: Rect::new(99, 0, 1, 4),
+            ascii: Rect::new(100, 0, 40, 4),
+            sep3: None,
+            inspector: None,
+        });
+
+        app.handle_action(Action::ToggleInspector);
+
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.show_inspector);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("no format detected"));
+        assert!(app.status_message.contains("ELF / PNG / ZIP"));
+    }
+
+    #[test]
+    fn entering_view_only_inspector_reports_read_only_mode() {
+        let mut app = app_with_inspector_field_editable("TEST", false);
+        app.mode = Mode::Normal;
+        app.last_columns = Some(crate::view::layout::MainColumns {
+            gutter: Rect::new(0, 0, 8, 4),
+            sep1: Rect::new(8, 0, 1, 4),
+            hex: Rect::new(9, 0, 90, 4),
+            sep2: Rect::new(99, 0, 1, 4),
+            ascii: Rect::new(100, 0, 40, 4),
+            sep3: None,
+            inspector: None,
+        });
+
+        app.handle_action(Action::ToggleInspector);
+
+        assert_eq!(app.mode, Mode::Inspector);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Info);
+        assert!(app.status_message.contains("view-only"));
+    }
+
+    #[test]
+    fn inspector_enter_on_read_only_field_reports_reason() {
+        let mut app = app_with_inspector_field_editable("TEST", false);
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::Inspector);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Info);
+        assert!(app.status_message.contains("read-only"));
+        assert!(app.status_message.contains("entry"));
     }
 
     #[test]

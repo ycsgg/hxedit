@@ -8,6 +8,29 @@ use crate::view::inspector as inspector_view;
 use crate::view::layout::MIN_INSPECTOR_WIDTH;
 
 impl App {
+    fn supported_inspector_formats() -> &'static str {
+        "ELF / PNG / ZIP"
+    }
+
+    pub(crate) fn inspector_has_editable_fields(&self) -> bool {
+        self.inspector
+            .as_ref()
+            .map(|inspector| {
+                inspector
+                    .rows
+                    .iter()
+                    .any(|row| matches!(row, InspectorRow::Field { editable: true, .. }))
+            })
+            .unwrap_or(false)
+    }
+
+    fn no_format_detected_message(&self) -> String {
+        format!(
+            "inspector unavailable: no format detected (supported: {}; use :format to force)",
+            Self::supported_inspector_formats()
+        )
+    }
+
     fn current_main_inner_width(&self) -> Option<u16> {
         self.last_columns.map(|columns| {
             columns.gutter.width
@@ -59,8 +82,26 @@ impl App {
             self.warn_inspector_too_narrow();
             return false;
         }
+        if let Some(error) = self.inspector_error.as_ref() {
+            self.mode = Mode::Normal;
+            self.set_error_status(error.clone());
+            return false;
+        }
+        if self.inspector.is_none() {
+            self.mode = Mode::Normal;
+            self.set_warning_status(self.no_format_detected_message());
+            return false;
+        }
         self.mode = Mode::Inspector;
         self.sync_inspector_to_cursor();
+        if !self.inspector_has_editable_fields() {
+            let format_name = self
+                .inspector
+                .as_ref()
+                .map(|inspector| inspector.format_name.clone())
+                .unwrap_or_else(|| "current".to_owned());
+            self.set_info_status(format!("{format_name} inspector is view-only"));
+        }
         true
     }
 
@@ -180,6 +221,10 @@ impl App {
             self.inspector = None;
             self.inspector_error = None;
         }
+    }
+
+    pub(crate) fn inspector_empty_panel_message(&self) -> String {
+        self.no_format_detected_message()
     }
 
     /// Sync inspector selection to the current hex cursor when hex has focus.
@@ -322,6 +367,14 @@ impl App {
             self.set_info_status(format!("edited field at 0x{:x}", abs_offset));
         }
         Ok(())
+    }
+
+    pub(crate) fn inspector_read_only_message(
+        &self,
+        format_name: &str,
+        field_name: &str,
+    ) -> String {
+        format!("{format_name} field '{field_name}' is read-only in inspector")
     }
 
     pub(crate) fn find_field_def(&self, field_index: usize) -> Option<FieldDef> {

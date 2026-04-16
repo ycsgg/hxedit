@@ -313,6 +313,7 @@ Current limitation:
 
 - `:insp` `:inspector`
   - toggle the inspector panel
+  - if auto-detect finds no supported format, the panel stays visible with a hint and focus remains in the main view
 
 - `:format`
   - return to auto-detected inspector format
@@ -341,6 +342,8 @@ Current limitation:
 - The inspector is currently rebuilt by full detect + parse + flatten refreshes
 - It works best on a wide terminal
 - If the terminal is too narrow, inspector focus is rejected and a status warning is shown
+- If no supported format is detected, the panel shows an explicit unavailable message with `:format` guidance
+- Read-only inspector fields now report that they are view-only instead of silently doing nothing
 - Editable fields are not a promise of structure-safe output
 - PNG / ZIP inspector edits show warnings because structure consistency is not repaired automatically
 

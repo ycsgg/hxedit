@@ -274,7 +274,10 @@ impl App {
                 inspector_area,
             );
         } else {
-            frame.render_widget(Paragraph::new("No format detected"), inspector_area);
+            frame.render_widget(
+                Paragraph::new(self.inspector_empty_panel_message()).wrap(Wrap { trim: false }),
+                inspector_area,
+            );
         }
     }
 
