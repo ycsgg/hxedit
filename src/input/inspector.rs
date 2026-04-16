@@ -1,8 +1,13 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::action::Action;
+use crate::input::keymap::force_quit_action;
 
 pub fn map(key: KeyEvent) -> Option<Action> {
+    if let Some(action) = force_quit_action(&key) {
+        return Some(action);
+    }
+
     match key.code {
         // Navigation
         KeyCode::Up | KeyCode::Char('k') => Some(Action::InspectorUp),
@@ -27,11 +32,6 @@ pub fn map(key: KeyEvent) -> Option<Action> {
 
         // Backspace while editing
         KeyCode::Backspace => Some(Action::InspectorBackspace),
-
-        // Ctrl+C force quit
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(Action::ForceQuit)
-        }
 
         // Other chars become input when editing
         KeyCode::Char(c) => Some(Action::InspectorChar(c)),

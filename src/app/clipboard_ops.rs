@@ -3,6 +3,22 @@ use crate::clipboard;
 use crate::copy::{format_selection, CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
 
+impl PasteState {
+    fn new(source: PasteSource, bytes: usize, preview: bool, data: &[u8]) -> Self {
+        let head = data
+            .iter()
+            .take(4)
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let suffix = if data.len() > 4 { " ..." } else { "" };
+        let action = if preview { "preview" } else { "paste" };
+        Self {
+            summary: format!("{action} {}:{bytes} [{head}{suffix}]", source.label()),
+        }
+    }
+}
+
 impl App {
     pub(crate) fn copy_selection(
         &mut self,
@@ -44,9 +60,7 @@ impl App {
             bytes.truncate(limit);
         }
 
-        self.last_paste = Some(PasteState {
-            summary: crate::app::helpers::paste_summary(source, bytes.len(), preview, &bytes),
-        });
+        self.last_paste = Some(PasteState::new(source, bytes.len(), preview, &bytes));
 
         if preview {
             self.status_message = if bytes.is_empty() {

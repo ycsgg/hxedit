@@ -1,45 +1,37 @@
-use crate::app::text_cursor::{next_char_boundary, prev_char_boundary};
+use crate::app::text_cursor::{
+    backspace_char_before_cursor, delete_char_at_cursor, insert_char_at_cursor, move_cursor_end,
+    move_cursor_home, move_cursor_left, move_cursor_right,
+};
 use crate::app::App;
 use crate::mode::Mode;
 
 impl App {
     pub(crate) fn insert_command_char(&mut self, c: char) {
-        let pos = self.command_cursor_pos.min(self.command_buffer.len());
-        self.command_buffer.insert(pos, c);
-        self.command_cursor_pos = pos + c.len_utf8();
+        insert_char_at_cursor(&mut self.command_buffer, &mut self.command_cursor_pos, c);
     }
 
     pub(crate) fn move_command_cursor_left(&mut self) {
-        self.command_cursor_pos = prev_char_boundary(&self.command_buffer, self.command_cursor_pos);
+        move_cursor_left(&self.command_buffer, &mut self.command_cursor_pos);
     }
 
     pub(crate) fn move_command_cursor_right(&mut self) {
-        self.command_cursor_pos = next_char_boundary(&self.command_buffer, self.command_cursor_pos);
+        move_cursor_right(&self.command_buffer, &mut self.command_cursor_pos);
     }
 
     pub(crate) fn move_command_cursor_home(&mut self) {
-        self.command_cursor_pos = 0;
+        move_cursor_home(&mut self.command_cursor_pos);
     }
 
     pub(crate) fn move_command_cursor_end(&mut self) {
-        self.command_cursor_pos = self.command_buffer.len();
+        move_cursor_end(&self.command_buffer, &mut self.command_cursor_pos);
     }
 
     pub(crate) fn delete_command_char(&mut self) {
-        if self.command_cursor_pos < self.command_buffer.len() {
-            let next = next_char_boundary(&self.command_buffer, self.command_cursor_pos);
-            self.command_buffer
-                .replace_range(self.command_cursor_pos..next, "");
-        }
+        delete_char_at_cursor(&mut self.command_buffer, self.command_cursor_pos);
     }
 
     pub(crate) fn backspace_command_char(&mut self) {
-        if self.command_cursor_pos > 0 {
-            let prev = prev_char_boundary(&self.command_buffer, self.command_cursor_pos);
-            self.command_buffer
-                .replace_range(prev..self.command_cursor_pos, "");
-            self.command_cursor_pos = prev;
-        }
+        backspace_char_before_cursor(&mut self.command_buffer, &mut self.command_cursor_pos);
     }
 
     pub(crate) fn cancel_command_input(&mut self) {

@@ -4,7 +4,6 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::app::helpers::separator_widget;
 use crate::app::App;
 use crate::commands::hints;
 use crate::core::document::ByteSlot;
@@ -24,6 +23,13 @@ struct MainLines {
     gutter: Vec<Line<'static>>,
     hex: Vec<Line<'static>>,
     ascii: Vec<Line<'static>>,
+}
+
+fn separator_widget(height: u16, palette: &crate::view::palette::Palette) -> Paragraph<'static> {
+    let lines = (0..height)
+        .map(|_| Line::styled("│", palette.separator))
+        .collect::<Vec<_>>();
+    Paragraph::new(lines)
 }
 
 impl App {

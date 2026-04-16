@@ -6,7 +6,6 @@ mod command_input;
 mod commands;
 mod editing_state;
 mod events;
-mod helpers;
 mod inspector_state;
 mod mode_state;
 mod mouse;

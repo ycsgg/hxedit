@@ -1,17 +1,17 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::action::Action;
+use crate::input::keymap::{force_quit_action, movement_action};
 
 pub fn map(key: KeyEvent) -> Option<Action> {
+    if let Some(action) = force_quit_action(&key) {
+        return Some(action);
+    }
+    if let Some(action) = movement_action(&key.code) {
+        return Some(action);
+    }
+
     match key.code {
-        KeyCode::Left | KeyCode::Char('h') => Some(Action::MoveLeft),
-        KeyCode::Right | KeyCode::Char('l') => Some(Action::MoveRight),
-        KeyCode::Up | KeyCode::Char('k') => Some(Action::MoveUp),
-        KeyCode::Down | KeyCode::Char('j') => Some(Action::MoveDown),
-        KeyCode::PageUp => Some(Action::PageUp),
-        KeyCode::PageDown => Some(Action::PageDown),
-        KeyCode::Home => Some(Action::RowStart),
-        KeyCode::End => Some(Action::RowEnd),
         KeyCode::Char('v') => Some(Action::ToggleVisual),
         KeyCode::Char('i') => Some(Action::EnterInsert),
         KeyCode::Char('r') => Some(Action::EnterReplace),
@@ -21,9 +21,6 @@ pub fn map(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('t') => Some(Action::ToggleInspector),
         KeyCode::Char(':') => Some(Action::EnterCommand),
         KeyCode::Tab => Some(Action::ToggleInspector),
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(Action::ForceQuit)
-        }
         _ => None,
     }
 }

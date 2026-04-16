@@ -1,5 +1,8 @@
 use crate::action::Action;
-use crate::app::text_cursor::{next_char_boundary, prev_char_boundary};
+use crate::app::text_cursor::{
+    backspace_char_before_cursor, delete_char_at_cursor, insert_char_at_cursor, move_cursor_end,
+    move_cursor_home, move_cursor_left, move_cursor_right,
+};
 use crate::app::App;
 use crate::error::{HxError, HxResult};
 use crate::format::parse::InspectorRow;
@@ -15,55 +18,54 @@ impl App {
 
 impl App {
     fn dispatch_action(&mut self, action: Action) -> HxResult<()> {
-        if let Some(result) = self.handle_navigation_action(action) {
-            return result;
+        if self.handle_navigation_action(action) {
+            return Ok(());
         }
-        if let Some(result) = self.handle_command_action(action) {
-            return result;
+        if self.handle_command_action(action)? {
+            return Ok(());
         }
-        if let Some(result) = self.handle_inspector_action(action) {
-            return result;
+        if self.handle_inspector_action(action)? {
+            return Ok(());
         }
         self.handle_editor_action(action)
     }
 
-    fn handle_navigation_action(&mut self, action: Action) -> Option<HxResult<()>> {
-        let result = match action {
+    fn handle_navigation_action(&mut self, action: Action) -> bool {
+        match action {
             Action::MoveLeft => {
                 self.move_horizontal(-1);
-                Ok(())
+                true
             }
             Action::MoveRight => {
                 self.move_horizontal(1);
-                Ok(())
+                true
             }
             Action::MoveUp => {
                 self.move_vertical(-1);
-                Ok(())
+                true
             }
             Action::MoveDown => {
                 self.move_vertical(1);
-                Ok(())
+                true
             }
             Action::PageUp => {
                 self.move_vertical(-(self.view_rows as i64));
-                Ok(())
+                true
             }
             Action::PageDown => {
                 self.move_vertical(self.view_rows as i64);
-                Ok(())
+                true
             }
             Action::RowStart => {
                 self.move_row_edge(false);
-                Ok(())
+                true
             }
             Action::RowEnd => {
                 self.move_row_edge(true);
-                Ok(())
+                true
             }
-            _ => return None,
-        };
-        Some(result)
+            _ => false,
+        }
     }
 
     fn handle_editor_action(&mut self, action: Action) -> HxResult<()> {
@@ -100,88 +102,92 @@ impl App {
         }
     }
 
-    fn handle_command_action(&mut self, action: Action) -> Option<HxResult<()>> {
-        let result = match action {
+    fn handle_command_action(&mut self, action: Action) -> HxResult<bool> {
+        match action {
             Action::CommandChar(c) => {
                 self.insert_command_char(c);
-                Ok(())
+                Ok(true)
             }
             Action::CommandLeft => {
                 self.move_command_cursor_left();
-                Ok(())
+                Ok(true)
             }
             Action::CommandRight => {
                 self.move_command_cursor_right();
-                Ok(())
+                Ok(true)
             }
             Action::CommandHome => {
                 self.move_command_cursor_home();
-                Ok(())
+                Ok(true)
             }
             Action::CommandEnd => {
                 self.move_command_cursor_end();
-                Ok(())
+                Ok(true)
             }
             Action::CommandDelete => {
                 self.delete_command_char();
-                Ok(())
+                Ok(true)
             }
             Action::CommandBackspace => {
                 self.backspace_command_char();
-                Ok(())
+                Ok(true)
             }
-            Action::CommandSubmit => self.submit_command(),
+            Action::CommandSubmit => {
+                self.submit_command()?;
+                Ok(true)
+            }
             Action::CommandCancel => {
                 self.cancel_command_input();
-                Ok(())
+                Ok(true)
             }
-            _ => return None,
-        };
-        Some(result)
+            _ => Ok(false),
+        }
     }
 
-    fn handle_inspector_action(&mut self, action: Action) -> Option<HxResult<()>> {
-        let result = match action {
+    fn handle_inspector_action(&mut self, action: Action) -> HxResult<bool> {
+        match action {
             Action::InspectorUp => {
                 self.move_inspector_selection(true);
-                Ok(())
+                Ok(true)
             }
             Action::InspectorDown => {
                 self.move_inspector_selection(false);
-                Ok(())
+                Ok(true)
             }
-            Action::InspectorEnter => self.handle_inspector_enter(),
+            Action::InspectorEnter => {
+                self.handle_inspector_enter()?;
+                Ok(true)
+            }
             Action::InspectorChar(c) => {
                 self.insert_inspector_char(c);
-                Ok(())
+                Ok(true)
             }
             Action::InspectorBackspace => {
                 self.backspace_inspector_char();
-                Ok(())
+                Ok(true)
             }
             Action::InspectorLeft => {
                 self.move_inspector_cursor(true);
-                Ok(())
+                Ok(true)
             }
             Action::InspectorRight => {
                 self.move_inspector_cursor(false);
-                Ok(())
+                Ok(true)
             }
             Action::InspectorHome => {
                 self.set_inspector_cursor(true);
-                Ok(())
+                Ok(true)
             }
             Action::InspectorEnd => {
                 self.set_inspector_cursor(false);
-                Ok(())
+                Ok(true)
             }
             Action::InspectorDelete => {
                 self.delete_inspector_char();
-                Ok(())
+                Ok(true)
             }
-            _ => return None,
-        };
-        Some(result)
+            _ => Ok(false),
+        }
     }
 
     fn finish_action(&mut self, action: Action, result: HxResult<()>) {
@@ -303,8 +309,7 @@ impl App {
     fn insert_inspector_char(&mut self, c: char) {
         if let Some(inspector) = self.inspector.as_mut() {
             if let Some(edit) = inspector.editing.as_mut() {
-                edit.buffer.insert(edit.cursor_pos, c);
-                edit.cursor_pos += c.len_utf8();
+                insert_char_at_cursor(&mut edit.buffer, &mut edit.cursor_pos, c);
             } else if c == 't' {
                 self.toggle_inspector_mode();
             }
@@ -313,34 +318,33 @@ impl App {
 
     fn backspace_inspector_char(&mut self) {
         if let Some(edit) = self.inspector_edit_mut() {
-            if edit.cursor_pos > 0 {
-                edit.cursor_pos = prev_char_boundary(&edit.buffer, edit.cursor_pos);
-                edit.buffer.remove(edit.cursor_pos);
-            }
+            backspace_char_before_cursor(&mut edit.buffer, &mut edit.cursor_pos);
         }
     }
 
     fn move_inspector_cursor(&mut self, left: bool) {
         if let Some(edit) = self.inspector_edit_mut() {
-            edit.cursor_pos = if left {
-                prev_char_boundary(&edit.buffer, edit.cursor_pos)
+            if left {
+                move_cursor_left(&edit.buffer, &mut edit.cursor_pos);
             } else {
-                next_char_boundary(&edit.buffer, edit.cursor_pos)
-            };
+                move_cursor_right(&edit.buffer, &mut edit.cursor_pos);
+            }
         }
     }
 
     fn set_inspector_cursor(&mut self, home: bool) {
         if let Some(edit) = self.inspector_edit_mut() {
-            edit.cursor_pos = if home { 0 } else { edit.buffer.len() };
+            if home {
+                move_cursor_home(&mut edit.cursor_pos);
+            } else {
+                move_cursor_end(&edit.buffer, &mut edit.cursor_pos);
+            }
         }
     }
 
     fn delete_inspector_char(&mut self) {
         if let Some(edit) = self.inspector_edit_mut() {
-            if edit.cursor_pos < edit.buffer.len() {
-                edit.buffer.remove(edit.cursor_pos);
-            }
+            delete_char_at_cursor(&mut edit.buffer, edit.cursor_pos);
         }
     }
 
