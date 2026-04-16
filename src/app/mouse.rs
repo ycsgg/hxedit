@@ -1,52 +1,47 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 use crate::app::App;
-use crate::error::HxResult;
 use crate::mode::{Mode, NibblePhase};
+use crate::util::geometry::rect_contains;
 
 impl App {
-    pub(crate) fn handle_mouse(&mut self, mouse_event: MouseEvent) -> HxResult<()> {
+    pub(crate) fn handle_mouse(&mut self, mouse_event: MouseEvent) {
         match mouse_event.kind {
             MouseEventKind::ScrollUp => {
                 let over_inspector = self
                     .last_columns
                     .and_then(|columns| columns.inspector)
-                    .is_some_and(|area| {
-                        crate::app::helpers::contains(area, mouse_event.column, mouse_event.row)
-                    });
+                    .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row));
                 if over_inspector {
                     self.scroll_inspector(-3);
                 } else {
                     self.scroll_viewport(-3);
                     self.sync_inspector_to_cursor();
                 }
-                Ok(())
             }
             MouseEventKind::ScrollDown => {
                 let over_inspector = self
                     .last_columns
                     .and_then(|columns| columns.inspector)
-                    .is_some_and(|area| {
-                        crate::app::helpers::contains(area, mouse_event.column, mouse_event.row)
-                    });
+                    .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row));
                 if over_inspector {
                     self.scroll_inspector(3);
                 } else {
                     self.scroll_viewport(3);
                     self.sync_inspector_to_cursor();
                 }
-                Ok(())
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 let Some(columns) = self.last_columns else {
-                    return Ok(());
+                    return;
                 };
 
-                if columns.inspector.is_some_and(|area| {
-                    crate::app::helpers::contains(area, mouse_event.column, mouse_event.row)
-                }) {
+                if columns
+                    .inspector
+                    .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row))
+                {
                     if !self.mode.is_inspector() {
-                        self.leave_mode()?;
+                        self.leave_mode();
                     }
                     self.mode = Mode::Inspector;
                 }
@@ -79,14 +74,14 @@ impl App {
                                 self.sync_cursor_to_inspector();
                             }
                         }
-                        return Ok(());
+                        return;
                     }
 
                     if self.mode.is_inspector() {
-                        self.leave_mode()?;
+                        self.leave_mode();
                     }
                     if matches!(self.mode, Mode::InsertHex { .. }) {
-                        self.commit_pending_insert()?;
+                        self.commit_pending_insert();
                     }
                     self.mouse_selection_anchor = Some(hit.offset);
                     self.cursor = hit.offset;
@@ -114,22 +109,11 @@ impl App {
                     }
                     self.ensure_cursor_visible();
                     self.sync_inspector_to_cursor();
-                    return Ok(());
                 }
-
-                if matches!(self.mode, Mode::Command)
-                    && self.last_command_area.is_some_and(|rect| {
-                        crate::app::helpers::contains(rect, mouse_event.column, mouse_event.row)
-                    })
-                {
-                    return Ok(());
-                }
-
-                Ok(())
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 let Some(columns) = self.last_columns else {
-                    return Ok(());
+                    return;
                 };
                 let Some(hit) = crate::input::mouse::hit_test(
                     columns,
@@ -139,7 +123,7 @@ impl App {
                     self.config.bytes_per_line,
                     self.document.len(),
                 ) else {
-                    return Ok(());
+                    return;
                 };
 
                 let anchor = self.mouse_selection_anchor.unwrap_or(hit.offset);
@@ -148,13 +132,11 @@ impl App {
                 self.mode = Mode::Visual;
                 self.ensure_cursor_visible();
                 self.sync_inspector_to_cursor();
-                Ok(())
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 self.mouse_selection_anchor = None;
-                Ok(())
             }
-            _ => Ok(()),
+            _ => {}
         }
     }
 }

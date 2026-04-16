@@ -116,14 +116,14 @@ fn command_undo_can_rewind_multiple_changes() {
 #[test]
 fn toggling_visual_tracks_selection_range() {
     let mut app = app_with_len(32);
-    app.toggle_visual().unwrap();
+    app.toggle_visual();
     assert_eq!(app.mode, Mode::Visual);
     assert_eq!(app.selection_range(), Some((0, 0)));
 
-    app.move_horizontal(3).unwrap();
+    app.move_horizontal(3);
     assert_eq!(app.selection_range(), Some((0, 3)));
 
-    app.toggle_visual().unwrap();
+    app.toggle_visual();
     assert_eq!(app.mode, Mode::Normal);
     assert_eq!(app.selection_range(), None);
 }
@@ -131,8 +131,8 @@ fn toggling_visual_tracks_selection_range() {
 #[test]
 fn visual_delete_removes_range_as_one_action() {
     let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
-    app.toggle_visual().unwrap();
-    app.move_horizontal(2).unwrap();
+    app.toggle_visual();
+    app.move_horizontal(2);
     app.delete_at_cursor_or_selection().unwrap();
 
     assert_eq!(app.mode, Mode::Normal);

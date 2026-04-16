@@ -15,6 +15,7 @@ mod render;
 mod search;
 #[cfg(test)]
 mod tests;
+mod text_cursor;
 mod undo;
 
 use anyhow::Result;
@@ -157,6 +158,15 @@ enum PasteSource {
     Raw,
 }
 
+impl From<crate::util::parse::PasteTextSource> for PasteSource {
+    fn from(source: crate::util::parse::PasteTextSource) -> Self {
+        match source {
+            crate::util::parse::PasteTextSource::Hex => Self::Hex,
+            crate::util::parse::PasteTextSource::Base64 => Self::Base64,
+        }
+    }
+}
+
 impl SearchKind {
     fn label(self) -> &'static str {
         match self {
@@ -296,14 +306,14 @@ impl App {
                             profiler.record_key_event();
                         }
                         if let Some(action) = map_key(self.mode, key) {
-                            self.handle_action(action)?;
+                            self.handle_action(action);
                         }
                     }
                     Event::Mouse(mouse) => {
                         if let Some(profiler) = self.profiler.as_mut() {
                             profiler.record_mouse_event();
                         }
-                        self.handle_mouse(mouse)?
+                        self.handle_mouse(mouse)
                     }
                     _ => {
                         if let Some(profiler) = self.profiler.as_mut() {

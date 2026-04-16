@@ -133,7 +133,7 @@ impl App {
             Some(pending) => {
                 self.document
                     .replace_display_byte(pending.offset, (pending.high_nibble << 4) | value)?;
-                self.commit_pending_insert()?;
+                self.commit_pending_insert();
                 self.cursor = pending.offset + 1;
                 self.refresh_inspector();
                 self.status_message = format!("inserted 0x{:x}", pending.offset);
@@ -185,12 +185,12 @@ impl App {
     }
 
     /// Finalize a half-completed insert byte into the undo stack.
-    pub(crate) fn commit_pending_insert(&mut self) -> HxResult<Option<u64>> {
+    pub(crate) fn commit_pending_insert(&mut self) -> Option<u64> {
         let pending = match self.mode {
             Mode::InsertHex {
                 pending: Some(pending),
             } => pending,
-            _ => return Ok(None),
+            _ => return None,
         };
 
         self.push_undo_step(
@@ -202,7 +202,7 @@ impl App {
             Mode::InsertHex { pending: None },
         );
         self.mode = Mode::InsertHex { pending: None };
-        Ok(Some(pending.offset))
+        Some(pending.offset)
     }
 
     /// Undo a pending insert without pushing an undo step.
@@ -222,10 +222,9 @@ impl App {
     }
 
     /// Commit any pending insert before a cursor move or mode switch.
-    pub(crate) fn ensure_insert_pending_committed(&mut self) -> HxResult<()> {
+    pub(crate) fn ensure_insert_pending_committed(&mut self) {
         if matches!(self.mode, Mode::InsertHex { .. }) {
-            self.commit_pending_insert()?;
+            self.commit_pending_insert();
         }
-        Ok(())
     }
 }

@@ -1,9 +1,8 @@
 use crate::app::App;
-use crate::error::HxResult;
 use crate::mode::Mode;
 
 impl App {
-    pub(crate) fn toggle_visual(&mut self) -> HxResult<()> {
+    pub(crate) fn toggle_visual(&mut self) {
         match self.mode {
             Mode::Visual => {
                 self.selection_anchor = None;
@@ -19,7 +18,6 @@ impl App {
             | Mode::Inspector
             | Mode::InspectorEdit => {}
         }
-        Ok(())
     }
 
     pub(crate) fn clear_error_if_command_done(&mut self) {
@@ -33,7 +31,7 @@ impl App {
     }
 
     /// Leave the current mode (Esc handler).
-    pub(crate) fn leave_mode(&mut self) -> HxResult<()> {
+    pub(crate) fn leave_mode(&mut self) {
         match self.mode {
             Mode::Visual => {
                 self.selection_anchor = None;
@@ -44,7 +42,7 @@ impl App {
                 self.mode = self.normalize_mode(return_mode);
             }
             Mode::InsertHex { .. } => {
-                self.commit_pending_insert()?;
+                self.commit_pending_insert();
                 self.mode = Mode::Normal;
             }
             Mode::Inspector => {
@@ -63,7 +61,6 @@ impl App {
                 self.mode = Mode::Normal;
             }
         }
-        Ok(())
     }
 
     pub(crate) fn normalize_mode(&self, mode: Mode) -> Mode {

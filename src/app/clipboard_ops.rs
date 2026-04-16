@@ -36,7 +36,8 @@ impl App {
             (clipboard::read_raw_bytes()?, PasteSource::Raw)
         } else {
             let text = clipboard::read_text()?;
-            crate::app::helpers::parse_paste_payload(&text)?
+            let (bytes, source) = crate::util::parse::parse_paste_text(&text)?;
+            (bytes, source.into())
         };
 
         if let Some(limit) = limit {

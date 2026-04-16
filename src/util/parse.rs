@@ -1,5 +1,11 @@
 use crate::error::{HxError, HxResult};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteTextSource {
+    Hex,
+    Base64,
+}
+
 pub fn parse_offset(input: &str) -> HxResult<u64> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -75,11 +81,17 @@ pub fn parse_hex_stream(input: &str) -> HxResult<Vec<u8>> {
     }
 }
 
-pub fn parse_paste_text_bytes(input: &str) -> HxResult<Vec<u8>> {
+pub fn parse_paste_text(input: &str) -> HxResult<(Vec<u8>, PasteTextSource)> {
     if let Ok(hex) = parse_hex_stream(input) {
-        return Ok(hex);
+        return Ok((hex, PasteTextSource::Hex));
     }
-    decode_base64(input).map_err(|_| HxError::InvalidPasteData(input.trim().to_owned()))
+    decode_base64(input)
+        .map(|bytes| (bytes, PasteTextSource::Base64))
+        .map_err(|_| HxError::InvalidPasteData(input.trim().to_owned()))
+}
+
+pub fn parse_paste_text_bytes(input: &str) -> HxResult<Vec<u8>> {
+    parse_paste_text(input).map(|(bytes, _)| bytes)
 }
 
 pub fn decode_base64(input: &str) -> HxResult<Vec<u8>> {
@@ -170,6 +182,10 @@ mod tests {
             parse_paste_text_bytes("data:image/png;base64,SGVsbG8=").unwrap(),
             b"Hello"
         );
+        assert_eq!(
+            parse_paste_text("SGVsbG8=").unwrap().1,
+            PasteTextSource::Base64
+        );
     }
 
     #[test]
@@ -177,6 +193,10 @@ mod tests {
         assert_eq!(
             parse_paste_text_bytes("deadbeef").unwrap(),
             vec![0xde, 0xad, 0xbe, 0xef]
+        );
+        assert_eq!(
+            parse_paste_text("deadbeef").unwrap().1,
+            PasteTextSource::Hex
         );
     }
 

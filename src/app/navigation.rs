@@ -1,29 +1,26 @@
 use crate::app::App;
-use crate::error::HxResult;
 use crate::mode::Mode;
 
 impl App {
-    pub(crate) fn move_horizontal(&mut self, delta: i64) -> HxResult<()> {
-        self.ensure_insert_pending_committed()?;
+    pub(crate) fn move_horizontal(&mut self, delta: i64) {
+        self.ensure_insert_pending_committed();
         self.cursor = self.offset_with_delta(self.cursor, delta);
         if let Mode::EditHex { ref mut phase } = self.mode {
             *phase = crate::mode::NibblePhase::High;
         }
-        Ok(())
     }
 
-    pub(crate) fn move_vertical(&mut self, rows: i64) -> HxResult<()> {
-        self.ensure_insert_pending_committed()?;
+    pub(crate) fn move_vertical(&mut self, rows: i64) {
+        self.ensure_insert_pending_committed();
         let delta = rows.saturating_mul(self.config.bytes_per_line as i64);
         self.cursor = self.offset_with_delta(self.cursor, delta);
         if let Mode::EditHex { ref mut phase } = self.mode {
             *phase = crate::mode::NibblePhase::High;
         }
-        Ok(())
     }
 
-    pub(crate) fn move_row_edge(&mut self, end: bool) -> HxResult<()> {
-        self.ensure_insert_pending_committed()?;
+    pub(crate) fn move_row_edge(&mut self, end: bool) {
+        self.ensure_insert_pending_committed();
         let row_start = align_offset(self.cursor, self.config.bytes_per_line);
         let target = if end {
             row_start + self.config.bytes_per_line.saturating_sub(1) as u64
@@ -31,7 +28,6 @@ impl App {
             row_start
         };
         self.cursor = self.clamp_cursor_for_mode(target, self.mode);
-        Ok(())
     }
 
     pub(crate) fn ensure_cursor_visible(&mut self) {

@@ -36,8 +36,14 @@ impl App {
                 limit,
             } => self.execute_paste_command(raw, preview, limit, true),
             Command::Copy { format, display } => self.copy_selection(format, display),
-            Command::Inspector => self.execute_inspector_command(),
-            Command::Format { name } => self.execute_format_command(name),
+            Command::Inspector => {
+                self.execute_inspector_command();
+                Ok(())
+            }
+            Command::Format { name } => {
+                self.execute_format_command(name);
+                Ok(())
+            }
             Command::SearchAscii { pattern, backward } => {
                 self.execute_search_command(SearchKind::Ascii, pattern, backward)
             }
@@ -85,7 +91,7 @@ impl App {
         self.paste_from_clipboard(raw, preview, limit, insert)
     }
 
-    fn execute_inspector_command(&mut self) -> HxResult<()> {
+    fn execute_inspector_command(&mut self) {
         let from_inspector = self
             .command_return_mode
             .is_some_and(|mode| mode.is_inspector());
@@ -102,10 +108,9 @@ impl App {
             self.inspector = None;
             self.inspector_error = None;
         }
-        Ok(())
     }
 
-    fn execute_format_command(&mut self, name: Option<String>) -> HxResult<()> {
+    fn execute_format_command(&mut self, name: Option<String>) {
         self.show_inspector = true;
         match name {
             Some(name) => self.execute_named_format_command(name),
@@ -114,12 +119,11 @@ impl App {
                 self.refresh_inspector();
                 self.mode = Mode::Inspector;
                 self.status_message = "format: auto".to_owned();
-                Ok(())
             }
         }
     }
 
-    fn execute_named_format_command(&mut self, name: String) -> HxResult<()> {
+    fn execute_named_format_command(&mut self, name: String) {
         if crate::format::detect::detect_by_name(&name, &mut self.document).is_some() {
             self.inspector_format_override = Some(name.to_lowercase());
             self.refresh_inspector();
@@ -128,7 +132,6 @@ impl App {
         } else {
             self.status_message = format!("unknown or mismatched format: {}", name);
         }
-        Ok(())
     }
 
     fn execute_search_command(

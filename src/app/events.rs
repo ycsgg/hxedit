@@ -1,4 +1,5 @@
 use crate::action::Action;
+use crate::app::text_cursor::{next_char_boundary, prev_char_boundary};
 use crate::app::App;
 use crate::error::{HxError, HxResult};
 use crate::format::parse::InspectorRow;
@@ -6,9 +7,9 @@ use crate::mode::Mode;
 use crate::mode::NibblePhase;
 
 impl App {
-    pub(crate) fn handle_action(&mut self, action: Action) -> HxResult<()> {
+    pub(crate) fn handle_action(&mut self, action: Action) {
         let result = self.dispatch_action(action);
-        self.finish_action(action, result)
+        self.finish_action(action, result);
     }
 }
 
@@ -28,14 +29,38 @@ impl App {
 
     fn handle_navigation_action(&mut self, action: Action) -> Option<HxResult<()>> {
         let result = match action {
-            Action::MoveLeft => self.move_horizontal(-1),
-            Action::MoveRight => self.move_horizontal(1),
-            Action::MoveUp => self.move_vertical(-1),
-            Action::MoveDown => self.move_vertical(1),
-            Action::PageUp => self.move_vertical(-(self.view_rows as i64)),
-            Action::PageDown => self.move_vertical(self.view_rows as i64),
-            Action::RowStart => self.move_row_edge(false),
-            Action::RowEnd => self.move_row_edge(true),
+            Action::MoveLeft => {
+                self.move_horizontal(-1);
+                Ok(())
+            }
+            Action::MoveRight => {
+                self.move_horizontal(1);
+                Ok(())
+            }
+            Action::MoveUp => {
+                self.move_vertical(-1);
+                Ok(())
+            }
+            Action::MoveDown => {
+                self.move_vertical(1);
+                Ok(())
+            }
+            Action::PageUp => {
+                self.move_vertical(-(self.view_rows as i64));
+                Ok(())
+            }
+            Action::PageDown => {
+                self.move_vertical(self.view_rows as i64);
+                Ok(())
+            }
+            Action::RowStart => {
+                self.move_row_edge(false);
+                Ok(())
+            }
+            Action::RowEnd => {
+                self.move_row_edge(true);
+                Ok(())
+            }
             _ => return None,
         };
         Some(result)
@@ -43,11 +68,20 @@ impl App {
 
     fn handle_editor_action(&mut self, action: Action) -> HxResult<()> {
         match action {
-            Action::ToggleVisual => self.toggle_visual(),
+            Action::ToggleVisual => {
+                self.toggle_visual();
+                Ok(())
+            }
             Action::EnterInsert => self.enter_hex_mode(true),
             Action::EnterReplace => self.enter_hex_mode(false),
-            Action::EnterCommand => self.enter_command_mode(),
-            Action::LeaveMode => self.leave_mode(),
+            Action::EnterCommand => {
+                self.enter_command_mode();
+                Ok(())
+            }
+            Action::LeaveMode => {
+                self.leave_mode();
+                Ok(())
+            }
             Action::DeleteByte => self.delete_at_cursor_or_selection(),
             Action::SearchNext => self.repeat_search(crate::app::SearchDirection::Forward),
             Action::SearchPrev => self.repeat_search(crate::app::SearchDirection::Backward),
@@ -68,15 +102,39 @@ impl App {
 
     fn handle_command_action(&mut self, action: Action) -> Option<HxResult<()>> {
         let result = match action {
-            Action::CommandChar(c) => self.insert_command_char(c),
-            Action::CommandLeft => self.move_command_cursor_left(),
-            Action::CommandRight => self.move_command_cursor_right(),
-            Action::CommandHome => self.move_command_cursor_home(),
-            Action::CommandEnd => self.move_command_cursor_end(),
-            Action::CommandDelete => self.delete_command_char(),
-            Action::CommandBackspace => self.backspace_command_char(),
+            Action::CommandChar(c) => {
+                self.insert_command_char(c);
+                Ok(())
+            }
+            Action::CommandLeft => {
+                self.move_command_cursor_left();
+                Ok(())
+            }
+            Action::CommandRight => {
+                self.move_command_cursor_right();
+                Ok(())
+            }
+            Action::CommandHome => {
+                self.move_command_cursor_home();
+                Ok(())
+            }
+            Action::CommandEnd => {
+                self.move_command_cursor_end();
+                Ok(())
+            }
+            Action::CommandDelete => {
+                self.delete_command_char();
+                Ok(())
+            }
+            Action::CommandBackspace => {
+                self.backspace_command_char();
+                Ok(())
+            }
             Action::CommandSubmit => self.submit_command(),
-            Action::CommandCancel => self.cancel_command_input(),
+            Action::CommandCancel => {
+                self.cancel_command_input();
+                Ok(())
+            }
             _ => return None,
         };
         Some(result)
@@ -84,22 +142,49 @@ impl App {
 
     fn handle_inspector_action(&mut self, action: Action) -> Option<HxResult<()>> {
         let result = match action {
-            Action::InspectorUp => self.move_inspector_selection(true),
-            Action::InspectorDown => self.move_inspector_selection(false),
+            Action::InspectorUp => {
+                self.move_inspector_selection(true);
+                Ok(())
+            }
+            Action::InspectorDown => {
+                self.move_inspector_selection(false);
+                Ok(())
+            }
             Action::InspectorEnter => self.handle_inspector_enter(),
-            Action::InspectorChar(c) => self.insert_inspector_char(c),
-            Action::InspectorBackspace => self.backspace_inspector_char(),
-            Action::InspectorLeft => self.move_inspector_cursor(true),
-            Action::InspectorRight => self.move_inspector_cursor(false),
-            Action::InspectorHome => self.set_inspector_cursor(true),
-            Action::InspectorEnd => self.set_inspector_cursor(false),
-            Action::InspectorDelete => self.delete_inspector_char(),
+            Action::InspectorChar(c) => {
+                self.insert_inspector_char(c);
+                Ok(())
+            }
+            Action::InspectorBackspace => {
+                self.backspace_inspector_char();
+                Ok(())
+            }
+            Action::InspectorLeft => {
+                self.move_inspector_cursor(true);
+                Ok(())
+            }
+            Action::InspectorRight => {
+                self.move_inspector_cursor(false);
+                Ok(())
+            }
+            Action::InspectorHome => {
+                self.set_inspector_cursor(true);
+                Ok(())
+            }
+            Action::InspectorEnd => {
+                self.set_inspector_cursor(false);
+                Ok(())
+            }
+            Action::InspectorDelete => {
+                self.delete_inspector_char();
+                Ok(())
+            }
             _ => return None,
         };
         Some(result)
     }
 
-    fn finish_action(&mut self, action: Action, result: HxResult<()>) -> HxResult<()> {
+    fn finish_action(&mut self, action: Action, result: HxResult<()>) {
         match result {
             Ok(()) => {
                 self.ensure_cursor_visible();
@@ -107,11 +192,9 @@ impl App {
                 if !is_command_edit_action(action) {
                     self.clear_error_if_command_done();
                 }
-                Ok(())
             }
             Err(err) => {
                 self.status_message = err.to_string();
-                Ok(())
             }
         }
     }
@@ -130,9 +213,9 @@ impl App {
         Ok(())
     }
 
-    fn enter_command_mode(&mut self) -> HxResult<()> {
+    fn enter_command_mode(&mut self) {
         let return_mode = if matches!(self.mode, Mode::InsertHex { .. }) {
-            self.commit_pending_insert()?;
+            self.commit_pending_insert();
             Mode::Normal
         } else {
             self.mode
@@ -141,7 +224,6 @@ impl App {
         self.mode = Mode::Command;
         self.command_buffer.clear();
         self.command_cursor_pos = 0;
-        Ok(())
     }
 
     fn handle_undo_action(&mut self, steps: usize) -> HxResult<()> {
@@ -163,12 +245,12 @@ impl App {
         }
     }
 
-    fn move_inspector_selection(&mut self, upward: bool) -> HxResult<()> {
+    fn move_inspector_selection(&mut self, upward: bool) {
         let Some(inspector) = self.inspector.as_mut() else {
-            return Ok(());
+            return;
         };
         if inspector.editing.is_some() {
-            return Ok(());
+            return;
         }
 
         let mut target = inspector.selected_row;
@@ -192,7 +274,6 @@ impl App {
         }
 
         self.sync_cursor_to_inspector();
-        Ok(())
     }
 
     fn handle_inspector_enter(&mut self) -> HxResult<()> {
@@ -219,7 +300,7 @@ impl App {
         Ok(())
     }
 
-    fn insert_inspector_char(&mut self, c: char) -> HxResult<()> {
+    fn insert_inspector_char(&mut self, c: char) {
         if let Some(inspector) = self.inspector.as_mut() {
             if let Some(edit) = inspector.editing.as_mut() {
                 edit.buffer.insert(edit.cursor_pos, c);
@@ -228,20 +309,18 @@ impl App {
                 self.toggle_inspector_mode();
             }
         }
-        Ok(())
     }
 
-    fn backspace_inspector_char(&mut self) -> HxResult<()> {
+    fn backspace_inspector_char(&mut self) {
         if let Some(edit) = self.inspector_edit_mut() {
             if edit.cursor_pos > 0 {
                 edit.cursor_pos = prev_char_boundary(&edit.buffer, edit.cursor_pos);
                 edit.buffer.remove(edit.cursor_pos);
             }
         }
-        Ok(())
     }
 
-    fn move_inspector_cursor(&mut self, left: bool) -> HxResult<()> {
+    fn move_inspector_cursor(&mut self, left: bool) {
         if let Some(edit) = self.inspector_edit_mut() {
             edit.cursor_pos = if left {
                 prev_char_boundary(&edit.buffer, edit.cursor_pos)
@@ -249,48 +328,25 @@ impl App {
                 next_char_boundary(&edit.buffer, edit.cursor_pos)
             };
         }
-        Ok(())
     }
 
-    fn set_inspector_cursor(&mut self, home: bool) -> HxResult<()> {
+    fn set_inspector_cursor(&mut self, home: bool) {
         if let Some(edit) = self.inspector_edit_mut() {
             edit.cursor_pos = if home { 0 } else { edit.buffer.len() };
         }
-        Ok(())
     }
 
-    fn delete_inspector_char(&mut self) -> HxResult<()> {
+    fn delete_inspector_char(&mut self) {
         if let Some(edit) = self.inspector_edit_mut() {
             if edit.cursor_pos < edit.buffer.len() {
                 edit.buffer.remove(edit.cursor_pos);
             }
         }
-        Ok(())
     }
 
     fn inspector_edit_mut(&mut self) -> Option<&mut crate::app::InspectorEdit> {
         self.inspector.as_mut()?.editing.as_mut()
     }
-}
-
-fn prev_char_boundary(text: &str, cursor_pos: usize) -> usize {
-    text[..cursor_pos.min(text.len())]
-        .char_indices()
-        .last()
-        .map(|(idx, _)| idx)
-        .unwrap_or(0)
-}
-
-fn next_char_boundary(text: &str, cursor_pos: usize) -> usize {
-    if cursor_pos >= text.len() {
-        return text.len();
-    }
-    let start = cursor_pos.min(text.len());
-    text[start..]
-        .char_indices()
-        .nth(1)
-        .map(|(idx, _)| start + idx)
-        .unwrap_or(text.len())
 }
 
 fn is_command_edit_action(action: Action) -> bool {
@@ -375,13 +431,13 @@ mod tests {
     #[test]
     fn command_cursor_can_move_and_insert_in_middle() {
         let mut app = app_with_len(4);
-        app.handle_action(Action::EnterCommand).unwrap();
-        app.handle_action(Action::CommandChar('a')).unwrap();
-        app.handle_action(Action::CommandChar('b')).unwrap();
-        app.handle_action(Action::CommandChar('c')).unwrap();
-        app.handle_action(Action::CommandLeft).unwrap();
-        app.handle_action(Action::CommandLeft).unwrap();
-        app.handle_action(Action::CommandChar('X')).unwrap();
+        app.handle_action(Action::EnterCommand);
+        app.handle_action(Action::CommandChar('a'));
+        app.handle_action(Action::CommandChar('b'));
+        app.handle_action(Action::CommandChar('c'));
+        app.handle_action(Action::CommandLeft);
+        app.handle_action(Action::CommandLeft);
+        app.handle_action(Action::CommandChar('X'));
 
         assert_eq!(app.command_buffer, "aXbc");
         assert_eq!(app.command_cursor_pos, 2);
@@ -390,12 +446,12 @@ mod tests {
     #[test]
     fn command_backspace_respects_cursor_position() {
         let mut app = app_with_len(4);
-        app.handle_action(Action::EnterCommand).unwrap();
-        app.handle_action(Action::CommandChar('a')).unwrap();
-        app.handle_action(Action::CommandChar('b')).unwrap();
-        app.handle_action(Action::CommandChar('c')).unwrap();
-        app.handle_action(Action::CommandLeft).unwrap();
-        app.handle_action(Action::CommandBackspace).unwrap();
+        app.handle_action(Action::EnterCommand);
+        app.handle_action(Action::CommandChar('a'));
+        app.handle_action(Action::CommandChar('b'));
+        app.handle_action(Action::CommandChar('c'));
+        app.handle_action(Action::CommandLeft);
+        app.handle_action(Action::CommandBackspace);
 
         assert_eq!(app.command_buffer, "ac");
         assert_eq!(app.command_cursor_pos, 1);
@@ -404,23 +460,23 @@ mod tests {
     #[test]
     fn command_delete_home_and_end_respect_cursor_position() {
         let mut app = app_with_len(4);
-        app.handle_action(Action::EnterCommand).unwrap();
-        app.handle_action(Action::CommandChar('a')).unwrap();
-        app.handle_action(Action::CommandChar('b')).unwrap();
-        app.handle_action(Action::CommandChar('c')).unwrap();
-        app.handle_action(Action::CommandChar('d')).unwrap();
+        app.handle_action(Action::EnterCommand);
+        app.handle_action(Action::CommandChar('a'));
+        app.handle_action(Action::CommandChar('b'));
+        app.handle_action(Action::CommandChar('c'));
+        app.handle_action(Action::CommandChar('d'));
 
-        app.handle_action(Action::CommandHome).unwrap();
+        app.handle_action(Action::CommandHome);
         assert_eq!(app.command_cursor_pos, 0);
 
-        app.handle_action(Action::CommandRight).unwrap();
-        app.handle_action(Action::CommandRight).unwrap();
-        app.handle_action(Action::CommandDelete).unwrap();
+        app.handle_action(Action::CommandRight);
+        app.handle_action(Action::CommandRight);
+        app.handle_action(Action::CommandDelete);
 
         assert_eq!(app.command_buffer, "abd");
         assert_eq!(app.command_cursor_pos, 2);
 
-        app.handle_action(Action::CommandEnd).unwrap();
+        app.handle_action(Action::CommandEnd);
         assert_eq!(app.command_cursor_pos, app.command_buffer.len());
     }
 
@@ -428,7 +484,7 @@ mod tests {
     fn inspector_escape_returns_to_inspector_mode() {
         let mut app = app_with_inspector_field();
 
-        app.handle_action(Action::InspectorEnter).unwrap();
+        app.handle_action(Action::InspectorEnter);
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert!(app
             .inspector
@@ -436,7 +492,7 @@ mod tests {
             .and_then(|inspector| inspector.editing.as_ref())
             .is_some());
 
-        app.handle_action(Action::LeaveMode).unwrap();
+        app.handle_action(Action::LeaveMode);
 
         assert_eq!(app.mode, Mode::Inspector);
         assert!(app
