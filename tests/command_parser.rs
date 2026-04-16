@@ -1,5 +1,5 @@
 use hxedit::commands::parser::parse_command;
-use hxedit::commands::types::Command;
+use hxedit::commands::types::{Command, GotoTarget};
 use hxedit::copy::{CopyDisplay, CopyFormat};
 
 #[test]
@@ -12,7 +12,27 @@ fn parses_basic_commands() {
     );
     assert_eq!(
         parse_command("goto 0x20").unwrap(),
-        Command::Goto { offset: 0x20 }
+        Command::Goto {
+            target: GotoTarget::Absolute(0x20)
+        }
+    );
+    assert_eq!(
+        parse_command("goto end").unwrap(),
+        Command::Goto {
+            target: GotoTarget::End
+        }
+    );
+    assert_eq!(
+        parse_command("goto +16").unwrap(),
+        Command::Goto {
+            target: GotoTarget::Relative(16)
+        }
+    );
+    assert_eq!(
+        parse_command("goto -0x10").unwrap(),
+        Command::Goto {
+            target: GotoTarget::Relative(-0x10)
+        }
     );
     assert_eq!(parse_command("u").unwrap(), Command::Undo { steps: 1 });
     assert_eq!(parse_command("undo 3").unwrap(), Command::Undo { steps: 3 });

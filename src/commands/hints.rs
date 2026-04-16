@@ -42,8 +42,10 @@ pub fn hint_for(input: &str) -> CommandHint {
         "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?" | "pi!?"
         | "pi?!" | "paste-insert!?" | "paste-insert?!" => paste_hint(name, rest, true),
         "g" | "goto" => CommandHint {
-            syntax: format!("{name} <offset>"),
-            details: "jump to byte offset; supports decimal or 0x-prefixed hex".to_owned(),
+            syntax: format!("{name} <offset|end|+delta|-delta>"),
+            details:
+                "jump to an absolute offset, end, or a relative delta; supports decimal or 0x-prefixed hex"
+                    .to_owned(),
         },
         "s" | "s!" => CommandHint {
             syntax: format!("{name} <ascii>"),
@@ -168,7 +170,7 @@ fn paste_hint(name: &str, rest: Option<&str>, insert: bool) -> CommandHint {
             "preview only; default parses clipboard as hex/base64 text. ! previews raw clipboard bytes. num limits previewed bytes."
                 .to_owned()
         } else {
-            "overwrite existing bytes from cursor. default parses as hex/base64. ! pastes raw bytes. num limits pasted bytes."
+            "overwrite existing bytes from cursor. default parses as hex/base64. ! pastes raw bytes. num limits pasted bytes. bytes past EOF are dropped."
                 .to_owned()
         },
     }

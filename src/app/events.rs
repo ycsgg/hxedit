@@ -302,6 +302,9 @@ impl App {
                 cursor_pos: display.len(),
             });
             self.mode = Mode::InspectorEdit;
+            if let Some(warning) = self.inspector_edit_warning() {
+                self.status_message = warning.to_owned();
+            }
         }
         Ok(())
     }
@@ -369,6 +372,7 @@ fn is_command_edit_action(action: Action) -> bool {
 mod tests {
     use std::fs;
 
+    use ratatui::layout::Rect;
     use tempfile::tempdir;
 
     use super::*;
@@ -397,7 +401,7 @@ mod tests {
         app
     }
 
-    fn app_with_inspector_field() -> App {
+    fn app_with_inspector_field_for(format_name: &str) -> App {
         let mut app = app_with_len(4);
         let field = FieldDef {
             name: "entry".to_owned(),
@@ -421,7 +425,7 @@ mod tests {
         let rows = crate::format::parse::flatten(&structs);
         app.show_inspector = true;
         app.inspector = Some(crate::app::InspectorState {
-            format_name: "TEST".to_owned(),
+            format_name: format_name.to_owned(),
             structs,
             rows,
             scroll_offset: 0,
@@ -430,6 +434,10 @@ mod tests {
         });
         app.mode = Mode::Inspector;
         app
+    }
+
+    fn app_with_inspector_field() -> App {
+        app_with_inspector_field_for("TEST")
     }
 
     #[test]
@@ -504,5 +512,77 @@ mod tests {
             .as_ref()
             .and_then(|inspector| inspector.editing.as_ref())
             .is_none());
+    }
+
+    #[test]
+    fn inspector_warns_when_editing_png_field() {
+        let mut app = app_with_inspector_field_for("PNG");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert!(app.status_message.contains("warning: PNG inspector edits"));
+    }
+
+    #[test]
+    fn hidden_inspector_focus_falls_back_to_normal_mode() {
+        let mut app = app_with_inspector_field();
+        app.last_columns = Some(crate::view::layout::MainColumns {
+            gutter: Rect::new(0, 0, 4, 4),
+            sep1: Rect::new(4, 0, 1, 4),
+            hex: Rect::new(5, 0, 20, 4),
+            sep2: Rect::new(25, 0, 1, 4),
+            ascii: Rect::new(26, 0, 10, 4),
+            sep3: None,
+            inspector: None,
+        });
+
+        app.ensure_inspector_mode_visible();
+
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.contains("too narrow"));
+        assert!(app.status_message.contains("current 36 columns"));
+    }
+
+    #[test]
+    fn entering_inspector_from_normal_mode_warns_when_hidden() {
+        let mut app = app_with_inspector_field();
+        app.mode = Mode::Normal;
+        app.last_columns = Some(crate::view::layout::MainColumns {
+            gutter: Rect::new(0, 0, 4, 4),
+            sep1: Rect::new(4, 0, 1, 4),
+            hex: Rect::new(5, 0, 20, 4),
+            sep2: Rect::new(25, 0, 1, 4),
+            ascii: Rect::new(26, 0, 10, 4),
+            sep3: None,
+            inspector: None,
+        });
+
+        app.handle_action(Action::ToggleInspector);
+
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.show_inspector);
+        assert!(app.status_message.contains("too narrow"));
+        assert!(app.status_message.contains("current 36 columns"));
+    }
+
+    #[test]
+    fn entering_inspector_from_normal_mode_succeeds_when_width_is_sufficient() {
+        let mut app = app_with_inspector_field();
+        app.mode = Mode::Normal;
+        app.last_columns = Some(crate::view::layout::MainColumns {
+            gutter: Rect::new(0, 0, 8, 4),
+            sep1: Rect::new(8, 0, 1, 4),
+            hex: Rect::new(9, 0, 90, 4),
+            sep2: Rect::new(99, 0, 1, 4),
+            ascii: Rect::new(100, 0, 40, 4),
+            sep3: None,
+            inspector: None,
+        });
+
+        app.handle_action(Action::ToggleInspector);
+
+        assert_eq!(app.mode, Mode::Inspector);
+        assert!(!app.status_message.contains("too narrow"));
     }
 }

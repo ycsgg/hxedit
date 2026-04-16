@@ -4,7 +4,7 @@ use tempfile::tempdir;
 
 use crate::app::{App, SearchDirection};
 use crate::cli::Cli;
-use crate::commands::types::Command;
+use crate::commands::types::{Command, GotoTarget};
 use crate::core::document::ByteSlot;
 use crate::mode::{Mode, NibblePhase};
 
@@ -114,6 +114,25 @@ fn command_undo_can_rewind_multiple_changes() {
 }
 
 #[test]
+fn command_undo_clamps_eof_cursor_back_into_normal_bounds() {
+    let mut app = app_with_bytes(&[0x11]);
+    app.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app.cursor = 1;
+    app.edit_nibble(0xa).unwrap();
+    app.edit_nibble(0xb).unwrap();
+    app.mode = Mode::Normal;
+
+    app.execute_command(Command::Undo { steps: 2 }).unwrap();
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(app.document.len(), 1);
+    assert_eq!(app.cursor, 0);
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
+}
+
+#[test]
 fn toggling_visual_tracks_selection_range() {
     let mut app = app_with_len(32);
     app.toggle_visual();
@@ -179,6 +198,29 @@ fn reverse_search_command_searches_upward() {
 
     app.repeat_search(SearchDirection::Backward).unwrap();
     assert_eq!(app.cursor, 4);
+}
+
+#[test]
+fn goto_command_supports_end_and_relative_offsets() {
+    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
+
+    app.execute_command(Command::Goto {
+        target: GotoTarget::End,
+    })
+    .unwrap();
+    assert_eq!(app.cursor, 3);
+
+    app.execute_command(Command::Goto {
+        target: GotoTarget::Relative(-2),
+    })
+    .unwrap();
+    assert_eq!(app.cursor, 1);
+
+    app.execute_command(Command::Goto {
+        target: GotoTarget::Relative(2),
+    })
+    .unwrap();
+    assert_eq!(app.cursor, 3);
 }
 
 #[test]

@@ -65,7 +65,11 @@ impl App {
 
     pub(crate) fn normalize_mode(&self, mode: Mode) -> Mode {
         match mode {
-            Mode::Inspector | Mode::InspectorEdit if !self.show_inspector => Mode::Normal,
+            Mode::Inspector | Mode::InspectorEdit
+                if !self.show_inspector || !self.inspector_panel_visible() =>
+            {
+                Mode::Normal
+            }
             Mode::InspectorEdit
                 if self
                     .inspector

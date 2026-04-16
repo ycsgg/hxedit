@@ -3,6 +3,13 @@ use std::path::PathBuf;
 use crate::copy::{CopyDisplay, CopyFormat};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GotoTarget {
+    Absolute(u64),
+    Relative(i64),
+    End,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Quit {
         force: bool,
@@ -14,7 +21,7 @@ pub enum Command {
         path: Option<PathBuf>,
     },
     Goto {
-        offset: u64,
+        target: GotoTarget,
     },
     /// Overwrite-paste: writes clipboard bytes over existing content starting
     /// at cursor.  Does not shift subsequent offsets.

@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use crate::commands::{split_command, types::Command};
+use crate::commands::{
+    split_command,
+    types::{Command, GotoTarget},
+};
 use crate::copy::{CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
 use crate::util::parse::{parse_hex_bytes, parse_offset};
@@ -37,7 +40,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         "g" | "goto" => {
             let arg = rest.ok_or(HxError::MissingArgument("offset"))?;
             Ok(Command::Goto {
-                offset: parse_offset(arg)?,
+                target: parse_goto_target(arg)?,
             })
         }
         "s" | "s!" => {
@@ -59,6 +62,29 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         }
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
+}
+
+fn parse_goto_target(input: &str) -> HxResult<GotoTarget> {
+    let trimmed = input.trim();
+    if trimmed.eq_ignore_ascii_case("end") {
+        return Ok(GotoTarget::End);
+    }
+
+    if let Some(relative) = trimmed.strip_prefix('+') {
+        let offset = parse_offset(relative)?;
+        let delta =
+            i64::try_from(offset).map_err(|_| HxError::InvalidOffset(trimmed.to_owned()))?;
+        return Ok(GotoTarget::Relative(delta));
+    }
+
+    if let Some(relative) = trimmed.strip_prefix('-') {
+        let offset = parse_offset(relative)?;
+        let delta =
+            i64::try_from(offset).map_err(|_| HxError::InvalidOffset(trimmed.to_owned()))?;
+        return Ok(GotoTarget::Relative(-delta));
+    }
+
+    Ok(GotoTarget::Absolute(parse_offset(trimmed)?))
 }
 
 fn opt_path(input: Option<&str>) -> Option<PathBuf> {
@@ -159,6 +185,28 @@ mod tests {
             parse_command("format elf").unwrap(),
             Command::Format {
                 name: Some("elf".to_owned())
+            }
+        );
+    }
+
+    #[test]
+    fn goto_command_accepts_end_and_relative_offsets() {
+        assert_eq!(
+            parse_command("goto end").unwrap(),
+            Command::Goto {
+                target: GotoTarget::End
+            }
+        );
+        assert_eq!(
+            parse_command("goto +0x10").unwrap(),
+            Command::Goto {
+                target: GotoTarget::Relative(0x10)
+            }
+        );
+        assert_eq!(
+            parse_command("goto -20").unwrap(),
+            Command::Goto {
+                target: GotoTarget::Relative(-20)
             }
         );
     }

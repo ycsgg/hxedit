@@ -49,7 +49,53 @@ pub fn build(info: StatusInfo<'_>, palette: &Palette) -> Line<'static> {
     }
     if !info.message.is_empty() {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(info.message.to_owned(), palette.status));
+        spans.push(Span::styled(
+            info.message.to_owned(),
+            if is_warning_message(info.message) {
+                palette.warning
+            } else {
+                palette.status
+            },
+        ));
     }
     Line::from(spans)
+}
+
+fn is_warning_message(message: &str) -> bool {
+    message.contains("warning:")
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::style::{Color, Modifier};
+
+    use super::{build, StatusInfo};
+    use crate::mode::{Mode, NibblePhase};
+    use crate::view::palette::Palette;
+
+    #[test]
+    fn warning_messages_use_warning_style() {
+        let palette = Palette::new(true);
+        let line = build(
+            StatusInfo {
+                mode: Mode::EditHex {
+                    phase: NibblePhase::High,
+                },
+                path: "sample.bin",
+                cursor: 0,
+                len: 1,
+                selection_len: None,
+                paste_info: None,
+                dirty: false,
+                message: "warning: png edit may break crc",
+                readonly: false,
+            },
+            &palette,
+        );
+
+        let warning_span = line.spans.last().expect("message span");
+        assert_eq!(warning_span.style.fg, Some(Color::Black));
+        assert_eq!(warning_span.style.bg, Some(Color::Yellow));
+        assert!(warning_span.style.add_modifier.contains(Modifier::BOLD));
+    }
 }

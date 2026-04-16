@@ -1,6 +1,8 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::Block;
 
+pub const MIN_INSPECTOR_WIDTH: u16 = 80;
+
 /// Top-level screen slices used by the app render pass.
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenLayout {
@@ -56,7 +58,7 @@ pub fn split_main(
 ) -> MainColumns {
     let inner = block.inner(area);
 
-    if show_inspector && inner.width >= 80 {
+    if show_inspector && inner.width >= MIN_INSPECTOR_WIDTH {
         let sections = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([

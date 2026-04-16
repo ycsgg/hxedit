@@ -5,6 +5,7 @@ pub struct Palette {
     pub gutter: Style,
     pub separator: Style,
     pub status: Style,
+    pub warning: Style,
     pub dirty: Style,
     pub selection: Style,
     pub deleted: Style,
@@ -37,6 +38,10 @@ impl Palette {
                 gutter: Style::default().fg(Color::DarkGray),
                 separator: Style::default().fg(Color::DarkGray),
                 status: Style::default().fg(Color::White),
+                warning: Style::default()
+                    .bg(Color::Yellow)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
                 dirty: Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -77,6 +82,9 @@ impl Palette {
                 gutter: base,
                 separator: base,
                 status: base,
+                warning: base
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
                 dirty: base.add_modifier(Modifier::BOLD),
                 selection: base.add_modifier(Modifier::REVERSED),
                 deleted: base,

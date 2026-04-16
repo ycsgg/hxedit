@@ -33,6 +33,7 @@ The project is usable today, but it is intentionally narrower than a full-featur
   - ZIP
 
 - Inspector editing is still **byte-oriented, not structure-safe**
+  - PNG / ZIP edits now show explicit warnings
   - PNG edits do not repair CRC or chunk consistency
   - ZIP edits do not repair header / descriptor consistency
 
@@ -198,8 +199,9 @@ cargo run -- --readonly --offset 0x100 --inspector some.bin
 
 ### Navigation / Search
 
-- `:g <offset>` `:goto <offset>`
-  - jump to a decimal or `0x`-prefixed offset
+- `:g <offset|end|+delta|-delta>` `:goto <offset|end|+delta|-delta>`
+  - jump to an absolute offset, to the final byte with `end`, or relative to the current cursor with `+` / `-`
+  - absolute and relative values support decimal or `0x`-prefixed hex
 
 - `:s <text>`
   - search ASCII downward
@@ -300,8 +302,9 @@ Current limitation:
 
 - The inspector is currently rebuilt by full detect + parse + flatten refreshes
 - It works best on a wide terminal
-- On narrow layouts the panel may not be visible even if inspector mode is entered
+- If the terminal is too narrow, inspector focus is rejected and a status warning is shown
 - Editable fields are not a promise of structure-safe output
+- PNG / ZIP inspector edits show warnings because structure consistency is not repaired automatically
 
 ## Limitations
 

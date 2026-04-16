@@ -1,6 +1,6 @@
 use crate::app::{App, SearchDirection, SearchKind, SearchState};
 use crate::commands::parser::parse_command;
-use crate::commands::types::Command;
+use crate::commands::types::{Command, GotoTarget};
 use crate::error::{HxError, HxResult};
 use crate::mode::Mode;
 
@@ -23,7 +23,7 @@ impl App {
             Command::Quit { force } => self.execute_quit_command(force),
             Command::Write { path } => self.execute_write_command(path, false),
             Command::WriteQuit { path } => self.execute_write_command(path, true),
-            Command::Goto { offset } => self.execute_goto_command(offset),
+            Command::Goto { target } => self.execute_goto_command(target),
             Command::Undo { steps } => self.undo(steps, false),
             Command::Paste {
                 raw,
@@ -75,10 +75,30 @@ impl App {
         Ok(())
     }
 
-    fn execute_goto_command(&mut self, offset: u64) -> HxResult<()> {
+    fn execute_goto_command(&mut self, target: GotoTarget) -> HxResult<()> {
+        let offset = self.resolve_goto_target(target)?;
         self.cursor = self.document.goto(offset)?;
         self.status_message = format!("goto 0x{:x}", self.cursor);
         Ok(())
+    }
+
+    fn resolve_goto_target(&self, target: GotoTarget) -> HxResult<u64> {
+        match target {
+            GotoTarget::Absolute(offset) => Ok(offset),
+            GotoTarget::End => {
+                if self.document.is_empty() {
+                    Ok(0)
+                } else {
+                    Ok(self.document.len() - 1)
+                }
+            }
+            GotoTarget::Relative(delta) => {
+                let current = i64::try_from(self.cursor)
+                    .map_err(|_| HxError::InvalidOffset(delta.to_string()))?;
+                let target = current.saturating_add(delta);
+                u64::try_from(target).map_err(|_| HxError::OffsetOutOfRange)
+            }
+        }
     }
 
     fn execute_paste_command(
@@ -98,10 +118,9 @@ impl App {
         if !self.show_inspector {
             self.show_inspector = true;
             self.refresh_inspector();
-            self.mode = Mode::Inspector;
+            self.focus_inspector_or_warn();
         } else if !from_inspector {
-            self.mode = Mode::Inspector;
-            self.sync_inspector_to_cursor();
+            self.focus_inspector_or_warn();
         } else {
             self.mode = Mode::Normal;
             self.show_inspector = false;
@@ -117,8 +136,9 @@ impl App {
             None => {
                 self.inspector_format_override = None;
                 self.refresh_inspector();
-                self.mode = Mode::Inspector;
-                self.status_message = "format: auto".to_owned();
+                if self.focus_inspector_or_warn() {
+                    self.status_message = "format: auto".to_owned();
+                }
             }
         }
     }
@@ -127,8 +147,9 @@ impl App {
         if crate::format::detect::detect_by_name(&name, &mut self.document).is_some() {
             self.inspector_format_override = Some(name.to_lowercase());
             self.refresh_inspector();
-            self.mode = Mode::Inspector;
-            self.status_message = format!("format: {}", name);
+            if self.focus_inspector_or_warn() {
+                self.status_message = format!("format: {}", name);
+            }
         } else {
             self.status_message = format!("unknown or mismatched format: {}", name);
         }

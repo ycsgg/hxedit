@@ -82,6 +82,7 @@ impl App {
             self.show_inspector,
         );
         self.last_columns = Some(columns);
+        self.ensure_inspector_mode_visible();
         frame.render_widget(block, area);
 
         // Keep render-derived row count in sync with navigation and paging.

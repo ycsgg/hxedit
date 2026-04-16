@@ -4,6 +4,7 @@ use crate::format::types::*;
 
 /// Local file header signature: PK\x03\x04
 const ZIP_LOCAL_MAGIC: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
+const ZIP_DATA_DESCRIPTOR_FLAG: u16 = 0x0008;
 
 /// Detect and parse ZIP format by scanning Local File Headers from the start.
 pub fn detect(doc: &mut Document) -> Option<FormatDef> {
@@ -31,6 +32,9 @@ pub fn detect(doc: &mut Document) -> Option<FormatDef> {
         let extra_len_bytes = read_bytes_raw(doc, offset + 28, 2)?;
         let fname_len = u16::from_le_bytes([fname_len_bytes[0], fname_len_bytes[1]]) as u64;
         let extra_len = u16::from_le_bytes([extra_len_bytes[0], extra_len_bytes[1]]) as u64;
+
+        let flags_bytes = read_bytes_raw(doc, offset + 6, 2)?;
+        let flags = u16::from_le_bytes([flags_bytes[0], flags_bytes[1]]);
 
         // Read compressed size
         let csize_bytes = read_bytes_raw(doc, offset + 18, 4)?;
@@ -150,12 +154,24 @@ pub fn detect(doc: &mut Document) -> Option<FormatDef> {
             });
         }
 
+        let has_data_descriptor = flags & ZIP_DATA_DESCRIPTOR_FLAG != 0;
         structs.push(StructDef {
-            name: format!("Local File: {}", fname_display),
+            name: if has_data_descriptor {
+                format!(
+                    "Local File: {} [data descriptor; partial scan]",
+                    fname_display
+                )
+            } else {
+                format!("Local File: {}", fname_display)
+            },
             base_offset: offset,
             fields,
             children: vec![],
         });
+
+        if has_data_descriptor {
+            break;
+        }
 
         // Advance past header + data
         offset += 30 + fname_len + extra_len + compressed_size;
@@ -170,4 +186,46 @@ pub fn detect(doc: &mut Document) -> Option<FormatDef> {
         name: "ZIP".to_string(),
         structs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::detect;
+    use crate::config::Config;
+    use crate::core::document::Document;
+
+    #[test]
+    fn stops_local_header_scan_when_data_descriptor_sizes_are_unavailable() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("descriptor.zip");
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&[0x50, 0x4b, 0x03, 0x04]); // local header
+        bytes.extend_from_slice(&20_u16.to_le_bytes()); // version needed
+        bytes.extend_from_slice(&0x0008_u16.to_le_bytes()); // flags: data descriptor
+        bytes.extend_from_slice(&0_u16.to_le_bytes()); // compression
+        bytes.extend_from_slice(&0_u16.to_le_bytes()); // mod time
+        bytes.extend_from_slice(&0_u16.to_le_bytes()); // mod date
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // crc32
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // compressed size unavailable
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // uncompressed size unavailable
+        bytes.extend_from_slice(&1_u16.to_le_bytes()); // filename len
+        bytes.extend_from_slice(&0_u16.to_le_bytes()); // extra len
+        bytes.push(b'a'); // filename
+        bytes.extend_from_slice(&[0x50, 0x4b, 0x03, 0x04]); // payload starts with local-header magic
+        bytes.extend_from_slice(&[0x50, 0x4b, 0x07, 0x08]); // descriptor signature
+        bytes.extend_from_slice(&[0; 12]); // descriptor body
+
+        fs::write(&path, bytes).unwrap();
+
+        let mut doc = Document::open(&path, &Config::default()).unwrap();
+        let def = detect(&mut doc).expect("zip should still be detected");
+
+        assert_eq!(def.structs.len(), 1);
+        assert!(def.structs[0].name.contains("partial scan"));
+    }
 }

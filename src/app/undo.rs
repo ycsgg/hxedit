@@ -55,6 +55,7 @@ impl App {
 
         if !restore_mode {
             self.mode = Mode::Normal;
+            self.cursor = self.clamp_cursor_for_mode(self.cursor, Mode::Normal);
         }
 
         self.refresh_inspector();

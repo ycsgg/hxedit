@@ -20,6 +20,10 @@ impl PasteState {
 }
 
 impl App {
+    fn overwrite_paste_truncates(&self, requested: usize) -> bool {
+        requested > self.document.len().saturating_sub(self.cursor) as usize
+    }
+
     pub(crate) fn copy_selection(
         &mut self,
         format: CopyFormat,
@@ -61,10 +65,17 @@ impl App {
         }
 
         self.last_paste = Some(PasteState::new(source, bytes.len(), preview, &bytes));
+        let overwrite_truncated = !insert && self.overwrite_paste_truncates(bytes.len());
 
         if preview {
             self.status_message = if bytes.is_empty() {
                 "paste preview: no bytes".to_owned()
+            } else if overwrite_truncated {
+                format!(
+                    "paste preview [{} {} bytes; overwrite truncates at EOF]",
+                    source.label(),
+                    bytes.len()
+                )
             } else {
                 format!("paste preview [{} {} bytes]", source.label(), bytes.len())
             };
@@ -83,9 +94,24 @@ impl App {
         } else {
             let pasted = self.apply_paste_overwrite(&bytes)?;
             if pasted == 0 {
-                self.status_message = "paste produced no bytes".to_owned();
+                self.status_message = if overwrite_truncated {
+                    format!(
+                        "paste produced no bytes [{}] (cursor at EOF; overwrite truncates)",
+                        source.label()
+                    )
+                } else {
+                    "paste produced no bytes".to_owned()
+                };
             } else {
-                self.status_message = format!("{mode_label} {} bytes [{}]", pasted, source.label());
+                self.status_message = if overwrite_truncated {
+                    format!(
+                        "{mode_label} {} bytes [{}] (truncated at EOF)",
+                        pasted,
+                        source.label()
+                    )
+                } else {
+                    format!("{mode_label} {} bytes [{}]", pasted, source.label())
+                };
             }
         }
         Ok(())

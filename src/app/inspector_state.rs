@@ -5,16 +5,82 @@ use crate::format::parse::{InspectorRow, StructValue};
 use crate::format::types::FieldDef;
 use crate::mode::Mode;
 use crate::view::inspector as inspector_view;
+use crate::view::layout::MIN_INSPECTOR_WIDTH;
 
 impl App {
+    fn current_main_inner_width(&self) -> Option<u16> {
+        self.last_columns.map(|columns| {
+            columns.gutter.width
+                + columns.sep1.width
+                + columns.hex.width
+                + columns.sep2.width
+                + columns.ascii.width
+                + columns.sep3.map(|area| area.width).unwrap_or(0)
+                + columns.inspector.map(|area| area.width).unwrap_or(0)
+        })
+    }
+
+    fn warn_inspector_too_narrow(&mut self) {
+        self.status_message = match self.current_main_inner_width() {
+            Some(current) => format!(
+                "warning: inspector hidden; terminal too narrow (current {} columns, need {}+)",
+                current, MIN_INSPECTOR_WIDTH
+            ),
+            None => format!(
+                "warning: inspector hidden; terminal too narrow (need {}+ columns)",
+                MIN_INSPECTOR_WIDTH
+            ),
+        };
+    }
+
+    pub(crate) fn inspector_panel_visible(&self) -> bool {
+        self.current_main_inner_width()
+            .map(|width| width >= MIN_INSPECTOR_WIDTH)
+            .unwrap_or(true)
+    }
+
+    pub(crate) fn ensure_inspector_mode_visible(&mut self) {
+        if !self.mode.is_inspector() || self.inspector_panel_visible() {
+            return;
+        }
+        if let Some(inspector) = self.inspector.as_mut() {
+            inspector.editing = None;
+        }
+        self.mode = Mode::Normal;
+        self.warn_inspector_too_narrow();
+    }
+
+    pub(crate) fn focus_inspector_or_warn(&mut self) -> bool {
+        if !self.inspector_panel_visible() {
+            if let Some(inspector) = self.inspector.as_mut() {
+                inspector.editing = None;
+            }
+            self.mode = Mode::Normal;
+            self.warn_inspector_too_narrow();
+            return false;
+        }
+        self.mode = Mode::Inspector;
+        self.sync_inspector_to_cursor();
+        true
+    }
+
+    pub(crate) fn inspector_edit_warning(&self) -> Option<&'static str> {
+        match self.inspector.as_ref()?.format_name.as_str() {
+            "PNG" => Some("warning: PNG inspector edits do not repair CRC or chunk consistency"),
+            "ZIP" => {
+                Some("warning: ZIP inspector edits do not repair header or descriptor consistency")
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn toggle_inspector_mode(&mut self) {
         if !self.show_inspector {
             self.show_inspector = true;
             self.refresh_inspector();
-            self.mode = Mode::Inspector;
+            self.focus_inspector_or_warn();
         } else if !self.mode.is_inspector() {
-            self.mode = Mode::Inspector;
-            self.sync_inspector_to_cursor();
+            self.focus_inspector_or_warn();
         } else {
             if let Some(inspector) = self.inspector.as_mut() {
                 inspector.editing = None;
@@ -250,7 +316,11 @@ impl App {
         self.refresh_inspector();
         self.mode = Mode::Inspector;
         self.sync_cursor_to_inspector();
-        self.status_message = format!("edited field at 0x{:x}", abs_offset);
+        self.status_message = if let Some(warning) = self.inspector_edit_warning() {
+            format!("edited field at 0x{:x}; {}", abs_offset, warning)
+        } else {
+            format!("edited field at 0x{:x}", abs_offset)
+        };
         Ok(())
     }
 
