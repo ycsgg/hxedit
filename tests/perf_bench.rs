@@ -158,6 +158,34 @@ fn bench_paste_overwrite_large() {
 }
 
 #[test]
+fn bench_paste_overwrite_bulk_path() {
+    // Measures the post-phase4 bulk overwrite: one cell_ids_range call +
+    // replace_display_byte_by_id per cell, matching apply_paste_overwrite.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("p16b.bin");
+    let size: usize = 4 * 1024 * 1024;
+    let data: Vec<u8> = (0..size).map(|i| (i % 256) as u8).collect();
+    fs::write(&path, &data).unwrap();
+    let mut doc = Document::open(&path, &bench_config()).unwrap();
+    for i in 0..2000u64 {
+        doc.insert_bytes(i * 500, &[0xAA]).unwrap();
+    }
+
+    let n = 200_000usize;
+    let bytes: Vec<u8> = (0..n).map(|i| (i % 256) as u8).collect();
+    let t = Instant::now();
+    let ids = doc.cell_ids_range(0, n as u64);
+    for (b, id) in bytes.iter().copied().zip(ids.into_iter()) {
+        let _ = doc.replace_display_byte_by_id(id, b);
+    }
+    print(
+        "paste overwrite 200k bytes (bulk path)",
+        t.elapsed().as_nanos(),
+        n,
+    );
+}
+
+#[test]
 fn bench_logical_bytes_large_copy() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("c16.bin");

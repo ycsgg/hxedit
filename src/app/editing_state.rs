@@ -35,11 +35,15 @@ impl App {
             return self.delete_current();
         };
 
-        let mut ids = Vec::with_capacity((end - start + 1) as usize);
-        for offset in start..=end {
-            if let Some(id) = self.document.delete_byte(offset)? {
-                ids.push(id);
+        let span = end - start + 1;
+        let candidates = self.document.cell_ids_range(start, span);
+        let mut ids = Vec::with_capacity(candidates.len());
+        for id in candidates {
+            if self.document.is_tombstone(id) {
+                continue;
             }
+            self.document.mark_tombstones(&[id])?;
+            ids.push(id);
         }
 
         self.cursor = self.clamp_offset(start);
@@ -53,7 +57,7 @@ impl App {
             self.mode,
         );
         self.refresh_inspector();
-        self.set_info_status(format!("deleted selection {} bytes", end - start + 1));
+        self.set_info_status(format!("deleted selection {} bytes", span));
         Ok(())
     }
 

@@ -239,19 +239,18 @@ impl App {
 
         let cursor_before = self.cursor;
         let doc_len = self.document.len();
-        let mut ops = Vec::new();
+        let applied = bytes
+            .len()
+            .min(doc_len.saturating_sub(cursor_before) as usize);
+        let ids = self.document.cell_ids_range(cursor_before, applied as u64);
+        let mut ops = Vec::with_capacity(applied);
 
-        for (i, &byte) in bytes.iter().enumerate() {
-            let offset = cursor_before + i as u64;
-            if offset >= doc_len {
-                break; // past EOF — stop overwriting
+        for (byte, id) in bytes[..applied].iter().copied().zip(ids.into_iter()) {
+            if self.document.is_tombstone(id) {
+                return Err(HxError::OffsetOutOfRange);
             }
-            let id = self
-                .document
-                .cell_id_at(offset)
-                .ok_or(HxError::OffsetOutOfRange)?;
             let previous = self.document.replacement_state(id);
-            self.document.replace_display_byte(offset, byte)?;
+            self.document.replace_display_byte_by_id(id, byte)?;
             let after = self.document.replacement_state(id);
             if after != previous {
                 ops.push(crate::app::ReplacementChange {
@@ -262,7 +261,7 @@ impl App {
             }
         }
 
-        let written = bytes.len().min((doc_len - cursor_before) as usize);
+        let written = applied;
         let cursor_after =
             self.clamp_cursor_for_mode(cursor_before + written.saturating_sub(1) as u64, self.mode);
 

@@ -164,6 +164,13 @@ impl Document {
         self.pieces.pieces().to_vec()
     }
 
+    /// Collect `CellId`s for a contiguous display range, using the piece
+    /// table's batched walk. Skips tombstone filtering — callers are
+    /// expected to check `is_tombstone` on each returned id.
+    pub fn cell_ids_range(&self, offset: u64, len: u64) -> Vec<CellId> {
+        self.pieces.cell_ids_range(offset, len)
+    }
+
     /// Check whether a cell is tombstoned (O(log n) BTreeSet lookup).
     pub fn is_tombstone(&self, id: CellId) -> bool {
         self.tombstones.contains(&id)

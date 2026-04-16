@@ -93,6 +93,19 @@ impl Document {
         Ok(id)
     }
 
+    /// Replace the byte identified by `id` with `value`, skipping the display
+    /// offset → cell resolution. Used by bulk overwrite paths that have
+    /// already resolved the cell (e.g. overwrite-paste walking pieces).
+    pub fn replace_display_byte_by_id(&mut self, id: CellId, value: u8) -> HxResult<()> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        if self.tombstones.contains(&id) {
+            return Err(HxError::OffsetOutOfRange);
+        }
+        self.set_display_byte_by_id(id, value)
+    }
+
     /// Set a byte: replace if within bounds, insert if at EOF.
     pub fn set_byte(&mut self, offset: u64, value: u8) -> HxResult<()> {
         if offset == self.len() {
