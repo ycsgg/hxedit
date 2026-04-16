@@ -62,12 +62,16 @@ impl App {
             self.cursor = found;
             if wrapped {
                 self.set_info_status(format!(
-                    "found {} at 0x{:x} (wrapped)",
+                    "found {} at display 0x{:x} (wrapped)",
                     search.kind.label(),
                     found
                 ));
             } else {
-                self.set_info_status(format!("found {} at 0x{:x}", search.kind.label(), found));
+                self.set_info_status(format!(
+                    "found {} at display 0x{:x}",
+                    search.kind.label(),
+                    found
+                ));
             }
         } else {
             self.set_info_status(format!("{} pattern not found", search.kind.label()));

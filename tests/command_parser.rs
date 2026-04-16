@@ -1,5 +1,5 @@
 use hxedit::commands::parser::parse_command;
-use hxedit::commands::types::{Command, GotoTarget};
+use hxedit::commands::types::{Command, GotoTarget, HashAlgorithm};
 use hxedit::copy::{CopyDisplay, CopyFormat};
 
 #[test]
@@ -131,6 +131,8 @@ fn rejects_invalid_commands() {
     assert!(parse_command("paste nope").is_err());
     assert!(parse_command("copy nope").is_err());
     assert!(parse_command("S 0xz1").is_err());
+    assert!(parse_command("hash").is_err());
+    assert!(parse_command("hash blake2").is_err());
     assert!(parse_command("unknown").is_err());
 }
 
@@ -148,6 +150,28 @@ fn parses_uppercase_hex_search_patterns() {
         Command::SearchHex {
             pattern: vec![0x7f, 0x45, 0x4c, 0x46],
             backward: false,
+        }
+    );
+}
+
+#[test]
+fn parses_hash_commands() {
+    assert_eq!(
+        parse_command("hash md5").unwrap(),
+        Command::Hash {
+            algorithm: HashAlgorithm::Md5
+        }
+    );
+    assert_eq!(
+        parse_command("hash sha256").unwrap(),
+        Command::Hash {
+            algorithm: HashAlgorithm::Sha256
+        }
+    );
+    assert_eq!(
+        parse_command("hash crc32").unwrap(),
+        Command::Hash {
+            algorithm: HashAlgorithm::Crc32
         }
     );
 }

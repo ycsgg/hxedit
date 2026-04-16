@@ -132,6 +132,16 @@ pub fn detect(doc: &mut Document) -> Option<FormatDef> {
             editable: false,
         });
 
+        if chunk_len > 0 {
+            fields.push(FieldDef {
+                name: "data".into(),
+                offset: 8,
+                field_type: FieldType::DataRange(chunk_len),
+                description: "Chunk data".into(),
+                editable: false,
+            });
+        }
+
         structs.push(StructDef {
             name: format!("Chunk: {}", chunk_type),
             base_offset: offset,

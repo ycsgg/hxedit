@@ -8,9 +8,14 @@ license = "MIT"
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
+crc32fast = "1.4"
 crossterm = "0.28"
+digest = "0.10"
+md-5 = "0.10"
 memchr = "2.7"
 ratatui = "0.29"
+sha1 = "0.10"
+sha2 = "0.10"
 supports-color = "3"
 thiserror = "2.0"
 

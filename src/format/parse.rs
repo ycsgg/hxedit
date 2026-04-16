@@ -103,9 +103,24 @@ fn read_bytes(doc: &mut Document, offset: u64, len: usize) -> HxResult<Vec<u8>> 
 /// Parse a single field: read raw bytes from the document and format as display string.
 fn parse_field(doc: &mut Document, field: &FieldDef, base_offset: u64) -> HxResult<FieldValue> {
     let abs_offset = base_offset + field.offset;
-    let size = field.field_type.byte_size().unwrap_or(0);
-    let raw_bytes = read_bytes(doc, abs_offset, size)?;
-    let display = format_value(&field.field_type, &raw_bytes);
+    let (raw_bytes, size, display) = match &field.field_type {
+        FieldType::DataRange(len) => {
+            let len = *len;
+            let end = abs_offset + len;
+            let display = if len == 0 {
+                "empty".to_owned()
+            } else {
+                format!("0x{:x}–0x{:x} ({} bytes)", abs_offset, end - 1, len)
+            };
+            (Vec::new(), len as usize, display)
+        }
+        _ => {
+            let size = field.field_type.byte_size().unwrap_or(0);
+            let raw_bytes = read_bytes(doc, abs_offset, size)?;
+            let display = format_value(&field.field_type, &raw_bytes);
+            (raw_bytes, size, display)
+        }
+    };
     Ok(FieldValue {
         def: field.clone(),
         abs_offset,
@@ -287,6 +302,13 @@ pub fn format_value(field_type: &FieldType, raw: &[u8]) -> String {
         FieldType::Utf8(n) => {
             let s = String::from_utf8_lossy(&raw[..*n.min(&raw.len())]);
             format!("\"{}\"", s.trim_end_matches('\0'))
+        }
+        FieldType::DataRange(len) => {
+            if *len == 0 {
+                "empty".to_owned()
+            } else {
+                format!("{} bytes", len)
+            }
         }
         FieldType::Enum { inner, variants } => {
             let base = format_value(inner, raw);

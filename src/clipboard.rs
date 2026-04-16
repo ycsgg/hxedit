@@ -2,6 +2,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use crate::error::{HxError, HxResult};
+#[cfg(target_os = "macos")]
 use crate::util::parse::decode_base64;
 
 pub fn copy_text(text: &str) -> HxResult<()> {
@@ -12,7 +13,7 @@ pub fn copy_text(text: &str) -> HxResult<()> {
 
     #[cfg(target_os = "windows")]
     {
-        return pipe_to_command("clip", &[], text);
+        pipe_to_command("clip", &[], text)
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -40,11 +41,11 @@ pub fn read_text() -> HxResult<String> {
 
     #[cfg(target_os = "windows")]
     {
-        return Ok(String::from_utf8_lossy(&capture_command(
+        Ok(String::from_utf8_lossy(&capture_command(
             "powershell",
             &["-NoProfile", "-Command", "Get-Clipboard"],
         )?)
-        .into_owned());
+        .into_owned())
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -82,10 +83,10 @@ pub fn read_raw_bytes() -> HxResult<Vec<u8>> {
 
     #[cfg(target_os = "windows")]
     {
-        return capture_command(
+        capture_command(
             "powershell",
             &["-NoProfile", "-Command", "Get-Clipboard -Raw"],
-        );
+        )
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]

@@ -154,7 +154,18 @@ pub fn detect(doc: &mut Document) -> Option<FormatDef> {
             });
         }
 
+        let data_offset = 30 + fname_len + extra_len;
         let has_data_descriptor = flags & ZIP_DATA_DESCRIPTOR_FLAG != 0;
+        if !has_data_descriptor && compressed_size > 0 {
+            fields.push(FieldDef {
+                name: "file_data".into(),
+                offset: data_offset,
+                field_type: FieldType::DataRange(compressed_size),
+                description: "Compressed file data".into(),
+                editable: false,
+            });
+        }
+
         structs.push(StructDef {
             name: if has_data_descriptor {
                 format!(

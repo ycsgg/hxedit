@@ -110,6 +110,7 @@ pub fn encode_value(field_type: &FieldType, input: &str) -> Result<Vec<u8>, Stri
             bytes.resize(*n, 0);
             Ok(bytes)
         }
+        FieldType::DataRange(_) => Err("data range fields cannot be edited".into()),
         FieldType::Enum { inner, variants } => {
             // Try matching variant name first
             if let Some((val, _)) = variants.iter().find(|(_, name)| name == input) {

@@ -4,7 +4,7 @@ use tempfile::tempdir;
 
 use crate::app::{App, SearchDirection, StatusLevel};
 use crate::cli::Cli;
-use crate::commands::types::{Command, GotoTarget};
+use crate::commands::types::{Command, GotoTarget, HashAlgorithm};
 use crate::core::document::ByteSlot;
 use crate::mode::{Mode, NibblePhase};
 
@@ -431,4 +431,63 @@ fn edit_mode_can_append_at_eof() {
     app.edit_nibble(0xb).unwrap();
     assert_eq!(app.document.len(), 2);
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
+}
+
+#[test]
+fn hash_command_computes_sha256_of_entire_file() {
+    let mut app = app_with_bytes(b"hello");
+    app.execute_command(Command::Hash {
+        algorithm: HashAlgorithm::Sha256,
+    })
+    .unwrap();
+    assert!(app.status_message.contains("sha256"));
+    assert!(app.status_message.contains("entire file"));
+    assert!(app.status_message.contains("2cf24dba5fb0a30e"));
+}
+
+#[test]
+fn hash_command_computes_crc32() {
+    let mut app = app_with_bytes(b"hello");
+    app.execute_command(Command::Hash {
+        algorithm: HashAlgorithm::Crc32,
+    })
+    .unwrap();
+    assert!(app.status_message.contains("crc32"));
+}
+
+#[test]
+fn hash_command_on_visual_selection_uses_selection_range() {
+    let mut app = app_with_bytes(b"hello world");
+    app.toggle_visual();
+    app.move_horizontal(4);
+    app.execute_command(Command::Hash {
+        algorithm: HashAlgorithm::Md5,
+    })
+    .unwrap();
+    assert!(app.status_message.contains("md5"));
+    assert!(app.status_message.contains("sel 0x"));
+}
+
+#[test]
+fn hash_command_on_empty_file_reports_no_data() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("empty.bin");
+    fs::write(&file, []).unwrap();
+    let cli = Cli {
+        file,
+        bytes_per_line: 16,
+        page_size: 4096,
+        cache_pages: 8,
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let mut app = App::from_cli(cli).unwrap();
+    app.execute_command(Command::Hash {
+        algorithm: HashAlgorithm::Sha256,
+    })
+    .unwrap();
+    assert!(app.status_message.contains("no data"));
 }

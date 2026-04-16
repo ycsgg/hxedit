@@ -26,6 +26,8 @@ pub enum HxError {
     InvalidUndoCount(String),
     #[error("invalid redo count: {0}")]
     InvalidRedoCount(String),
+    #[error("invalid hash algorithm: {0}; supported: md5 sha1 sha256 sha512 crc32")]
+    InvalidHashAlgorithm(String),
     #[error("invalid hex pattern: {0}")]
     InvalidHexPattern(String),
     #[error("unknown command: {0}")]

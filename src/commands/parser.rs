@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::commands::{
     split_command,
-    types::{Command, GotoTarget},
+    types::{Command, GotoTarget, HashAlgorithm},
 };
 use crate::copy::{CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
@@ -62,6 +62,12 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 pattern: parse_hex_bytes(arg)?,
                 backward: name.ends_with('!'),
             })
+        }
+        "hash" => {
+            let arg = rest.ok_or(HxError::MissingArgument("hash algorithm"))?;
+            let algo = HashAlgorithm::parse(arg)
+                .ok_or_else(|| HxError::InvalidHashAlgorithm(arg.to_owned()))?;
+            Ok(Command::Hash { algorithm: algo })
         }
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
@@ -226,5 +232,51 @@ mod tests {
     fn redo_command_accepts_optional_steps() {
         assert_eq!(parse_command("redo").unwrap(), Command::Redo { steps: 1 });
         assert_eq!(parse_command("redo 3").unwrap(), Command::Redo { steps: 3 });
+    }
+
+    #[test]
+    fn hash_command_parses_all_algorithms() {
+        assert_eq!(
+            parse_command("hash md5").unwrap(),
+            Command::Hash {
+                algorithm: HashAlgorithm::Md5
+            }
+        );
+        assert_eq!(
+            parse_command("hash sha1").unwrap(),
+            Command::Hash {
+                algorithm: HashAlgorithm::Sha1
+            }
+        );
+        assert_eq!(
+            parse_command("hash sha256").unwrap(),
+            Command::Hash {
+                algorithm: HashAlgorithm::Sha256
+            }
+        );
+        assert_eq!(
+            parse_command("hash sha512").unwrap(),
+            Command::Hash {
+                algorithm: HashAlgorithm::Sha512
+            }
+        );
+        assert_eq!(
+            parse_command("hash crc32").unwrap(),
+            Command::Hash {
+                algorithm: HashAlgorithm::Crc32
+            }
+        );
+    }
+
+    #[test]
+    fn hash_command_rejects_unknown_algorithm() {
+        let err = parse_command("hash blake2").unwrap_err();
+        assert!(err.to_string().contains("blake2"));
+    }
+
+    #[test]
+    fn hash_command_requires_algorithm_argument() {
+        let err = parse_command("hash").unwrap_err();
+        assert!(err.to_string().contains("hash algorithm"));
     }
 }

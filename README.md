@@ -1,372 +1,175 @@
 # hxedit
 
-`hxedit` is a terminal hex editor for large files, written in Rust.
+A terminal hex editor for large files, written in Rust.
 
-It is built around a non-destructive byte editing model:
+hxedit provides non-destructive byte-level editing with full undo/redo support, built-in format inspection, and search across files of any size.
 
-- real inserts / real deletes are tracked by a piece table
-- normal deletes are tombstones that keep their display slot
-- overwrite edits are replacements on stable `CellId`s
-
-The project is usable today, but it is intentionally narrower than a full-featured binary IDE. The current implementation prioritizes byte-level correctness, undo/save/search stability, and room for large-file performance work.
-
-## Current Status
-
-- Save is currently **rewrite-only**
-  - saving the same path writes a temporary file and renames it back
-  - there is no true patch-save fast path yet
-
-- Overwrite paste currently **stops at EOF**
-  - it does not append the remainder automatically
-
-- Insert paste is supported
-  - it inserts bytes at the cursor and shifts following display offsets right
-
-- Clipboard text paste accepts:
-  - hex text like `de ad be ef` or `deadbeef`
-  - base64 text like `SGVsbG8=`
-  - data URLs with `;base64,`
-
-- Built-in format inspector currently supports:
-  - ELF
-  - PNG
-  - ZIP
-
-- Inspector editing is still **byte-oriented, not structure-safe**
-  - PNG / ZIP edits now show explicit warnings
-  - PNG edits do not repair CRC or chunk consistency
-  - ZIP edits do not repair header / descriptor consistency
-
-## Build And Run
+## Quick Start
 
 ```bash
 cargo run -- <file>
 ```
 
-Useful CLI flags:
-
-- `--readonly`
-  - open without write access
-  - if omitted and the file cannot be opened writable, hxedit now falls back to read-only automatically
-
-- `--offset <n|0xhex>`
-  - start at a specific byte offset
-
-- `--inspector`
-  - open with inspector enabled
-
-- `--bytes-per-line <n>`
-  - bytes shown per row, default `16`
-
-- `--page-size <n>`
-  - page cache read size, default `16384`
-
-- `--cache-pages <n>`
-  - page cache capacity, default `128`
-
-- `--profile`
-  - print startup / render / search diagnostics to `stderr` on exit
-
-- `--no-color`
-  - disable color styling
-  - also disabled automatically when the `NO_COLOR` environment variable is set
-
-hxedit auto-detects terminal color support and selects the best palette:
-- true-color (RGB) when the terminal supports 16 million colors
-- 256-color (indexed) when the terminal supports 256 colors
-- 16-color (ANSI named) when only basic color support is detected
-- no color when the terminal has no color support or `--no-color` / `NO_COLOR` is set
-
-Examples:
-
 ```bash
-cargo run -- tests/fixtures/ascii.bin
-cargo run -- --readonly --offset 0x100 --inspector some.bin
+hxedit --readonly --offset 0x100 --inspector some.bin
 ```
+
+## Features
+
+- **Non-destructive editing** — overwrite bytes, insert new bytes, or mark bytes as deleted; all changes are undoable
+- **Visual selection** — select a range of bytes for delete, copy, or hash operations
+- **Undo / Redo** — full multi-step undo and redo with `Ctrl+Z` / `Ctrl+Y` or `:undo` / `:redo`
+- **Search** — search by ASCII text or hex bytes, forward and backward, with automatic wrap-around
+- **Format inspector** — built-in parsing for ELF, PNG, and ZIP structures with field-level editing
+- **Hash computation** — compute MD5, SHA1, SHA256, SHA512, or CRC32 of a selection or the entire file
+- **Clipboard integration** — copy selections as hex, binary, numeric, or base64 text; paste from clipboard as hex or base64
+- **Large file support** — paged I/O with configurable cache for responsive editing of files much larger than memory
+- **Read-only mode** — automatically falls back to read-only when the file cannot be opened for writing
+- **Adaptive colors** — auto-detects terminal color support (true-color / 256-color / 16-color / no color)
+
+## CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--readonly` | Open without write access; auto-detected if the file lacks write permission |
+| `--offset <n\|0xhex>` | Start at a specific byte offset |
+| `--inspector` | Open with the inspector panel enabled |
+| `--bytes-per-line <n>` | Bytes shown per row (default 16) |
+| `--page-size <n>` | Page cache read size (default 16384) |
+| `--cache-pages <n>` | Page cache capacity (default 128) |
+| `--profile` | Print diagnostics to stderr on exit |
+| `--no-color` | Disable color styling; also disabled by `NO_COLOR` env var |
 
 ## Modes
 
-- `NORMAL`
-  - move around, delete with tombstones, start selections, enter commands
-
-- `EDIT`
-  - overwrite bytes nibble-by-nibble
-
-- `INSERT`
-  - insert bytes nibble-by-nibble
-
-- `VISUAL`
-  - select a display range for delete / copy
-
-- `COMMAND`
-  - enter `:` commands with live hints
-
-- `INSPECT`
-  - move through parsed format fields
-
-- `INSPEDIT`
-  - edit the selected inspector field inline
+| Mode | Description |
+|------|-------------|
+| NORMAL | Navigate, delete, select, enter commands |
+| EDIT | Overwrite bytes nibble-by-nibble |
+| INSERT | Insert new bytes nibble-by-nibble |
+| VISUAL | Select a byte range for operations |
+| COMMAND | Enter `:` commands with live hints |
+| INSPECT | Browse parsed format fields |
+| INSPEDIT | Edit an inspector field inline |
 
 ## Keybindings
 
-### Main View
+### Navigation
 
-- `h` `j` `k` `l` or arrow keys
-  - move cursor
+- `h` `j` `k` `l` / arrow keys — move cursor
+- `PageUp` `PageDown` — scroll by page
+- `Home` `End` — jump to row start / end
 
-- `PageUp` `PageDown`
-  - move by one visible page
+### Editing
 
-- `Home` `End`
-  - jump to row start / row end
+- `r` — enter overwrite mode
+- `i` — enter insert mode
+- `x` — delete current byte (or visual selection)
+- `0-9 a-f` — enter hex nibbles in edit/insert mode
+- `Backspace` — delete in edit/insert mode
+- `Ctrl+Z` / `Ctrl+Y` — undo / redo
 
-- `v`
-  - toggle visual selection
+### Selection & Search
 
-- `i`
-  - enter insert hex mode
-
-- `r`
-  - enter overwrite hex mode
-
-- `x`
-  - tombstone-delete the current byte or the active visual selection
-
-- `n` `p`
-  - repeat the last search forward / backward
-
-- `t` or `Tab`
-  - toggle the inspector panel
-
-- `:`
-  - enter command mode
-
-- `Esc`
-  - leave the current sub-mode
-
-### Edit / Insert Modes
-
-- hex digits `0-9 a-f`
-  - edit or insert nibbles
-
-- `Backspace`
-  - edit-mode / insert-mode backspace
-
-- `Ctrl+Z`
-  - undo one edit step
-
-- `Ctrl+Y`
-  - redo one undone edit step
-
-### Command Mode
-
-- `Enter`
-  - submit command
-
-- `Esc`
-  - cancel command mode
-
-- `Left` `Right` `Home` `End` `Delete` `Backspace`
-  - edit the command buffer
-
-- `Up` `Down`
-  - browse command history
-
-- successful commands clear the command buffer
-  - use `Up` / `Down` to recall earlier commands from history
-
-- failed commands keep the current command buffer
-  - for example, `:q` on a dirty buffer stays editable instead of clearing input
+- `v` — toggle visual selection
+- `n` / `p` — repeat search forward / backward
+- `:` — enter command mode
 
 ### Inspector
 
-- `j` `k` or `Up` `Down`
-  - move selected field
-
-- `Left` `Right` `Home` `End` `Delete` `Backspace`
-  - edit the current field while in `INSPEDIT`
-
-- `Enter`
-  - start editing the selected field, or submit the edit
-
-- `Esc`
-  - leave inspector edit, or leave inspector mode
-
-- `:`
-  - open command mode from inspector
+- `t` / `Tab` — toggle inspector panel
+- `j` `k` / `Up` `Down` — move between fields
+- `Enter` — start or submit field edit
+- `Esc` — leave edit or inspector
 
 ## Commands
 
-### File / Session
+### File
 
-- `:q` `:quit`
-  - quit, but refuse if there are unsaved changes
+| Command | Description |
+|---------|-------------|
+| `:q` | Quit (refuses if unsaved) |
+| `:q!` | Force quit |
+| `:w` | Save |
+| `:w <path>` | Save as |
+| `:wq` | Save and quit |
+| `:u [n]` | Undo n changes (default 1) |
+| `:redo [n]` | Redo n changes (default 1) |
 
-- `:q!` `:quit!`
-  - force quit
+### Navigation
 
-- `:w` `:write`
-  - save current file
+| Command | Description |
+|---------|-------------|
+| `:g <offset>` | Go to absolute offset (decimal or `0x` hex) |
+| `:g end` | Go to last byte |
+| `:g +<delta>` | Go forward by delta |
+| `:g -<delta>` | Go backward by delta |
+| `:s <text>` | Search ASCII downward |
+| `:s! <text>` | Search ASCII upward |
+| `:S <hex>` | Search hex bytes downward |
+| `:S! <hex>` | Search hex bytes upward |
 
-- `:w <path>` `:write <path>`
-  - save as and switch the buffer to the new path
-  - this still works from a readonly session because it writes a new target
+Search wraps around automatically — forward search continues from the start after EOF, backward search continues from the end after BOF.
 
-- `:wq`
-  - save and quit
+### Clipboard
 
-- `:u [steps]` `:undo [steps]`
-  - undo one change by default, or more if a positive count is provided
+| Command | Description |
+|---------|-------------|
+| `:p [!] [n]` | Overwrite-paste at cursor; `!` = raw bytes; `n` = byte limit |
+| `:p? [!] [n]` | Preview overwrite-paste |
+| `:pi [!] [n]` | Insert-paste at cursor |
+| `:pi? [!] [n]` | Preview insert-paste |
+| `:c [fmt] [disp]` | Copy visual selection |
 
-- `:redo [steps]`
-  - redo one undone change by default, or more if a positive count is provided
+Copy format options: `bin` (binary text), `b` (byte groups, default), `db` (2-byte), `qb` (4-byte)
 
-### Navigation / Search
+Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (little-endian numeric), `b64` (base64)
 
-- `:g <offset|end|+delta|-delta>` `:goto <offset|end|+delta|-delta>`
-  - jump to an absolute offset, to the final byte with `end`, or relative to the current cursor with `+` / `-`
-  - absolute and relative values support decimal or `0x`-prefixed hex
+### Hash
 
-- `:s <text>`
-  - search ASCII downward
+| Command | Description |
+|---------|-------------|
+| `:hash md5` | Compute MD5 |
+| `:hash sha1` | Compute SHA-1 |
+| `:hash sha256` | Compute SHA-256 |
+| `:hash sha512` | Compute SHA-512 |
+| `:hash crc32` | Compute CRC32 |
 
-- `:s! <text>`
-  - search ASCII upward
-
-- `:S <hex>`
-  - search hex bytes downward, for example `:S 7f 45 4c 46`
-
-- `:S! <hex>`
-  - search hex bytes upward
-
-Search now wraps around automatically:
-
-- forward search continues from the start after reaching EOF
-- backward search continues from the end after reaching BOF
-
-### Paste
-
-- `:p [!] [num]` `:paste [!] [num]`
-  - overwrite-paste at the cursor
-  - default input is clipboard text parsed as hex first, then base64
-  - `!` uses raw clipboard bytes
-  - `num` limits how many bytes are used
-  - bytes past EOF are currently dropped
-
-- `:p? [!] [num]` `:paste? [!] [num]`
-  - preview overwrite-paste without modifying the document
-  - preview now shows parse source, requested/used length, a head-byte preview, and overwrite/insert effect
-
-- `:pi [!] [num]` `:paste-insert [!] [num]`
-  - insert-paste at the cursor
-  - bytes are inserted and subsequent offsets move right
-
-- `:pi? [!] [num]` `:paste-insert? [!] [num]`
-  - preview insert-paste without modifying the document
-
-### Copy
-
-- `:c [bin|b|db|qb] [r|nb|nl|b64]`
-  - copy the current visual selection to the system clipboard as formatted text
-
-Format options:
-
-- `bin`
-  - binary text
-
-- `b`
-  - byte groups, default
-
-- `db`
-  - 2-byte groups
-
-- `qb`
-  - 4-byte groups
-
-Display options:
-
-- `r`
-  - raw formatted text, default
-
-- `nb`
-  - big-endian numeric output
-
-- `nl`
-  - little-endian numeric output
-
-- `b64`
-  - base64 output for the logical selected bytes
-
-Current limitation:
-
-- copy is text-oriented
-- there is no raw binary clipboard copy yet
-
-## Status Bar
-
-- `len`
-  - display length including tombstones
-
-- `vis`
-  - bytes that would actually be written on save
-
-- `sel(span)`
-  - selected display-slot span
-
-- `sel(logical)`
-  - selected logical byte count after skipping tombstones
+Hashes the visual selection if active, otherwise the entire file.
 
 ### Inspector
 
-- `:insp` `:inspector`
-  - toggle the inspector panel
-  - if auto-detect finds no supported format, the panel stays visible with a hint and focus remains in the main view
+| Command | Description |
+|---------|-------------|
+| `:insp` | Toggle inspector panel |
+| `:format` | Reset to auto-detected format |
+| `:format elf\|png\|zip` | Force a specific format |
 
-- `:format`
-  - return to auto-detected inspector format
+## Status Bar
 
-- `:format elf|png|zip`
-  - force a built-in inspector format when the file matches
+- `len` — display length including deleted slots
+- `vis` — bytes that will be written on save
+- `sel(span)` — selected display-slot span
+- `sel(logical)` — selected logical byte count (skipping deleted)
+- `[RO]` — read-only indicator
+- `[+]` — unsaved changes indicator
 
-## Editing Semantics
+## Editing Model
 
-- Normal delete is a **tombstone delete**
-  - the display slot stays visible
-  - the byte is skipped on save
-
-- Insert-mode backspace uses **real delete**
-  - later display offsets move left immediately
-
-- Overwrite editing and inspector writes use **replacement**
-  - the piece layout does not change
-
-- Deleted bytes render as:
-  - `XX` in the hex column
-  - `x` in the ASCII column
+- **Delete** (`x` in normal mode) marks a byte as deleted — it still occupies a display slot but is skipped on save
+- **Insert** (`i` mode) adds new bytes, shifting subsequent content right
+- **Overwrite** (`r` mode) replaces bytes in-place without changing the layout
+- Deleted bytes display as `XX` in hex and `x` in ASCII
 
 ## Inspector Notes
 
-- The inspector is currently rebuilt by full detect + parse + flatten refreshes
-- It works best on a wide terminal
-- If the terminal is too narrow, inspector focus is rejected and a status warning is shown
-- If no supported format is detected, the panel shows an explicit unavailable message with `:format` guidance
-- Read-only inspector fields now report that they are view-only instead of silently doing nothing
-- Editable fields are not a promise of structure-safe output
-- PNG / ZIP inspector edits show warnings because structure consistency is not repaired automatically
+- Supports ELF, PNG, and ZIP formats
+- Works best on a wide terminal; shows a warning if the terminal is too narrow
+- Editable fields can be modified, but PNG/ZIP edits show warnings since structure consistency is not automatically repaired
+- Read-only fields report that they are view-only
 
 ## Limitations
 
-- save is rewrite-only
-- overwrite paste truncates at EOF
-- unwritable files now auto-fallback to readonly with a status warning
-- copy is text-only, not raw-binary
-
-## Profiling
-
-Use:
-
-```bash
-hxedit --profile <file>
-```
-
-to print startup, render, search, and cache diagnostics to `stderr` when the editor exits.
+- Save is rewrite-only (writes a temporary file and renames)
+- Overwrite paste stops at EOF; excess bytes are dropped
+- Copy is text-only; raw binary clipboard copy is not yet supported

@@ -113,14 +113,21 @@ impl App {
         let Some((start, end)) = self.selection_range() else {
             return Err(HxError::MissingSelection);
         };
+        let display_span = end - start + 1;
         let bytes = self.document.logical_bytes(start, end)?;
         let text = format_selection(&bytes, format, display)?;
         clipboard::copy_text(&text)?;
-        self.set_info_status(format!(
-            "copied {} bytes [{}]",
-            bytes.len(),
-            Self::copy_status_label(format, display)
-        ));
+        let label = Self::copy_status_label(format, display);
+        if display_span as usize != bytes.len() {
+            self.set_info_status(format!(
+                "copied {} logical bytes (display span {}) [{}]",
+                bytes.len(),
+                display_span,
+                label
+            ));
+        } else {
+            self.set_info_status(format!("copied {} bytes [{}]", bytes.len(), label));
+        }
         Ok(())
     }
 
@@ -203,20 +210,18 @@ impl App {
                 } else {
                     self.set_info_status("paste produced no bytes");
                 }
+            } else if overwrite_truncated {
+                self.set_warning_status(format!(
+                    "{mode_label} {} bytes [{}] (truncated at EOF)",
+                    pasted,
+                    source.label()
+                ));
             } else {
-                if overwrite_truncated {
-                    self.set_warning_status(format!(
-                        "{mode_label} {} bytes [{}] (truncated at EOF)",
-                        pasted,
-                        source.label()
-                    ));
-                } else {
-                    self.set_info_status(format!(
-                        "{mode_label} {} bytes [{}]",
-                        pasted,
-                        source.label()
-                    ));
-                }
+                self.set_info_status(format!(
+                    "{mode_label} {} bytes [{}]",
+                    pasted,
+                    source.label()
+                ));
             }
         }
         Ok(())

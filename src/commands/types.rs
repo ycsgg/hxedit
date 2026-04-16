@@ -9,6 +9,38 @@ pub enum GotoTarget {
     End,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashAlgorithm {
+    Md5,
+    Sha1,
+    Sha256,
+    Sha512,
+    Crc32,
+}
+
+impl HashAlgorithm {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Md5 => "md5",
+            Self::Sha1 => "sha1",
+            Self::Sha256 => "sha256",
+            Self::Sha512 => "sha512",
+            Self::Crc32 => "crc32",
+        }
+    }
+
+    pub fn parse(input: &str) -> Option<Self> {
+        match input {
+            "md5" => Some(Self::Md5),
+            "sha1" => Some(Self::Sha1),
+            "sha256" => Some(Self::Sha256),
+            "sha512" => Some(Self::Sha512),
+            "crc32" => Some(Self::Crc32),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Quit {
@@ -58,5 +90,8 @@ pub enum Command {
     Inspector,
     Format {
         name: Option<String>,
+    },
+    Hash {
+        algorithm: HashAlgorithm,
     },
 }

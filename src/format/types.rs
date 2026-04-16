@@ -22,6 +22,9 @@ pub enum FieldType {
     Bytes(usize),
     /// Fixed-length UTF-8 string.
     Utf8(usize),
+    /// Variable-length data range displayed as "start–end (N bytes)".
+    /// The length is computed at detect time and stored here.
+    DataRange(u64),
     /// Enum mapping: inner type's numeric value -> display name.
     /// E.g. ELF e_type: 2 -> "ET_EXEC".
     Enum {
@@ -44,6 +47,7 @@ impl FieldType {
             Self::U32Le | Self::U32Be | Self::I32Le | Self::I32Be => Some(4),
             Self::U64Le | Self::U64Be | Self::I64Le | Self::I64Be => Some(8),
             Self::Bytes(n) | Self::Utf8(n) => Some(*n),
+            Self::DataRange(_) => None,
             Self::Enum { inner, .. } | Self::Flags { inner, .. } => inner.byte_size(),
         }
     }

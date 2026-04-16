@@ -73,6 +73,10 @@ pub fn hint_for(input: &str) -> CommandHint {
                 .to_owned(),
         },
         "c" | "copy" => copy_hint(name, rest),
+        "hash" => CommandHint {
+            syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
+            details: "compute hash of the current visual selection, or the entire file if no selection is active".to_owned(),
+        },
         other => {
             let suggestions = known_commands()
                 .into_iter()
@@ -81,7 +85,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             if suggestions.is_empty() {
                 CommandHint {
                     syntax: "unknown command".to_owned(),
-                    details: "available: q w wq g s s! S S! u redo c p pi insp format"
+                    details: "available: q w wq g s s! S S! u redo c p pi hash insp format"
                         .to_owned(),
                 }
             } else {
@@ -204,6 +208,7 @@ fn known_commands() -> Vec<&'static str> {
         "format",
         "c",
         "copy",
+        "hash",
         "p",
         "paste",
         "p!",
@@ -278,5 +283,14 @@ mod tests {
     fn inspector_hint_mentions_panel() {
         let hint = hint_for("insp");
         assert!(hint.details.contains("inspector"));
+    }
+
+    #[test]
+    fn hash_hint_shows_algorithm_options() {
+        let hint = hint_for("hash");
+        assert!(hint.syntax.contains("md5"));
+        assert!(hint.syntax.contains("sha256"));
+        assert!(hint.syntax.contains("crc32"));
+        assert!(hint.details.contains("selection"));
     }
 }

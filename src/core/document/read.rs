@@ -1,10 +1,10 @@
 use crate::core::document::{ByteSlot, Document};
-use crate::core::piece_table::{CellId, PieceSource};
+use crate::core::piece_table::{CellId, Piece, PieceSource};
 use crate::error::HxResult;
 
+const LOGICAL_CHUNK: usize = 64 * 1024;
+
 impl Document {
-    /// Read raw bytes from the original file (bypasses piece table / overlays).
-    /// Used by the save path for bulk reads.
     pub fn raw_range(&mut self, offset: u64, len: usize) -> HxResult<Vec<u8>> {
         if offset >= self.original_len {
             return Ok(Vec::new());
@@ -13,12 +13,10 @@ impl Document {
         self.view.read_range(offset, clamped)
     }
 
-    /// Resolve a display offset to its stable [`CellId`].
     pub fn cell_id_at(&self, offset: u64) -> Option<CellId> {
         self.pieces.resolve(offset)
     }
 
-    /// Read a single display slot: `Present(byte)`, `Deleted`, or `Empty`.
     pub fn byte_at(&mut self, offset: u64) -> HxResult<ByteSlot> {
         let Some(id) = self.cell_id_at(offset) else {
             return Ok(ByteSlot::Empty);
@@ -29,10 +27,6 @@ impl Document {
         Ok(ByteSlot::Present(self.display_byte_for_id(id)?))
     }
 
-    /// Read a row of display slots starting at `offset`.
-    ///
-    /// Walks the piece table once to resolve all bytes in the range,
-    /// avoiding repeated O(pieces) lookups per byte.
     pub fn row_bytes(&mut self, offset: u64, width: usize) -> HxResult<Vec<ByteSlot>> {
         let doc_len = self.len();
         if width == 0 || offset >= doc_len {
@@ -95,19 +89,252 @@ impl Document {
     }
 
     /// Extract the actual bytes (skipping tombstones) in a display range.
-    /// Used by copy to get the selection content.
+    ///
+    /// Walks the piece table once and reads in 64 KB chunks, using O(log n)
+    /// range queries to skip clean chunks entirely — the same strategy as
+    /// the save path.
     pub fn logical_bytes(&mut self, start: u64, end_inclusive: u64) -> HxResult<Vec<u8>> {
         let len = self.len();
         if len == 0 || start > end_inclusive || start >= len {
             return Ok(Vec::new());
         }
 
-        let mut out = Vec::with_capacity((end_inclusive - start + 1) as usize);
-        for offset in start..=end_inclusive.min(len - 1) {
-            if let ByteSlot::Present(byte) = self.byte_at(offset)? {
-                out.push(byte);
+        let end = end_inclusive.min(len - 1) + 1;
+        let pieces: Vec<Piece> = self.pieces_snapshot();
+        let has_tombstones = self.has_tombstones();
+        let has_replacements = self.has_replacements();
+        let mut out = Vec::with_capacity((end - start) as usize);
+        let mut cursor = 0_u64;
+
+        for piece in &pieces {
+            if cursor >= end {
+                break;
             }
+            let piece_end = cursor + piece.len;
+            if piece_end <= start {
+                cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = start.max(cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start >= overlap_end {
+                cursor = piece_end;
+                continue;
+            }
+
+            let source_start = piece.start + (overlap_start - cursor);
+            let overlap_len = overlap_end - overlap_start;
+
+            match piece.source {
+                PieceSource::Original => {
+                    let mut remaining = overlap_len;
+                    let mut file_off = source_start;
+                    let mut cell_off = source_start;
+
+                    while remaining > 0 {
+                        let batch = (remaining as usize).min(LOGICAL_CHUNK);
+                        let raw = self.raw_range(file_off, batch)?;
+                        if raw.is_empty() {
+                            break;
+                        }
+                        let read_len = raw.len() as u64;
+
+                        let (need_ts, need_rep) = self.search_overlay_flags(
+                            PieceSource::Original,
+                            cell_off,
+                            read_len,
+                            has_tombstones,
+                            has_replacements,
+                        );
+
+                        if !need_ts && !need_rep {
+                            out.extend_from_slice(&raw);
+                        } else {
+                            for (i, &base) in raw.iter().enumerate() {
+                                let id = CellId::Original(cell_off + i as u64);
+                                if need_ts && self.is_tombstone(id) {
+                                    continue;
+                                }
+                                let byte = if need_rep {
+                                    self.replacement_for(id).unwrap_or(base)
+                                } else {
+                                    base
+                                };
+                                out.push(byte);
+                            }
+                        }
+
+                        file_off += read_len;
+                        cell_off += read_len;
+                        remaining -= read_len;
+                    }
+                }
+                PieceSource::Add => {
+                    let (need_ts, need_rep) = self.search_overlay_flags(
+                        PieceSource::Add,
+                        source_start,
+                        overlap_len,
+                        has_tombstones,
+                        has_replacements,
+                    );
+
+                    if !need_ts && !need_rep {
+                        let slice = self.add_slice(source_start, overlap_len);
+                        out.extend_from_slice(slice);
+                    } else {
+                        let slice = self.add_slice(source_start, overlap_len);
+                        for (i, &base) in slice.iter().enumerate() {
+                            let id = CellId::Add(source_start + i as u64);
+                            if need_ts && self.is_tombstone(id) {
+                                continue;
+                            }
+                            let byte = if need_rep {
+                                self.replacement_for(id).unwrap_or(base)
+                            } else {
+                                base
+                            };
+                            out.push(byte);
+                        }
+                    }
+                }
+            }
+
+            cursor = piece_end;
         }
+
         Ok(out)
+    }
+
+    /// Compute a hash over the logical bytes in a display range, streaming
+    /// data through the hasher in 64 KB chunks without materializing the
+    /// entire byte vector in memory.
+    pub fn hash_logical_bytes(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        mut hasher: Box<dyn digest::DynDigest>,
+    ) -> HxResult<(u64, Vec<u8>)> {
+        let len = self.len();
+        if len == 0 || start > end_inclusive || start >= len {
+            return Ok((0, Vec::new()));
+        }
+
+        let end = end_inclusive.min(len - 1) + 1;
+        let pieces: Vec<Piece> = self.pieces_snapshot();
+        let has_tombstones = self.has_tombstones();
+        let has_replacements = self.has_replacements();
+        let mut bytes_hashed: u64 = 0;
+        let mut cursor = 0_u64;
+
+        let mut chunk_buf = Vec::with_capacity(LOGICAL_CHUNK);
+
+        for piece in &pieces {
+            if cursor >= end {
+                break;
+            }
+            let piece_end = cursor + piece.len;
+            if piece_end <= start {
+                cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = start.max(cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start >= overlap_end {
+                cursor = piece_end;
+                continue;
+            }
+
+            let source_start = piece.start + (overlap_start - cursor);
+            let overlap_len = overlap_end - overlap_start;
+
+            match piece.source {
+                PieceSource::Original => {
+                    let mut remaining = overlap_len;
+                    let mut file_off = source_start;
+                    let mut cell_off = source_start;
+
+                    while remaining > 0 {
+                        let batch = (remaining as usize).min(LOGICAL_CHUNK);
+                        let raw = self.raw_range(file_off, batch)?;
+                        if raw.is_empty() {
+                            break;
+                        }
+                        let read_len = raw.len() as u64;
+
+                        let (need_ts, need_rep) = self.search_overlay_flags(
+                            PieceSource::Original,
+                            cell_off,
+                            read_len,
+                            has_tombstones,
+                            has_replacements,
+                        );
+
+                        if !need_ts && !need_rep {
+                            hasher.update(&raw);
+                            bytes_hashed += read_len;
+                        } else {
+                            chunk_buf.clear();
+                            for (i, &base) in raw.iter().enumerate() {
+                                let id = CellId::Original(cell_off + i as u64);
+                                if need_ts && self.is_tombstone(id) {
+                                    continue;
+                                }
+                                let byte = if need_rep {
+                                    self.replacement_for(id).unwrap_or(base)
+                                } else {
+                                    base
+                                };
+                                chunk_buf.push(byte);
+                            }
+                            hasher.update(&chunk_buf);
+                            bytes_hashed += chunk_buf.len() as u64;
+                        }
+
+                        file_off += read_len;
+                        cell_off += read_len;
+                        remaining -= read_len;
+                    }
+                }
+                PieceSource::Add => {
+                    let (need_ts, need_rep) = self.search_overlay_flags(
+                        PieceSource::Add,
+                        source_start,
+                        overlap_len,
+                        has_tombstones,
+                        has_replacements,
+                    );
+
+                    let slice = self.add_slice(source_start, overlap_len);
+
+                    if !need_ts && !need_rep {
+                        hasher.update(slice);
+                        bytes_hashed += slice.len() as u64;
+                    } else {
+                        chunk_buf.clear();
+                        for (i, &base) in slice.iter().enumerate() {
+                            let id = CellId::Add(source_start + i as u64);
+                            if need_ts && self.is_tombstone(id) {
+                                continue;
+                            }
+                            let byte = if need_rep {
+                                self.replacement_for(id).unwrap_or(base)
+                            } else {
+                                base
+                            };
+                            chunk_buf.push(byte);
+                        }
+                        hasher.update(&chunk_buf);
+                        bytes_hashed += chunk_buf.len() as u64;
+                    }
+                }
+            }
+
+            cursor = piece_end;
+        }
+
+        let result = hasher.finalize();
+        Ok((bytes_hashed, result.to_vec()))
     }
 }
