@@ -148,6 +148,9 @@ cargo run -- --readonly --offset 0x100 --inspector some.bin
 - `Ctrl+Z`
   - undo one edit step
 
+- `Ctrl+Y`
+  - redo one undone edit step
+
 ### Command Mode
 
 - `Enter`
@@ -158,6 +161,10 @@ cargo run -- --readonly --offset 0x100 --inspector some.bin
 
 - `Left` `Right` `Home` `End` `Delete` `Backspace`
   - edit the command buffer
+
+- `Up` `Down`
+  - browse command history
+  - command mode now restores the most recent command buffer when reopened
 
 - failed commands keep the current command buffer
   - for example, `:q` on a dirty buffer stays editable instead of clearing input
@@ -202,6 +209,9 @@ cargo run -- --readonly --offset 0x100 --inspector some.bin
 - `:u [steps]` `:undo [steps]`
   - undo one change by default, or more if a positive count is provided
 
+- `:redo [steps]`
+  - redo one undone change by default, or more if a positive count is provided
+
 ### Navigation / Search
 
 - `:g <offset|end|+delta|-delta>` `:goto <offset|end|+delta|-delta>`
@@ -220,7 +230,10 @@ cargo run -- --readonly --offset 0x100 --inspector some.bin
 - `:S! <hex>`
   - search hex bytes upward
 
-Search does not currently wrap around.
+Search now wraps around automatically:
+
+- forward search continues from the start after reaching EOF
+- backward search continues from the end after reaching BOF
 
 ### Paste
 

@@ -88,6 +88,7 @@ impl App {
             Action::SearchNext => self.repeat_search(crate::app::SearchDirection::Forward),
             Action::SearchPrev => self.repeat_search(crate::app::SearchDirection::Backward),
             Action::Undo(steps) => self.handle_undo_action(steps),
+            Action::Redo(steps) => self.handle_redo_action(steps),
             Action::EditHex(value) => self.handle_edit_hex_action(value),
             Action::EditBackspace => self.edit_backspace(),
             Action::ForceQuit => {
@@ -130,6 +131,14 @@ impl App {
             }
             Action::CommandBackspace => {
                 self.backspace_command_char();
+                Ok(true)
+            }
+            Action::CommandHistoryPrev => {
+                self.command_history_prev();
+                Ok(true)
+            }
+            Action::CommandHistoryNext => {
+                self.command_history_next();
                 Ok(true)
             }
             Action::CommandSubmit => {
@@ -228,8 +237,9 @@ impl App {
         };
         self.command_return_mode = Some(return_mode);
         self.mode = Mode::Command;
-        self.command_buffer.clear();
-        self.command_cursor_pos = 0;
+        self.reset_command_history_navigation();
+        self.command_buffer = self.last_command_buffer.clone();
+        self.command_cursor_pos = self.command_buffer.len();
     }
 
     fn handle_undo_action(&mut self, steps: usize) -> HxResult<()> {
@@ -242,6 +252,10 @@ impl App {
         } else {
             self.undo(steps, true)
         }
+    }
+
+    fn handle_redo_action(&mut self, steps: usize) -> HxResult<()> {
+        self.redo(steps, true)
     }
 
     fn handle_edit_hex_action(&mut self, value: u8) -> HxResult<()> {
@@ -366,6 +380,8 @@ fn is_command_edit_action(action: Action) -> bool {
             | Action::CommandEnd
             | Action::CommandDelete
             | Action::CommandBackspace
+            | Action::CommandHistoryPrev
+            | Action::CommandHistoryNext
     )
 }
 #[cfg(test)]
@@ -438,6 +454,12 @@ mod tests {
 
     fn app_with_inspector_field() -> App {
         app_with_inspector_field_for("TEST")
+    }
+
+    fn type_command(app: &mut App, input: &str) {
+        for ch in input.chars() {
+            app.handle_action(Action::CommandChar(ch));
+        }
     }
 
     #[test]
@@ -607,5 +629,42 @@ mod tests {
         assert_eq!(app.command_cursor_pos, 1);
         assert_eq!(app.status_level, crate::app::StatusLevel::Error);
         assert!(app.status_message.contains("unsaved changes"));
+    }
+
+    #[test]
+    fn command_mode_restores_last_buffer_and_browses_history() {
+        let mut app = app_with_len(16);
+
+        app.handle_action(Action::EnterCommand);
+        type_command(&mut app, "goto 0x4");
+        app.handle_action(Action::CommandSubmit);
+
+        app.handle_action(Action::EnterCommand);
+        assert_eq!(app.command_buffer, "goto 0x4");
+        type_command(&mut app, "2");
+        app.handle_action(Action::CommandCancel);
+
+        app.handle_action(Action::EnterCommand);
+        assert_eq!(app.command_buffer, "goto 0x42");
+        app.handle_action(Action::CommandHistoryPrev);
+        assert_eq!(app.command_buffer, "goto 0x4");
+
+        app.handle_action(Action::CommandCancel);
+        app.handle_action(Action::EnterCommand);
+        app.command_buffer.clear();
+        app.command_cursor_pos = 0;
+        type_command(&mut app, "undo");
+        app.handle_action(Action::CommandSubmit);
+        app.handle_action(Action::EnterCommand);
+        type_command(&mut app, " 2");
+
+        app.handle_action(Action::CommandHistoryPrev);
+        assert_eq!(app.command_buffer, "undo");
+        app.handle_action(Action::CommandHistoryPrev);
+        assert_eq!(app.command_buffer, "goto 0x4");
+        app.handle_action(Action::CommandHistoryNext);
+        assert_eq!(app.command_buffer, "undo");
+        app.handle_action(Action::CommandHistoryNext);
+        assert_eq!(app.command_buffer, "undo 2");
     }
 }

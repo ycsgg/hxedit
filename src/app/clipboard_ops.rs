@@ -156,21 +156,28 @@ impl App {
             self.document.replace_display_byte(offset, byte)?;
             let after = self.document.replacement_state(id);
             if after != previous {
-                ops.push(crate::app::ReplacementUndo { id, previous });
+                ops.push(crate::app::ReplacementChange {
+                    id,
+                    before: previous,
+                    after,
+                });
             }
         }
 
         let written = bytes.len().min((doc_len - cursor_before) as usize);
+        let cursor_after =
+            self.clamp_cursor_for_mode(cursor_before + written.saturating_sub(1) as u64, self.mode);
 
         if !ops.is_empty() {
             self.push_undo_step(
                 vec![EditOp::ReplaceBytes { changes: ops }],
                 cursor_before,
                 self.mode,
+                cursor_after,
+                self.mode,
             );
         }
-        self.cursor =
-            self.clamp_cursor_for_mode(cursor_before + written.saturating_sub(1) as u64, self.mode);
+        self.cursor = cursor_after;
         self.refresh_inspector();
         Ok(written)
     }
@@ -185,19 +192,22 @@ impl App {
         }
 
         let cursor_before = self.cursor;
-        self.document.insert_bytes(cursor_before, bytes)?;
-        self.push_undo_step(
-            vec![EditOp::Insert {
-                offset: cursor_before,
-                len: bytes.len() as u64,
-            }],
-            cursor_before,
-            self.mode,
-        );
-        self.cursor = self.clamp_cursor_for_mode(
+        let inserted = self.document.insert_bytes(cursor_before, bytes)?;
+        let cursor_after = self.clamp_cursor_for_mode(
             cursor_before + bytes.len().saturating_sub(1) as u64,
             self.mode,
         );
+        self.push_undo_step(
+            vec![EditOp::Insert {
+                offset: cursor_before,
+                cells: inserted,
+            }],
+            cursor_before,
+            self.mode,
+            cursor_after,
+            self.mode,
+        );
+        self.cursor = cursor_after;
         self.refresh_inspector();
         Ok(bytes.len())
     }

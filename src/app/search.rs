@@ -18,18 +18,33 @@ impl App {
         direction: SearchDirection,
     ) -> HxResult<()> {
         let started_at = Instant::now();
-        let found = match direction {
+        let (found, wrapped) = match direction {
             SearchDirection::Forward => {
                 let start = if self.document.is_empty() {
                     0
                 } else {
                     (self.cursor + 1).min(self.document.len())
                 };
-                self.document.search_forward(start, &search.pattern)?
+                if let Some(found) = self.document.search_forward(start, &search.pattern)? {
+                    (Some(found), false)
+                } else {
+                    (self.document.search_forward(0, &search.pattern)?, start > 0)
+                }
             }
-            SearchDirection::Backward => self
-                .document
-                .search_backward(self.cursor, &search.pattern)?,
+            SearchDirection::Backward => {
+                if let Some(found) = self
+                    .document
+                    .search_backward(self.cursor, &search.pattern)?
+                {
+                    (Some(found), false)
+                } else {
+                    (
+                        self.document
+                            .search_backward(self.document.len(), &search.pattern)?,
+                        self.cursor < self.document.len(),
+                    )
+                }
+            }
         };
 
         if let Some(profiler) = self.profiler.as_mut() {
@@ -45,7 +60,15 @@ impl App {
 
         if let Some(found) = found {
             self.cursor = found;
-            self.set_info_status(format!("found {} at 0x{:x}", search.kind.label(), found));
+            if wrapped {
+                self.set_info_status(format!(
+                    "found {} at 0x{:x} (wrapped)",
+                    search.kind.label(),
+                    found
+                ));
+            } else {
+                self.set_info_status(format!("found {} at 0x{:x}", search.kind.label(), found));
+            }
         } else {
             self.set_info_status(format!("{} pattern not found", search.kind.label()));
         }

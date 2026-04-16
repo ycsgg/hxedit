@@ -48,6 +48,10 @@ pub struct App {
     viewport_top: u64,
     command_buffer: String,
     command_cursor_pos: usize,
+    last_command_buffer: String,
+    command_history: Vec<String>,
+    command_history_index: Option<usize>,
+    command_history_stash: Option<String>,
     status_message: String,
     status_level: StatusLevel,
     should_quit: bool,
@@ -58,6 +62,7 @@ pub struct App {
     mouse_selection_anchor: Option<u64>,
     command_return_mode: Option<Mode>,
     undo_stack: Vec<UndoStep>,
+    redo_stack: Vec<UndoStep>,
     last_search: Option<SearchState>,
     last_paste: Option<PasteState>,
     profiler: Option<Profiler>,
@@ -104,10 +109,12 @@ pub(crate) struct InspectorEdit {
 
 /// Snapshot of a single cell's replacement state before an edit.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ReplacementUndo {
+pub(crate) struct ReplacementChange {
     pub(crate) id: CellId,
     /// `None` means the cell had no replacement (base byte was displayed).
-    pub(crate) previous: Option<u8>,
+    pub(crate) before: Option<u8>,
+    /// `None` means the cell returns to its base byte.
+    pub(crate) after: Option<u8>,
 }
 
 /// A single reversible edit operation.
@@ -119,10 +126,10 @@ pub(crate) struct ReplacementUndo {
 /// - `ReplaceBytes` — undo by restoring each cell's previous replacement.
 #[derive(Debug, Clone)]
 pub(crate) enum EditOp {
-    Insert { offset: u64, len: u64 },
+    Insert { offset: u64, cells: Vec<CellId> },
     RealDelete { offset: u64, cells: Vec<CellId> },
     TombstoneDelete { ids: Vec<CellId> },
-    ReplaceBytes { changes: Vec<ReplacementUndo> },
+    ReplaceBytes { changes: Vec<ReplacementChange> },
 }
 
 /// One entry on the undo stack: the cursor/mode before the edit, plus the
@@ -131,6 +138,8 @@ pub(crate) enum EditOp {
 struct UndoStep {
     cursor_before: u64,
     mode_before: Mode,
+    cursor_after: u64,
+    mode_after: Mode,
     ops: Vec<EditOp>,
 }
 
@@ -251,6 +260,10 @@ impl App {
             mode: Mode::Normal,
             command_buffer: String::new(),
             command_cursor_pos: 0,
+            last_command_buffer: String::new(),
+            command_history: Vec::new(),
+            command_history_index: None,
+            command_history_stash: None,
             status_message: if document.is_readonly() && !config.readonly {
                 "opened read-only; no write permission".to_owned()
             } else {
@@ -269,6 +282,7 @@ impl App {
             mouse_selection_anchor: None,
             command_return_mode: None,
             undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
             last_search: None,
             last_paste: None,
             profiler: config.profile.then(|| {

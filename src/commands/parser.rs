@@ -33,6 +33,9 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         "u" | "undo" => Ok(Command::Undo {
             steps: parse_undo_steps(rest)?,
         }),
+        "redo" => Ok(Command::Redo {
+            steps: parse_redo_steps(rest)?,
+        }),
         "insp" | "inspector" => Ok(Command::Inspector),
         "format" => Ok(Command::Format {
             name: rest.filter(|value| !value.is_empty()).map(str::to_owned),
@@ -92,15 +95,23 @@ fn opt_path(input: Option<&str>) -> Option<PathBuf> {
 }
 
 fn parse_undo_steps(input: Option<&str>) -> HxResult<usize> {
+    parse_positive_count(input, HxError::InvalidUndoCount)
+}
+
+fn parse_redo_steps(input: Option<&str>) -> HxResult<usize> {
+    parse_positive_count(input, HxError::InvalidRedoCount)
+}
+
+fn parse_positive_count(input: Option<&str>, invalid: fn(String) -> HxError) -> HxResult<usize> {
     match input {
         None => Ok(1),
         Some("") => Ok(1),
         Some(value) => {
             let steps = value
                 .parse::<usize>()
-                .map_err(|_| HxError::InvalidUndoCount(value.to_owned()))?;
+                .map_err(|_| invalid(value.to_owned()))?;
             if steps == 0 {
-                return Err(HxError::InvalidUndoCount(value.to_owned()));
+                return Err(invalid(value.to_owned()));
             }
             Ok(steps)
         }
@@ -209,5 +220,11 @@ mod tests {
                 target: GotoTarget::Relative(-20)
             }
         );
+    }
+
+    #[test]
+    fn redo_command_accepts_optional_steps() {
+        assert_eq!(parse_command("redo").unwrap(), Command::Redo { steps: 1 });
+        assert_eq!(parse_command("redo 3").unwrap(), Command::Redo { steps: 3 });
     }
 }

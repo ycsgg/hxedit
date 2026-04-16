@@ -288,6 +288,34 @@ fn reverse_search_command_searches_upward() {
 }
 
 #[test]
+fn forward_search_wraps_to_start() {
+    let mut app = app_with_bytes(b"hello world");
+    app.cursor = app.document.len() - 1;
+    app.execute_command(Command::SearchAscii {
+        pattern: b"hello".to_vec(),
+        backward: false,
+    })
+    .unwrap();
+
+    assert_eq!(app.cursor, 0);
+    assert!(app.status_message.contains("wrapped"));
+}
+
+#[test]
+fn backward_search_wraps_to_end() {
+    let mut app = app_with_bytes(b"hello world hello");
+    app.cursor = 0;
+    app.execute_command(Command::SearchAscii {
+        pattern: b"hello".to_vec(),
+        backward: true,
+    })
+    .unwrap();
+
+    assert_eq!(app.cursor, 12);
+    assert!(app.status_message.contains("wrapped"));
+}
+
+#[test]
 fn goto_command_supports_end_and_relative_offsets() {
     let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
 
@@ -332,6 +360,64 @@ fn undo_reverts_overwrite_paste_as_one_action() {
     assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0x22));
     assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x33));
+}
+
+#[test]
+fn redo_reapplies_overwrite_paste() {
+    let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
+    app.cursor = 1;
+    app.apply_paste_overwrite(&[0xaa, 0xbb]).unwrap();
+    app.undo(1, true).unwrap();
+    app.redo(1, true).unwrap();
+
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
+    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
+}
+
+#[test]
+fn redo_reapplies_insert_paste() {
+    let mut app = app_with_bytes(&[0x11, 0x22]);
+    app.cursor = 1;
+    app.apply_paste_insert(&[0xaa, 0xbb]).unwrap();
+    app.undo(1, true).unwrap();
+    app.redo(1, true).unwrap();
+
+    assert_eq!(app.document.len(), 4);
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
+    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
+}
+
+#[test]
+fn redo_reapplies_visual_delete() {
+    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
+    app.toggle_visual();
+    app.move_horizontal(2);
+    app.delete_at_cursor_or_selection().unwrap();
+    app.undo(1, true).unwrap();
+    app.redo(1, true).unwrap();
+
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Deleted);
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Deleted);
+    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Deleted);
+    assert_eq!(app.mode, Mode::Normal);
+}
+
+#[test]
+fn command_redo_replays_undone_changes() {
+    let mut app = app_with_len(16);
+    app.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app.edit_nibble(0xa).unwrap();
+    app.edit_nibble(0xb).unwrap();
+    app.mode = Mode::Normal;
+
+    app.execute_command(Command::Undo { steps: 2 }).unwrap();
+    app.execute_command(Command::Redo { steps: 2 }).unwrap();
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(app.cursor, 1);
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0xab));
 }
 
 #[test]

@@ -307,13 +307,15 @@ impl App {
         }
 
         let ops = format::edit::write_field(&mut self.document, abs_offset, &bytes)?;
-        if !ops.is_empty() {
-            self.push_undo_step(ops, self.cursor, self.mode);
-        }
+        let cursor_before = self.cursor;
+        let mode_before = self.mode;
 
         self.refresh_inspector();
         self.mode = Mode::Inspector;
         self.sync_cursor_to_inspector();
+        if !ops.is_empty() {
+            self.push_undo_step(ops, cursor_before, mode_before, self.cursor, self.mode);
+        }
         if let Some(warning) = self.inspector_edit_warning() {
             self.set_warning_status(format!("edited field at 0x{:x}; {}", abs_offset, warning));
         } else {

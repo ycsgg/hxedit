@@ -24,6 +24,8 @@ pub enum HxError {
     InvalidCopyDisplay(String),
     #[error("invalid undo count: {0}")]
     InvalidUndoCount(String),
+    #[error("invalid redo count: {0}")]
+    InvalidRedoCount(String),
     #[error("invalid hex pattern: {0}")]
     InvalidHexPattern(String),
     #[error("unknown command: {0}")]

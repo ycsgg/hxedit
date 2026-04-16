@@ -1,4 +1,4 @@
-use crate::app::{App, EditOp, ReplacementUndo};
+use crate::app::{App, EditOp, ReplacementChange};
 use crate::error::HxResult;
 use crate::mode::{Mode, NibblePhase, PendingInsert};
 
@@ -21,6 +21,8 @@ impl App {
             vec![EditOp::TombstoneDelete { ids: vec![id] }],
             self.cursor,
             self.mode,
+            self.cursor,
+            self.mode,
         );
         self.refresh_inspector();
         self.set_info_status(format!("deleted 0x{:x}", self.cursor));
@@ -40,10 +42,16 @@ impl App {
             }
         }
 
-        self.push_undo_step(vec![EditOp::TombstoneDelete { ids }], start, Mode::Visual);
         self.cursor = self.clamp_offset(start);
         self.selection_anchor = None;
         self.mode = Mode::Normal;
+        self.push_undo_step(
+            vec![EditOp::TombstoneDelete { ids }],
+            start,
+            Mode::Visual,
+            self.cursor,
+            self.mode,
+        );
         self.refresh_inspector();
         self.set_info_status(format!("deleted selection {} bytes", end - start + 1));
         Ok(())
@@ -75,18 +83,8 @@ impl App {
             .map(|(_, state)| state)
             .or_else(|| (offset < self.document.len()).then_some(None))
             .flatten();
-        if after != previous {
-            self.push_undo_step(
-                vec![EditOp::ReplaceBytes {
-                    changes: vec![ReplacementUndo { id, previous }],
-                }],
-                self.cursor,
-                self.mode,
-            );
-        } else if offset == self.document.len().saturating_sub(1) && previous.is_none() {
-            self.push_undo_step(vec![EditOp::Insert { offset, len: 1 }], offset, self.mode);
-        }
-
+        let cursor_before = self.cursor;
+        let mode_before = self.mode;
         self.set_info_status(format!("edited 0x{:x}", offset));
         self.mode = match phase {
             NibblePhase::High => Mode::EditHex {
@@ -99,6 +97,32 @@ impl App {
                 }
             }
         };
+        if after != previous {
+            self.push_undo_step(
+                vec![EditOp::ReplaceBytes {
+                    changes: vec![ReplacementChange {
+                        id,
+                        before: previous,
+                        after,
+                    }],
+                }],
+                cursor_before,
+                mode_before,
+                self.cursor,
+                self.mode,
+            );
+        } else if offset == self.document.len().saturating_sub(1) && previous.is_none() {
+            self.push_undo_step(
+                vec![EditOp::Insert {
+                    offset,
+                    cells: vec![id],
+                }],
+                cursor_before,
+                mode_before,
+                self.cursor,
+                self.mode,
+            );
+        }
         self.refresh_inspector();
         Ok(())
     }
@@ -119,6 +143,7 @@ impl App {
         match pending {
             None => {
                 let offset = self.cursor;
+                self.redo_stack.clear();
                 self.document.insert_byte(offset, value << 4)?;
                 self.cursor = offset;
                 self.mode = Mode::InsertHex {
@@ -133,8 +158,8 @@ impl App {
             Some(pending) => {
                 self.document
                     .replace_display_byte(pending.offset, (pending.high_nibble << 4) | value)?;
-                self.commit_pending_insert();
                 self.cursor = pending.offset + 1;
+                self.commit_pending_insert();
                 self.refresh_inspector();
                 self.set_info_status(format!("inserted 0x{:x}", pending.offset));
             }
@@ -148,6 +173,7 @@ impl App {
         match self.mode {
             Mode::InsertHex { pending } => {
                 if let Some(pending) = pending {
+                    self.redo_stack.clear();
                     self.document.delete_range_real(pending.offset, 1)?;
                     self.cursor = pending.offset;
                     self.mode = Mode::InsertHex { pending: None };
@@ -168,6 +194,8 @@ impl App {
                         cells: removed,
                     }],
                     self.cursor,
+                    Mode::InsertHex { pending: None },
+                    delete_offset,
                     Mode::InsertHex { pending: None },
                 );
                 self.cursor = delete_offset;
@@ -193,15 +221,21 @@ impl App {
             _ => return None,
         };
 
+        let id = self.document.cell_id_at(pending.offset)?;
+        let cursor_after = self.cursor;
+        let mode_after = Mode::InsertHex { pending: None };
+
         self.push_undo_step(
             vec![EditOp::Insert {
                 offset: pending.offset,
-                len: 1,
+                cells: vec![id],
             }],
             pending.offset,
             Mode::InsertHex { pending: None },
+            cursor_after,
+            mode_after,
         );
-        self.mode = Mode::InsertHex { pending: None };
+        self.mode = mode_after;
         Some(pending.offset)
     }
 

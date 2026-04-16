@@ -40,6 +40,9 @@ pub enum Command {
     Undo {
         steps: usize,
     },
+    Redo {
+        steps: usize,
+    },
     Copy {
         format: CopyFormat,
         display: CopyDisplay,

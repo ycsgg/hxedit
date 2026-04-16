@@ -26,9 +26,12 @@ pub enum Action {
     CommandEnd,
     CommandDelete,
     CommandBackspace,
+    CommandHistoryPrev,
+    CommandHistoryNext,
     CommandSubmit,
     CommandCancel,
     ForceQuit,
+    Redo(usize),
 
     // ── Inspector actions ──
     /// Toggle inspector panel visibility / focus.

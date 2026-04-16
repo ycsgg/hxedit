@@ -9,12 +9,14 @@ impl App {
         let return_mode = self.command_return_mode.unwrap_or(Mode::Normal);
         let command = parse_command(&self.command_buffer)?;
         self.execute_command(command)?;
+        self.remember_command_submission();
         self.command_buffer.clear();
         self.command_cursor_pos = 0;
         if matches!(self.mode, Mode::Command) {
             self.mode = self.normalize_mode(return_mode);
         }
         self.command_return_mode = None;
+        self.reset_command_history_navigation();
         Ok(())
     }
 
@@ -25,6 +27,7 @@ impl App {
             Command::WriteQuit { path } => self.execute_write_command(path, true),
             Command::Goto { target } => self.execute_goto_command(target),
             Command::Undo { steps } => self.undo(steps, false),
+            Command::Redo { steps } => self.redo(steps, false),
             Command::Paste {
                 raw,
                 preview,
@@ -68,6 +71,7 @@ impl App {
     ) -> HxResult<()> {
         let (saved, profile) = self.document.save(path)?;
         self.undo_stack.clear();
+        self.redo_stack.clear();
         self.cursor = self.clamp_offset(self.cursor);
         self.refresh_inspector();
         self.set_info_status(format!("wrote {} [{}]", saved.display(), profile));

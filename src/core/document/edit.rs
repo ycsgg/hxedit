@@ -43,6 +43,17 @@ impl Document {
         }
     }
 
+    /// Re-apply tombstones for a set of stable cells (used by redo).
+    pub fn mark_tombstones(&mut self, ids: &[CellId]) -> HxResult<()> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        for id in ids {
+            self.tombstones.insert(*id);
+        }
+        Ok(())
+    }
+
     /// Replace a single nibble (high or low) of the byte at `offset`.
     /// Used by edit-mode hex input. If `offset == len`, inserts a new byte
     /// (only valid for the high nibble).

@@ -1,4 +1,4 @@
-use crate::app::{EditOp, ReplacementUndo};
+use crate::app::{EditOp, ReplacementChange};
 use crate::core::document::Document;
 use crate::error::HxResult;
 use crate::format::types::FieldType;
@@ -142,7 +142,11 @@ pub(crate) fn write_field(
             doc.replace_display_byte(offset, byte)?;
             let after = doc.replacement_state(id);
             if after != previous {
-                changes.push(ReplacementUndo { id, previous });
+                changes.push(ReplacementChange {
+                    id,
+                    before: previous,
+                    after,
+                });
             }
         }
     }

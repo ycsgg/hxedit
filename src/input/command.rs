@@ -6,6 +6,8 @@ pub fn map(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Esc => Some(Action::CommandCancel),
         KeyCode::Enter => Some(Action::CommandSubmit),
+        KeyCode::Up => Some(Action::CommandHistoryPrev),
+        KeyCode::Down => Some(Action::CommandHistoryNext),
         KeyCode::Left => Some(Action::CommandLeft),
         KeyCode::Right => Some(Action::CommandRight),
         KeyCode::Home => Some(Action::CommandHome),

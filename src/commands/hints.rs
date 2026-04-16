@@ -67,6 +67,11 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: format!("{name} [steps]"),
             details: "undo one change by default; pass a positive number to undo more".to_owned(),
         },
+        "redo" => CommandHint {
+            syntax: "redo [steps]".to_owned(),
+            details: "redo one undone change by default; pass a positive number to redo more"
+                .to_owned(),
+        },
         "c" | "copy" => copy_hint(name, rest),
         other => {
             let suggestions = known_commands()
@@ -76,7 +81,8 @@ pub fn hint_for(input: &str) -> CommandHint {
             if suggestions.is_empty() {
                 CommandHint {
                     syntax: "unknown command".to_owned(),
-                    details: "available: q w wq g s s! S S! u c p pi insp format".to_owned(),
+                    details: "available: q w wq g s s! S S! u redo c p pi insp format"
+                        .to_owned(),
                 }
             } else {
                 CommandHint {
@@ -192,6 +198,7 @@ fn known_commands() -> Vec<&'static str> {
         "S!",
         "u",
         "undo",
+        "redo",
         "insp",
         "inspector",
         "format",
@@ -259,6 +266,12 @@ mod tests {
     fn reverse_search_hint_mentions_upward() {
         let hint = hint_for("s!");
         assert!(hint.details.contains("upward"));
+    }
+
+    #[test]
+    fn redo_hint_mentions_redoing_changes() {
+        let hint = hint_for("redo");
+        assert!(hint.details.contains("redo"));
     }
 
     #[test]

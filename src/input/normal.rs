@@ -1,9 +1,15 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::action::Action;
 use crate::input::keymap::{force_quit_action, movement_action};
 
 pub fn map(key: KeyEvent) -> Option<Action> {
+    if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y'))
+        && (key.modifiers.contains(KeyModifiers::CONTROL)
+            || key.modifiers.contains(KeyModifiers::SUPER))
+    {
+        return Some(Action::Redo(1));
+    }
     if let Some(action) = force_quit_action(&key) {
         return Some(action);
     }
