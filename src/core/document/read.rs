@@ -94,8 +94,8 @@ impl Document {
                         }
                     }
                     // Short read: pad with 0 to keep the per-byte legacy behavior.
-                    for _ in read_len..overlap_len as usize {
-                        out.push(0);
+                    if read_len < overlap_len as usize {
+                        out.resize(out.len() + (overlap_len as usize - read_len), 0);
                     }
                 }
                 PieceSource::Add => {
@@ -128,8 +128,8 @@ impl Document {
                             }
                         }
                     }
-                    for _ in slice.len()..overlap_len as usize {
-                        out.push(0);
+                    if slice.len() < overlap_len as usize {
+                        out.resize(out.len() + (overlap_len as usize - slice.len()), 0);
                     }
                 }
             }

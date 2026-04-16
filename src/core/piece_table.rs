@@ -11,6 +11,8 @@
 //! Normal-mode "tombstone" deletions are **not** handled here — they live in
 //! `Document::tombstones` and only affect rendering / saving.
 
+use std::cell::{Cell, RefCell};
+
 /// Stable identity for a single byte in the document.
 ///
 /// `CellId` survives insertions and deletions: an `Original(42)` always refers
@@ -66,6 +68,10 @@ pub struct Piece {
 ///   by [`coalesce`](Self::coalesce) after every mutation.
 /// - The add-buffer is append-only; bytes are never removed from it (real
 ///   deletions remove pieces, not buffer content).
+/// - `prefix_ends[i]` caches the cumulative display length through `pieces[i]`
+///   when `prefix_dirty` is `false`. Used for O(log n) offset lookup in
+///   [`find_piece`](Self::find_piece). Mutations set `prefix_dirty = true`
+///   and the cache is lazily rebuilt on the next read.
 #[derive(Debug, Clone)]
 pub struct PieceTable {
     /// Length of the original file (used by [`is_identity`](Self::is_identity)).
@@ -76,6 +82,10 @@ pub struct PieceTable {
     pieces: Vec<Piece>,
     /// Cached total display length (sum of all piece lengths).
     len: u64,
+    /// Cumulative display length at the end of each piece (lazy).
+    prefix_ends: RefCell<Vec<u64>>,
+    /// True when `prefix_ends` is stale and must be rebuilt before use.
+    prefix_dirty: Cell<bool>,
 }
 
 impl PieceTable {
@@ -98,6 +108,8 @@ impl PieceTable {
             add_buffer: Vec::new(),
             pieces,
             len: original_len,
+            prefix_ends: RefCell::new(Vec::new()),
+            prefix_dirty: Cell::new(true),
         }
     }
 
@@ -158,29 +170,61 @@ impl PieceTable {
         }
     }
 
+    /// Ensure the prefix-sum cache is up to date. O(pieces) rebuild when
+    /// dirty, O(1) otherwise. Called lazily from read paths.
+    fn ensure_prefix(&self) {
+        if !self.prefix_dirty.get() {
+            return;
+        }
+        let mut ends = self.prefix_ends.borrow_mut();
+        ends.clear();
+        ends.reserve(self.pieces.len());
+        let mut cursor = 0_u64;
+        for piece in &self.pieces {
+            cursor += piece.len;
+            ends.push(cursor);
+        }
+        self.prefix_dirty.set(false);
+    }
+
+    /// Locate the piece containing `display_offset`. Returns `(idx, cursor)`
+    /// where `cursor` is the display offset of the start of piece `idx`.
+    /// Returns `None` if the offset is past EOF.
+    fn find_piece(&self, display_offset: u64) -> Option<(usize, u64)> {
+        if display_offset >= self.len || self.pieces.is_empty() {
+            return None;
+        }
+        self.ensure_prefix();
+        let ends = self.prefix_ends.borrow();
+        // First index whose end > display_offset.
+        let idx = ends.partition_point(|end| *end <= display_offset);
+        if idx >= self.pieces.len() {
+            return None;
+        }
+        let cursor = if idx == 0 { 0 } else { ends[idx - 1] };
+        Some((idx, cursor))
+    }
+
+    /// Mark the prefix-sum cache stale. Called by every mutation.
+    fn invalidate_prefix(&mut self) {
+        self.prefix_dirty.set(true);
+    }
+
     /// Map a display offset to its [`CellId`].
     ///
-    /// Walks the piece list to find which piece contains the offset, then
-    /// computes the source-relative byte position.  Returns `None` if the
-    /// offset is past the end.
+    /// Uses the (lazily built) prefix-sum cache + binary search — O(log n) in
+    /// the number of pieces. Returns `None` if the offset is past the end.
     pub fn resolve(&self, display_offset: u64) -> Option<CellId> {
         if display_offset >= self.len {
             return None;
         }
-
-        let mut cursor = 0_u64;
-        for piece in &self.pieces {
-            let piece_end = cursor + piece.len;
-            if display_offset < piece_end {
-                let source_offset = piece.start + (display_offset - cursor);
-                return Some(match piece.source {
-                    PieceSource::Original => CellId::Original(source_offset),
-                    PieceSource::Add => CellId::Add(source_offset),
-                });
-            }
-            cursor = piece_end;
-        }
-        None
+        let (idx, cursor) = self.find_piece(display_offset)?;
+        let piece = self.pieces[idx];
+        let source_offset = piece.start + (display_offset - cursor);
+        Some(match piece.source {
+            PieceSource::Original => CellId::Original(source_offset),
+            PieceSource::Add => CellId::Add(source_offset),
+        })
     }
 
     /// Collect `CellId`s for a contiguous display range.
@@ -195,9 +239,11 @@ impl PieceTable {
 
         let end = display_offset.saturating_add(len).min(self.len);
         let mut out = Vec::with_capacity((end - display_offset) as usize);
-        let mut cursor = 0_u64;
+        let Some((start_idx, mut cursor)) = self.find_piece(display_offset) else {
+            return out;
+        };
 
-        for piece in &self.pieces {
+        for piece in &self.pieces[start_idx..] {
             if cursor >= end {
                 break;
             }
@@ -243,6 +289,7 @@ impl PieceTable {
         self.pieces.insert(insert_idx, piece);
         self.len += piece.len;
         self.coalesce();
+        self.invalidate_prefix();
     }
 
     /// Re-insert previously removed cells (used by undo of real-delete).
@@ -261,6 +308,7 @@ impl PieceTable {
         self.pieces.splice(insert_idx..insert_idx, new_pieces);
         self.len += inserted_len;
         self.coalesce();
+        self.invalidate_prefix();
     }
 
     /// Remove bytes from the display stream (insert-mode backspace).
@@ -286,14 +334,16 @@ impl PieceTable {
         self.pieces.drain(start_idx..end_idx);
         self.len -= end - display_offset;
         self.coalesce();
+        self.invalidate_prefix();
         removed
     }
 
     /// Split the piece that spans `display_offset` into two halves.
     ///
-    /// Returns the index where a new piece should be inserted.  If the
+    /// Returns the index where a new piece should be inserted. If the
     /// offset falls on a piece boundary, no split is needed and the
-    /// existing boundary index is returned.
+    /// existing boundary index is returned. Uses binary search on the
+    /// prefix-sum cache to find the piece in O(log n).
     fn split_piece_at(&mut self, display_offset: u64) -> usize {
         if display_offset == 0 {
             return 0;
@@ -302,34 +352,30 @@ impl PieceTable {
             return self.pieces.len();
         }
 
-        let mut cursor = 0_u64;
-        for idx in 0..self.pieces.len() {
-            let piece = self.pieces[idx];
-            let piece_end = cursor + piece.len;
+        let Some((idx, cursor)) = self.find_piece(display_offset) else {
+            return self.pieces.len();
+        };
+        let piece = self.pieces[idx];
+        let piece_end = cursor + piece.len;
 
-            if display_offset == cursor {
-                return idx;
-            }
-            if display_offset == piece_end {
-                return idx + 1;
-            }
-            if display_offset > cursor && display_offset < piece_end {
-                let left_len = display_offset - cursor;
-                let right_len = piece.len - left_len;
-                let right = Piece {
-                    source: piece.source,
-                    start: piece.start + left_len,
-                    len: right_len,
-                };
-                self.pieces[idx].len = left_len;
-                self.pieces.insert(idx + 1, right);
-                return idx + 1;
-            }
-
-            cursor = piece_end;
+        if display_offset == cursor {
+            return idx;
+        }
+        if display_offset == piece_end {
+            return idx + 1;
         }
 
-        self.pieces.len()
+        let left_len = display_offset - cursor;
+        let right_len = piece.len - left_len;
+        let right = Piece {
+            source: piece.source,
+            start: piece.start + left_len,
+            len: right_len,
+        };
+        self.pieces[idx].len = left_len;
+        self.pieces.insert(idx + 1, right);
+        self.prefix_dirty.set(true);
+        idx + 1
     }
 
     /// Merge adjacent pieces that reference contiguous ranges in the same
