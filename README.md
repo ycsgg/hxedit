@@ -164,7 +164,9 @@ cargo run -- --readonly --offset 0x100 --inspector some.bin
 
 - `Up` `Down`
   - browse command history
-  - command mode now restores the most recent command buffer when reopened
+
+- successful commands clear the command buffer
+  - use `Up` / `Down` to recall earlier commands from history
 
 - failed commands keep the current command buffer
   - for example, `:q` on a dirty buffer stays editable instead of clearing input

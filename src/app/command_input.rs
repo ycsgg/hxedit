@@ -21,7 +21,6 @@ impl App {
             return;
         }
 
-        self.last_command_buffer = command.clone();
         if self.command_history.last() != Some(&command) {
             self.command_history.push(command);
         }
@@ -87,16 +86,12 @@ impl App {
             self.command_buffer = self.command_history[next_index].clone();
         } else {
             self.command_history_index = None;
-            self.command_buffer = self
-                .command_history_stash
-                .take()
-                .unwrap_or_else(|| self.last_command_buffer.clone());
+            self.command_buffer = self.command_history_stash.take().unwrap_or_default();
         }
         self.command_cursor_pos = self.command_buffer.len();
     }
 
     pub(crate) fn cancel_command_input(&mut self) {
-        self.last_command_buffer = self.command_buffer.clone();
         self.command_buffer.clear();
         self.command_cursor_pos = 0;
         self.reset_command_history_navigation();

@@ -238,8 +238,8 @@ impl App {
         self.command_return_mode = Some(return_mode);
         self.mode = Mode::Command;
         self.reset_command_history_navigation();
-        self.command_buffer = self.last_command_buffer.clone();
-        self.command_cursor_pos = self.command_buffer.len();
+        self.command_buffer.clear();
+        self.command_cursor_pos = 0;
     }
 
     fn handle_undo_action(&mut self, steps: usize) -> HxResult<()> {
@@ -632,7 +632,7 @@ mod tests {
     }
 
     #[test]
-    fn command_mode_restores_last_buffer_and_browses_history() {
+    fn command_mode_clears_after_success_and_browses_history() {
         let mut app = app_with_len(16);
 
         app.handle_action(Action::EnterCommand);
@@ -640,31 +640,21 @@ mod tests {
         app.handle_action(Action::CommandSubmit);
 
         app.handle_action(Action::EnterCommand);
-        assert_eq!(app.command_buffer, "goto 0x4");
-        type_command(&mut app, "2");
-        app.handle_action(Action::CommandCancel);
-
-        app.handle_action(Action::EnterCommand);
-        assert_eq!(app.command_buffer, "goto 0x42");
-        app.handle_action(Action::CommandHistoryPrev);
-        assert_eq!(app.command_buffer, "goto 0x4");
-
-        app.handle_action(Action::CommandCancel);
-        app.handle_action(Action::EnterCommand);
-        app.command_buffer.clear();
-        app.command_cursor_pos = 0;
-        type_command(&mut app, "undo");
+        assert!(app.command_buffer.is_empty());
+        type_command(&mut app, "goto 0x1");
         app.handle_action(Action::CommandSubmit);
+
         app.handle_action(Action::EnterCommand);
-        type_command(&mut app, " 2");
+        assert!(app.command_buffer.is_empty());
+        type_command(&mut app, "und");
 
         app.handle_action(Action::CommandHistoryPrev);
-        assert_eq!(app.command_buffer, "undo");
+        assert_eq!(app.command_buffer, "goto 0x1");
         app.handle_action(Action::CommandHistoryPrev);
         assert_eq!(app.command_buffer, "goto 0x4");
         app.handle_action(Action::CommandHistoryNext);
-        assert_eq!(app.command_buffer, "undo");
+        assert_eq!(app.command_buffer, "goto 0x1");
         app.handle_action(Action::CommandHistoryNext);
-        assert_eq!(app.command_buffer, "undo 2");
+        assert_eq!(app.command_buffer, "und");
     }
 }
