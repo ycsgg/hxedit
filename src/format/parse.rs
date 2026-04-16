@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::core::document::{ByteSlot, Document};
+use crate::core::document::Document;
 use crate::error::HxResult;
 use crate::format::types::*;
 
@@ -191,13 +191,15 @@ fn count_skipped(sv: &StructValue, field_idx: &mut usize, node_counter: &mut usi
 }
 
 /// Read bytes from the document at the given offset and length.
+///
+/// Uses a batched piece-walking read instead of per-byte `byte_at` to keep
+/// parse cost proportional to the number of fields, not bytes. Short reads
+/// (past EOF or partial page) are padded with `0x00` to preserve the legacy
+/// fallback behavior that `byte_at`-based parsers relied on.
 fn read_bytes(doc: &mut Document, offset: u64, len: usize) -> HxResult<Vec<u8>> {
-    let mut buf = Vec::with_capacity(len);
-    for i in 0..len {
-        match doc.byte_at(offset + i as u64)? {
-            ByteSlot::Present(b) => buf.push(b),
-            _ => buf.push(0),
-        }
+    let mut buf = doc.read_logical_range(offset, len)?;
+    if buf.len() < len {
+        buf.resize(len, 0);
     }
     Ok(buf)
 }

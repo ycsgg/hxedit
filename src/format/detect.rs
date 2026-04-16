@@ -1,4 +1,4 @@
-use crate::core::document::{ByteSlot, Document};
+use crate::core::document::Document;
 use crate::format::defs;
 use crate::format::types::FormatDef;
 
@@ -30,17 +30,16 @@ pub fn detect_by_name(name: &str, doc: &mut Document) -> Option<FormatDef> {
 
 /// Helper: read a single byte from the document, returning None on failure.
 pub(crate) fn read_u8(doc: &mut Document, offset: u64) -> Option<u8> {
-    match doc.byte_at(offset).ok()? {
-        ByteSlot::Present(b) => Some(b),
-        _ => None,
-    }
+    let buf = doc.read_logical_range(offset, 1).ok()?;
+    buf.first().copied()
 }
 
-/// Helper: read N bytes from the document.
+/// Helper: read N bytes from the document via a batched piece walk.
 pub(crate) fn read_bytes_raw(doc: &mut Document, offset: u64, len: usize) -> Option<Vec<u8>> {
-    let mut buf = Vec::with_capacity(len);
-    for i in 0..len {
-        buf.push(read_u8(doc, offset + i as u64)?);
+    let buf = doc.read_logical_range(offset, len).ok()?;
+    if buf.len() == len {
+        Some(buf)
+    } else {
+        None
     }
-    Some(buf)
 }
