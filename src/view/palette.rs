@@ -65,9 +65,10 @@ impl Palette {
                     .fg(Color::Black)
                     .add_modifier(Modifier::BOLD),
                 cursor_nibble: Style::default()
-                    .bg(Color::LightBlue)
+                    .bg(Color::White)
                     .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD),
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
                 command_border: Style::default().fg(Color::Cyan),
                 command_hint: Style::default().fg(Color::DarkGray),
                 inspector_header: Style::default()
@@ -78,8 +79,9 @@ impl Palette {
                 inspector_active: Style::default()
                     .bg(Color::DarkGray)
                     .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-                inspector_edit: Style::default().bg(Color::Yellow).fg(Color::Black),
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
+                inspector_edit: Style::default().bg(Color::LightBlue).fg(Color::Black),
             }
         } else {
             let base = Style::default();
