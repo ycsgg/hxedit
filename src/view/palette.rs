@@ -86,7 +86,8 @@ impl Palette {
             separator: Style::default().fg(Color::Rgb(80, 80, 80)),
             status: Style::default().fg(Color::Rgb(220, 220, 220)),
             notice: Style::default()
-                .fg(Color::Rgb(120, 200, 255))
+                .bg(Color::Rgb(120, 200, 255))
+                .fg(Color::Rgb(30, 30, 30))
                 .add_modifier(Modifier::BOLD),
             warning: Style::default()
                 .bg(Color::Rgb(220, 180, 0))
@@ -135,6 +136,7 @@ impl Palette {
                 .fg(Color::Rgb(30, 30, 30)),
             inspector_highlight: Style::default()
                 .fg(Color::Rgb(255, 220, 120))
+                .bg(Color::Rgb(80, 80, 80))
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
         }
