@@ -3,6 +3,13 @@ use std::path::PathBuf;
 use crate::copy::{CopyDisplay, CopyFormat};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportFormat {
+    Binary { path: PathBuf },
+    CArray { name: String },
+    PythonBytes { name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GotoTarget {
     Absolute(u64),
     Relative(i64),
@@ -52,6 +59,10 @@ pub enum Command {
     WriteQuit {
         path: Option<PathBuf>,
     },
+    Fill {
+        pattern: Vec<u8>,
+        len: usize,
+    },
     Goto {
         target: GotoTarget,
     },
@@ -78,6 +89,9 @@ pub enum Command {
     Copy {
         format: CopyFormat,
         display: CopyDisplay,
+    },
+    Export {
+        format: ExportFormat,
     },
     SearchAscii {
         pattern: Vec<u8>,

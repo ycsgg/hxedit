@@ -2,11 +2,13 @@ use std::path::PathBuf;
 
 use crate::commands::{
     split_command,
-    types::{Command, GotoTarget, HashAlgorithm},
+    types::{Command, ExportFormat, GotoTarget, HashAlgorithm},
 };
 use crate::copy::{CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
-use crate::util::parse::{parse_hex_bytes, parse_offset};
+use crate::util::parse::{parse_hex_bytes, parse_hex_stream, parse_offset};
+
+const DEFAULT_EXPORT_NAME: &str = "selection_bytes";
 
 /// Parse command-line mode input into an executable command.
 pub fn parse_command(input: &str) -> HxResult<Command> {
@@ -25,11 +27,14 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         "wq" => Ok(Command::WriteQuit {
             path: opt_path(rest),
         }),
+        "fill" => parse_fill(rest),
+        "zero" => parse_zero(rest),
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
         | "paste?!" => parse_paste(name, rest, false),
         "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?" | "pi!?"
         | "pi?!" | "paste-insert!?" | "paste-insert?!" => parse_paste(name, rest, true),
         "c" | "copy" => parse_copy(rest),
+        "export" => parse_export(rest),
         "u" | "undo" => Ok(Command::Undo {
             steps: parse_undo_steps(rest)?,
         }),
@@ -108,20 +113,26 @@ fn parse_redo_steps(input: Option<&str>) -> HxResult<usize> {
     parse_positive_count(input, HxError::InvalidRedoCount)
 }
 
+fn parse_fill_count(input: &str) -> HxResult<usize> {
+    parse_positive_usize(input, HxError::InvalidFillCount)
+}
+
 fn parse_positive_count(input: Option<&str>, invalid: fn(String) -> HxError) -> HxResult<usize> {
     match input {
         None => Ok(1),
         Some("") => Ok(1),
-        Some(value) => {
-            let steps = value
-                .parse::<usize>()
-                .map_err(|_| invalid(value.to_owned()))?;
-            if steps == 0 {
-                return Err(invalid(value.to_owned()));
-            }
-            Ok(steps)
-        }
+        Some(value) => parse_positive_usize(value, invalid),
     }
+}
+
+fn parse_positive_usize(input: &str, invalid: fn(String) -> HxError) -> HxResult<usize> {
+    let steps = input
+        .parse::<usize>()
+        .map_err(|_| invalid(input.to_owned()))?;
+    if steps == 0 {
+        return Err(invalid(input.to_owned()));
+    }
+    Ok(steps)
 }
 
 fn parse_copy(input: Option<&str>) -> HxResult<Command> {
@@ -180,6 +191,70 @@ fn parse_paste(name: &str, input: Option<&str>, insert: bool) -> HxResult<Comman
             limit,
         })
     }
+}
+
+fn parse_fill(input: Option<&str>) -> HxResult<Command> {
+    let rest = input.ok_or(HxError::MissingArgument("fill pattern and length"))?;
+    let mut tokens = rest.split_whitespace().collect::<Vec<_>>();
+    if tokens.len() < 2 {
+        return Err(HxError::MissingArgument("fill pattern and length"));
+    }
+
+    let len = parse_fill_count(tokens.pop().expect("fill len token"))?;
+    let pattern = parse_hex_stream(&tokens.join(" "))?;
+    Ok(Command::Fill { pattern, len })
+}
+
+fn parse_zero(input: Option<&str>) -> HxResult<Command> {
+    let rest = input.ok_or(HxError::MissingArgument("fill length"))?;
+    let len = parse_fill_count(rest)?;
+    Ok(Command::Fill {
+        pattern: vec![0],
+        len,
+    })
+}
+
+fn parse_export(input: Option<&str>) -> HxResult<Command> {
+    let rest = input.ok_or(HxError::MissingArgument("export target"))?;
+    let mut tokens = rest.split_whitespace();
+    let first = tokens
+        .next()
+        .ok_or(HxError::MissingArgument("export target"))?;
+
+    let format = match first {
+        "bin" | "raw" => {
+            let path = tokens.collect::<Vec<_>>().join(" ");
+            if path.is_empty() {
+                return Err(HxError::MissingArgument("export path"));
+            }
+            ExportFormat::Binary {
+                path: PathBuf::from(path),
+            }
+        }
+        "c" | "carray" | "c-array" => {
+            let name = tokens.next().unwrap_or(DEFAULT_EXPORT_NAME);
+            if let Some(extra) = tokens.next() {
+                return Err(HxError::UnknownCommand(extra.to_owned()));
+            }
+            ExportFormat::CArray {
+                name: name.to_owned(),
+            }
+        }
+        "py" | "python" => {
+            let name = tokens.next().unwrap_or(DEFAULT_EXPORT_NAME);
+            if let Some(extra) = tokens.next() {
+                return Err(HxError::UnknownCommand(extra.to_owned()));
+            }
+            ExportFormat::PythonBytes {
+                name: name.to_owned(),
+            }
+        }
+        _ => ExportFormat::Binary {
+            path: PathBuf::from(rest),
+        },
+    };
+
+    Ok(Command::Export { format })
 }
 
 #[cfg(test)]

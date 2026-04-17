@@ -14,6 +14,8 @@ pub enum HxError {
     EmptySearch,
     #[error("invalid offset: {0}")]
     InvalidOffset(String),
+    #[error("invalid fill count: {0}")]
+    InvalidFillCount(String),
     #[error("invalid paste count: {0}")]
     InvalidPasteCount(String),
     #[error("invalid paste data: {0}")]
@@ -34,7 +36,7 @@ pub enum HxError {
     UnknownCommand(String),
     #[error("missing command argument: {0}")]
     MissingArgument(&'static str),
-    #[error("copy requires an active visual selection")]
+    #[error("operation requires an active visual selection")]
     MissingSelection,
     #[error("selection length must be a multiple of {0} bytes for this copy mode")]
     CopyAlignment(usize),

@@ -1,5 +1,7 @@
 use hxedit::commands::parser::parse_command;
-use hxedit::commands::types::{Command, GotoTarget, HashAlgorithm};
+use std::path::PathBuf;
+
+use hxedit::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 use hxedit::copy::{CopyDisplay, CopyFormat};
 
 #[test]
@@ -92,6 +94,44 @@ fn parses_basic_commands() {
         }
     );
     assert_eq!(
+        parse_command("fill de ad 8").unwrap(),
+        Command::Fill {
+            pattern: vec![0xde, 0xad],
+            len: 8,
+        }
+    );
+    assert_eq!(
+        parse_command("zero 16").unwrap(),
+        Command::Fill {
+            pattern: vec![0x00],
+            len: 16,
+        }
+    );
+    assert_eq!(
+        parse_command("export /tmp/out.bin").unwrap(),
+        Command::Export {
+            format: ExportFormat::Binary {
+                path: PathBuf::from("/tmp/out.bin")
+            }
+        }
+    );
+    assert_eq!(
+        parse_command("export c payload").unwrap(),
+        Command::Export {
+            format: ExportFormat::CArray {
+                name: "payload".to_owned()
+            }
+        }
+    );
+    assert_eq!(
+        parse_command("export py blob").unwrap(),
+        Command::Export {
+            format: ExportFormat::PythonBytes {
+                name: "blob".to_owned()
+            }
+        }
+    );
+    assert_eq!(
         parse_command("s hello").unwrap(),
         Command::SearchAscii {
             pattern: b"hello".to_vec(),
@@ -124,11 +164,15 @@ fn parses_basic_commands() {
 #[test]
 fn rejects_invalid_commands() {
     assert!(parse_command("goto nope").is_err());
+    assert!(parse_command("fill ff 0").is_err());
+    assert!(parse_command("fill 8").is_err());
+    assert!(parse_command("zero nope").is_err());
     assert!(parse_command("undo nope").is_err());
     assert!(parse_command("undo 0").is_err());
     assert!(parse_command("redo nope").is_err());
     assert!(parse_command("redo 0").is_err());
     assert!(parse_command("paste nope").is_err());
+    assert!(parse_command("export").is_err());
     assert!(parse_command("copy nope").is_err());
     assert!(parse_command("S 0xz1").is_err());
     assert!(parse_command("hash").is_err());

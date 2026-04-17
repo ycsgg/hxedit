@@ -29,6 +29,14 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "wq".to_owned(),
             details: "save current file and quit".to_owned(),
         },
+        "fill" => CommandHint {
+            syntax: "fill <hex-pattern> <len>".to_owned(),
+            details: "overwrite bytes from cursor with a repeated hex pattern; len is the number of bytes to write".to_owned(),
+        },
+        "zero" => CommandHint {
+            syntax: "zero <len>".to_owned(),
+            details: "overwrite bytes from cursor with 0x00 for len bytes".to_owned(),
+        },
         "insp" | "inspector" => CommandHint {
             syntax: "insp | inspector".to_owned(),
             details: "toggle format inspector panel".to_owned(),
@@ -73,6 +81,13 @@ pub fn hint_for(input: &str) -> CommandHint {
                 .to_owned(),
         },
         "c" | "copy" => copy_hint(name, rest),
+        "export" => CommandHint {
+            syntax: "export <path> | export bin <path> | export c [name] | export py [name]"
+                .to_owned(),
+            details:
+                "export the active visual selection as raw bytes to a file, or copy a C/Python literal to the clipboard"
+                    .to_owned(),
+        },
         "hash" => CommandHint {
             syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
             details: "compute hash of the current visual selection, or the entire file if no selection is active".to_owned(),
@@ -85,8 +100,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             if suggestions.is_empty() {
                 CommandHint {
                     syntax: "unknown command".to_owned(),
-                    details: "available: q w wq g s s! S S! u redo c p pi hash insp format"
-                        .to_owned(),
+                    details: format!("available: {}", known_commands().join(" ")),
                 }
             } else {
                 CommandHint {
@@ -194,6 +208,8 @@ fn known_commands() -> Vec<&'static str> {
         "w",
         "write",
         "wq",
+        "fill",
+        "zero",
         "g",
         "goto",
         "s",
@@ -208,6 +224,7 @@ fn known_commands() -> Vec<&'static str> {
         "format",
         "c",
         "copy",
+        "export",
         "hash",
         "p",
         "paste",

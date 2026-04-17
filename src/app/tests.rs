@@ -4,7 +4,7 @@ use tempfile::tempdir;
 
 use crate::app::{App, SearchDirection, StatusLevel};
 use crate::cli::Cli;
-use crate::commands::types::{Command, GotoTarget, HashAlgorithm};
+use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::core::document::ByteSlot;
 use crate::mode::{Mode, NibblePhase};
 
@@ -349,6 +349,48 @@ fn paste_overwrite_replaces_existing_bytes_in_place() {
     assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
     assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
+}
+
+#[test]
+fn fill_command_repeats_pattern_from_cursor() {
+    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13, 0x14]);
+    app.cursor = 1;
+    app.execute_command(Command::Fill {
+        pattern: vec![0xaa, 0xbb],
+        len: 3,
+    })
+    .unwrap();
+
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x10));
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
+    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
+    assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Present(0xaa));
+    assert!(app.status_message.contains("filled 3 bytes"));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0x11));
+    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
+    assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Present(0x13));
+}
+
+#[test]
+fn export_command_writes_logical_selection_to_file() {
+    let mut app = app_with_bytes(b"abcd");
+    app.cursor = 1;
+    app.delete_current().unwrap();
+    app.cursor = 0;
+    app.toggle_visual();
+    app.move_horizontal(2);
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("selection.bin");
+    app.execute_command(Command::Export {
+        format: ExportFormat::Binary { path: path.clone() },
+    })
+    .unwrap();
+
+    assert_eq!(fs::read(&path).unwrap(), b"ac");
+    assert!(app.status_message.contains("logical bytes"));
 }
 
 #[test]

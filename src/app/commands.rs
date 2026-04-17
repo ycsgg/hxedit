@@ -1,6 +1,6 @@
 use crate::app::{App, SearchDirection, SearchKind, SearchState};
 use crate::commands::parser::parse_command;
-use crate::commands::types::{Command, GotoTarget, HashAlgorithm};
+use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::error::{HxError, HxResult};
 use crate::mode::Mode;
 
@@ -25,6 +25,7 @@ impl App {
             Command::Quit { force } => self.execute_quit_command(force),
             Command::Write { path } => self.execute_write_command(path, false),
             Command::WriteQuit { path } => self.execute_write_command(path, true),
+            Command::Fill { pattern, len } => self.execute_fill_command(&pattern, len),
             Command::Goto { target } => self.execute_goto_command(target),
             Command::Undo { steps } => self.undo(steps, false),
             Command::Redo { steps } => self.redo(steps, false),
@@ -39,6 +40,7 @@ impl App {
                 limit,
             } => self.execute_paste_command(raw, preview, limit, true),
             Command::Copy { format, display } => self.copy_selection(format, display),
+            Command::Export { format } => self.execute_export_command(format),
             Command::Inspector => {
                 self.execute_inspector_command();
                 Ok(())
@@ -80,6 +82,34 @@ impl App {
         Ok(())
     }
 
+    fn execute_fill_command(&mut self, pattern: &[u8], len: usize) -> HxResult<()> {
+        if pattern.is_empty() || len == 0 {
+            self.set_info_status("fill produced no bytes");
+            return Ok(());
+        }
+
+        let bytes = repeated_pattern(pattern, len);
+        let applied = self.apply_paste_overwrite(&bytes)?;
+        let requested = bytes.len();
+        let pattern_preview = hex_preview(pattern);
+
+        if applied == 0 {
+            self.set_warning_status(format!(
+                "fill produced no bytes [pattern {pattern_preview}] (cursor at EOF; overwrite truncates)"
+            ));
+        } else if applied < requested {
+            self.set_warning_status(format!(
+                "filled {applied}/{requested} bytes [pattern {pattern_preview}] (truncated at EOF)"
+            ));
+        } else {
+            self.set_info_status(format!(
+                "filled {applied} bytes [pattern {pattern_preview}]"
+            ));
+        }
+
+        Ok(())
+    }
+
     fn execute_goto_command(&mut self, target: GotoTarget) -> HxResult<()> {
         let offset = self.resolve_goto_target(target)?;
         self.cursor = self.document.goto(offset)?;
@@ -114,6 +144,71 @@ impl App {
         insert: bool,
     ) -> HxResult<()> {
         self.paste_from_clipboard(raw, preview, limit, insert)
+    }
+
+    fn execute_export_command(&mut self, format: ExportFormat) -> HxResult<()> {
+        let Some((start, end)) = self.selection_range() else {
+            return Err(HxError::MissingSelection);
+        };
+
+        let display_span = end - start + 1;
+        let bytes = self.document.logical_bytes(start, end)?;
+
+        match format {
+            ExportFormat::Binary { path } => {
+                std::fs::write(&path, &bytes)?;
+                if display_span as usize != bytes.len() {
+                    self.set_info_status(format!(
+                        "exported {} logical bytes (display span {}) to {}",
+                        bytes.len(),
+                        display_span,
+                        path.display()
+                    ));
+                } else {
+                    self.set_info_status(format!(
+                        "exported {} bytes to {}",
+                        bytes.len(),
+                        path.display()
+                    ));
+                }
+            }
+            ExportFormat::CArray { name } => {
+                let ident = crate::export::sanitize_identifier(&name);
+                let text = crate::export::format_c_array(&ident, &bytes);
+                if crate::clipboard::copy_text(&text).is_ok() {
+                    self.set_info_status(format!(
+                        "exported {} bytes as C array '{}' [copied]",
+                        bytes.len(),
+                        ident
+                    ));
+                } else {
+                    self.set_warning_status(format!(
+                        "exported {} bytes as C array '{}' (clipboard unavailable)",
+                        bytes.len(),
+                        ident
+                    ));
+                }
+            }
+            ExportFormat::PythonBytes { name } => {
+                let ident = crate::export::sanitize_identifier(&name);
+                let text = crate::export::format_python_bytes(&ident, &bytes);
+                if crate::clipboard::copy_text(&text).is_ok() {
+                    self.set_info_status(format!(
+                        "exported {} bytes as Python bytes '{}' [copied]",
+                        bytes.len(),
+                        ident
+                    ));
+                } else {
+                    self.set_warning_status(format!(
+                        "exported {} bytes as Python bytes '{}' (clipboard unavailable)",
+                        bytes.len(),
+                        ident
+                    ));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn execute_inspector_command(&mut self) {
@@ -218,6 +313,19 @@ impl App {
         }
         Ok(())
     }
+}
+
+fn repeated_pattern(pattern: &[u8], len: usize) -> Vec<u8> {
+    pattern.iter().copied().cycle().take(len).collect()
+}
+
+fn hex_preview(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn search_direction(backward: bool) -> SearchDirection {

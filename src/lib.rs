@@ -7,6 +7,7 @@ pub mod config;
 pub mod copy;
 pub mod core;
 pub mod error;
+pub mod export;
 pub mod format;
 pub mod input;
 pub mod mode;
