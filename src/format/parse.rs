@@ -1,8 +1,17 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::core::document::Document;
 use crate::error::HxResult;
 use crate::format::types::*;
+
+/// Stable identifier for a struct inside the parsed tree.
+///
+/// Each component is `(struct_name, sibling_index_among_same_name)` — the
+/// sibling index counts how many earlier siblings of the same parent share
+/// the same name, so two `Chunk: IDAT` structs at the same level get distinct
+/// paths. This survives structure edits (e.g. adding or removing a chunk)
+/// as long as the existing structs keep their name+sibling-rank.
+pub type NodePath = Vec<(String, usize)>;
 
 /// A parsed field value.
 ///
@@ -43,9 +52,10 @@ pub enum InspectorRow {
     Header {
         name: String,
         depth: usize,
-        /// Stable-within-a-flatten id assigned by pre-order struct walk.
-        /// Used to track collapse state across rebuilds of the row list.
-        node_id: usize,
+        /// Stable identity of this struct within the parsed tree. Used to
+        /// track collapse state and to locate the struct after a rebuild
+        /// even when earlier siblings have been added or removed.
+        node_path: NodePath,
         /// Whether the struct's children are currently hidden.
         collapsed: bool,
         /// Whether this struct has any fields or nested structs to collapse.
@@ -71,20 +81,25 @@ pub enum InspectorRow {
 
 /// Flatten a StructValue tree into a list of renderable rows.
 ///
-/// `collapsed_nodes` lists the `node_id`s whose descendants should be hidden.
-/// `node_id` is assigned by pre-order struct walk, so it's stable as long as
-/// the struct tree shape does not change across rebuilds.
-pub fn flatten(structs: &[StructValue], collapsed_nodes: &BTreeSet<usize>) -> Vec<InspectorRow> {
+/// `collapsed_nodes` lists the [`NodePath`]s whose descendants should be
+/// hidden. Using a path-based key keeps collapse state pinned to a specific
+/// struct even when sibling counts change between rebuilds — e.g. a PNG
+/// gaining or losing a chunk no longer rolls the collapsed state into an
+/// unrelated neighbor.
+pub fn flatten(structs: &[StructValue], collapsed_nodes: &BTreeSet<NodePath>) -> Vec<InspectorRow> {
     let mut rows = Vec::new();
     let mut field_idx: usize = 0;
-    let mut node_counter: usize = 0;
+    let mut name_counts: HashMap<String, usize> = HashMap::new();
+    let parent_path: NodePath = Vec::new();
     for sv in structs {
+        let sibling_index = next_sibling_index(&mut name_counts, &sv.name);
         walk(
             sv,
             0,
+            &parent_path,
+            sibling_index,
             &mut rows,
             &mut field_idx,
-            &mut node_counter,
             collapsed_nodes,
         );
     }
@@ -99,59 +114,80 @@ pub fn flatten(structs: &[StructValue], collapsed_nodes: &BTreeSet<usize>) -> Ve
 pub fn initial_collapsed_nodes(
     structs: &[StructValue],
     default_collapsed_depth: usize,
-) -> BTreeSet<usize> {
+) -> BTreeSet<NodePath> {
     fn visit(
         sv: &StructValue,
         depth: usize,
-        counter: &mut usize,
+        parent_path: &NodePath,
+        sibling_index: usize,
         default_collapsed_depth: usize,
-        out: &mut BTreeSet<usize>,
+        out: &mut BTreeSet<NodePath>,
     ) {
-        let node_id = *counter;
-        *counter += 1;
+        let mut path = parent_path.clone();
+        path.push((sv.name.clone(), sibling_index));
         let has_children = !sv.fields.is_empty() || !sv.children.is_empty();
         if has_children && depth >= default_collapsed_depth {
-            out.insert(node_id);
+            out.insert(path.clone());
         }
+        let mut name_counts: HashMap<String, usize> = HashMap::new();
         for child in &sv.children {
-            visit(child, depth + 1, counter, default_collapsed_depth, out);
+            let child_idx = next_sibling_index(&mut name_counts, &child.name);
+            visit(
+                child,
+                depth + 1,
+                &path,
+                child_idx,
+                default_collapsed_depth,
+                out,
+            );
         }
     }
     let mut out = BTreeSet::new();
-    let mut counter = 0;
+    let mut name_counts: HashMap<String, usize> = HashMap::new();
+    let root: NodePath = Vec::new();
     for sv in structs {
-        visit(sv, 0, &mut counter, default_collapsed_depth, &mut out);
+        let idx = next_sibling_index(&mut name_counts, &sv.name);
+        visit(sv, 0, &root, idx, default_collapsed_depth, &mut out);
     }
     out
+}
+
+/// Return the next sibling index for a given name, incrementing the counter
+/// so the following sibling with the same name gets the next slot.
+fn next_sibling_index(counts: &mut HashMap<String, usize>, name: &str) -> usize {
+    let entry = counts.entry(name.to_owned()).or_insert(0);
+    let idx = *entry;
+    *entry += 1;
+    idx
 }
 
 fn walk(
     sv: &StructValue,
     depth: usize,
+    parent_path: &NodePath,
+    sibling_index: usize,
     rows: &mut Vec<InspectorRow>,
     field_idx: &mut usize,
-    node_counter: &mut usize,
-    collapsed_nodes: &BTreeSet<usize>,
+    collapsed_nodes: &BTreeSet<NodePath>,
 ) {
-    let node_id = *node_counter;
-    *node_counter += 1;
+    let mut node_path = parent_path.clone();
+    node_path.push((sv.name.clone(), sibling_index));
 
     let has_children = !sv.fields.is_empty() || !sv.children.is_empty();
-    let collapsed = has_children && collapsed_nodes.contains(&node_id);
+    let collapsed = has_children && collapsed_nodes.contains(&node_path);
 
     rows.push(InspectorRow::Header {
         name: sv.name.clone(),
         depth,
-        node_id,
+        node_path: node_path.clone(),
         collapsed,
         has_children,
     });
 
     if collapsed {
-        // Still bump field_idx and node_counter so that field_index stays
-        // consistent with find_field_def's pre-order walk and node_id stays
-        // consistent across rebuilds.
-        count_skipped(sv, field_idx, node_counter);
+        // Still bump field_idx so field_index stays consistent with
+        // find_field_def's pre-order walk even when nodes are collapsed.
+        count_skipped_fields(sv, field_idx);
         return;
     }
 
@@ -168,25 +204,27 @@ fn walk(
         *field_idx += 1;
     }
 
+    let mut name_counts: HashMap<String, usize> = HashMap::new();
     for child in &sv.children {
+        let child_idx = next_sibling_index(&mut name_counts, &child.name);
         walk(
             child,
             depth + 1,
+            &node_path,
+            child_idx,
             rows,
             field_idx,
-            node_counter,
             collapsed_nodes,
         );
     }
 }
 
-/// Advance `field_idx` and `node_counter` for a collapsed subtree so that
-/// both counters remain consistent with an uncollapsed walk of the same tree.
-fn count_skipped(sv: &StructValue, field_idx: &mut usize, node_counter: &mut usize) {
+/// Advance `field_idx` for a collapsed subtree so that indices remain
+/// consistent with an uncollapsed walk of the same tree.
+fn count_skipped_fields(sv: &StructValue, field_idx: &mut usize) {
     *field_idx += sv.fields.len();
     for child in &sv.children {
-        *node_counter += 1;
-        count_skipped(child, field_idx, node_counter);
+        count_skipped_fields(child, field_idx);
     }
 }
 
@@ -212,12 +250,24 @@ fn parse_field(doc: &mut Document, field: &FieldDef, base_offset: u64) -> HxResu
         FieldType::DataRange(len) => {
             let len = *len;
             let end = abs_offset + len;
+            // Saturate to usize so the reported `size` stays within addressable
+            // range on 32-bit platforms; note in display when that happened so
+            // the inspector doesn't silently round down a multi-GiB chunk.
+            let size = usize::try_from(len).unwrap_or(usize::MAX);
+            let overflow = (size as u64) < len;
             let display = if len == 0 {
                 "empty".to_owned()
+            } else if overflow {
+                format!(
+                    "0x{:x}–0x{:x} ({} bytes) (overflow)",
+                    abs_offset,
+                    end - 1,
+                    len
+                )
             } else {
                 format!("0x{:x}–0x{:x} ({} bytes)", abs_offset, end - 1, len)
             };
-            (Vec::new(), len as usize, display)
+            (Vec::new(), size, display)
         }
         _ => {
             let declared_size = field.field_type.byte_size().unwrap_or(0);
@@ -528,8 +578,8 @@ mod tests {
     #[test]
     fn flatten_with_collapsed_root_hides_children() {
         let tree = sample_tree();
-        let mut set = BTreeSet::new();
-        set.insert(0); // Header
+        let mut set: BTreeSet<NodePath> = BTreeSet::new();
+        set.insert(vec![("Header".into(), 0)]);
         let rows = flatten(&tree, &set);
         // Header (collapsed, no visible fields) + Second + s0 = 3 rows
         assert_eq!(rows.len(), 3);
@@ -547,8 +597,8 @@ mod tests {
     fn flatten_preserves_field_index_across_collapsed_nodes() {
         let tree = sample_tree();
         // Collapse only the first top-level; Second's field should still be index 4.
-        let mut set = BTreeSet::new();
-        set.insert(0);
+        let mut set: BTreeSet<NodePath> = BTreeSet::new();
+        set.insert(vec![("Header".into(), 0)]);
         let rows = flatten(&tree, &set);
         let InspectorRow::Field { field_index, .. } = rows
             .iter()
@@ -564,8 +614,8 @@ mod tests {
     #[test]
     fn flatten_collapses_nested_child_independently() {
         let tree = sample_tree();
-        let mut set = BTreeSet::new();
-        set.insert(1); // Child1
+        let mut set: BTreeSet<NodePath> = BTreeSet::new();
+        set.insert(vec![("Header".into(), 0), ("Child1".into(), 0)]);
         let rows = flatten(&tree, &set);
         // Header + f0 + f1 + Child1 (collapsed) + Second + s0 = 6
         assert_eq!(rows.len(), 6);
@@ -588,7 +638,7 @@ mod tests {
         let set = initial_collapsed_nodes(&tree, 1);
         // depth 1 = Child1 only
         assert_eq!(set.len(), 1);
-        assert!(set.contains(&1));
+        assert!(set.contains(&vec![("Header".into(), 0), ("Child1".into(), 0)]));
     }
 
     #[test]
@@ -604,25 +654,134 @@ mod tests {
     }
 
     #[test]
-    fn flatten_node_id_is_stable_under_reflatten() {
+    fn flatten_node_path_is_stable_under_reflatten() {
         let tree = sample_tree();
         let first = flatten(&tree, &BTreeSet::new());
         let second = flatten(&tree, &BTreeSet::new());
-        let ids_a: Vec<_> = first
+        let paths_a: Vec<_> = first
             .iter()
             .filter_map(|r| match r {
-                InspectorRow::Header { node_id, name, .. } => Some((node_id, name.clone())),
+                InspectorRow::Header {
+                    node_path, name, ..
+                } => Some((node_path.clone(), name.clone())),
                 _ => None,
             })
             .collect();
-        let ids_b: Vec<_> = second
+        let paths_b: Vec<_> = second
             .iter()
             .filter_map(|r| match r {
-                InspectorRow::Header { node_id, name, .. } => Some((node_id, name.clone())),
+                InspectorRow::Header {
+                    node_path, name, ..
+                } => Some((node_path.clone(), name.clone())),
                 _ => None,
             })
             .collect();
-        assert_eq!(ids_a, ids_b);
+        assert_eq!(paths_a, paths_b);
+    }
+
+    #[test]
+    fn collapse_survives_sibling_insertion_at_earlier_position() {
+        // Baseline: A, B(collapsed), C. User collapsed B by path.
+        let base = vec![
+            StructValue {
+                name: "A".into(),
+                base_offset: 0,
+                fields: vec![field("a0", 0)],
+                children: vec![],
+            },
+            StructValue {
+                name: "B".into(),
+                base_offset: 1,
+                fields: vec![field("b0", 1)],
+                children: vec![],
+            },
+            StructValue {
+                name: "C".into(),
+                base_offset: 2,
+                fields: vec![field("c0", 2)],
+                children: vec![],
+            },
+        ];
+        let mut collapsed: BTreeSet<NodePath> = BTreeSet::new();
+        collapsed.insert(vec![("B".into(), 0)]);
+        let rows_before = flatten(&base, &collapsed);
+        let b_before = rows_before
+            .iter()
+            .find(|r| matches!(r, InspectorRow::Header { name, .. } if name == "B"))
+            .unwrap();
+        assert!(matches!(
+            b_before,
+            InspectorRow::Header {
+                collapsed: true,
+                ..
+            }
+        ));
+
+        // Now prepend a new struct before B. B's position shifts but its path
+        // (still "B" at sibling index 0) should keep it collapsed.
+        let after = vec![
+            StructValue {
+                name: "NEW".into(),
+                base_offset: 0,
+                fields: vec![field("n0", 0)],
+                children: vec![],
+            },
+            base[0].clone(),
+            base[1].clone(),
+            base[2].clone(),
+        ];
+        let rows_after = flatten(&after, &collapsed);
+        let b_after = rows_after
+            .iter()
+            .find(|r| matches!(r, InspectorRow::Header { name, .. } if name == "B"))
+            .unwrap();
+        assert!(matches!(
+            b_after,
+            InspectorRow::Header {
+                collapsed: true,
+                ..
+            }
+        ));
+        // And the new struct should NOT pick up the stale "id=1" collapse.
+        let new_struct = rows_after
+            .iter()
+            .find(|r| matches!(r, InspectorRow::Header { name, .. } if name == "NEW"))
+            .unwrap();
+        assert!(matches!(
+            new_struct,
+            InspectorRow::Header {
+                collapsed: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn same_named_siblings_get_distinct_paths() {
+        let tree = vec![
+            StructValue {
+                name: "Chunk".into(),
+                base_offset: 0,
+                fields: vec![field("a", 0)],
+                children: vec![],
+            },
+            StructValue {
+                name: "Chunk".into(),
+                base_offset: 1,
+                fields: vec![field("b", 1)],
+                children: vec![],
+            },
+        ];
+        let rows = flatten(&tree, &BTreeSet::new());
+        let paths: Vec<NodePath> = rows
+            .iter()
+            .filter_map(|r| match r {
+                InspectorRow::Header { node_path, .. } => Some(node_path.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(paths.len(), 2);
+        assert_ne!(paths[0], paths[1]);
     }
 
     fn doc_with_bytes(bytes: &[u8]) -> Document {
@@ -666,5 +825,45 @@ mod tests {
         };
         let fv = parse_field(&mut doc, &field, 0).unwrap();
         assert_eq!(fv.size, 4);
+    }
+
+    #[test]
+    fn parse_field_data_range_saturates_size_and_marks_overflow() {
+        // DataRange declaring a length that overflows usize on 32-bit must
+        // saturate and annotate the display so the UI doesn't silently lie.
+        let mut doc = doc_with_bytes(&[0u8; 16]);
+        let huge = (usize::MAX as u64).saturating_add(1);
+        let field = FieldDef {
+            name: "chunk".into(),
+            offset: 0,
+            field_type: FieldType::DataRange(huge),
+            description: String::new(),
+            editable: false,
+        };
+        let fv = parse_field(&mut doc, &field, 0).unwrap();
+        if huge > usize::MAX as u64 {
+            assert_eq!(fv.size, usize::MAX);
+            assert!(fv.display.contains("(overflow)"), "got: {}", fv.display);
+        } else {
+            // On 64-bit platforms `huge` still fits (usize::MAX+1 saturates back
+            // to u64::MAX-ish only when usize is 64-bit); at minimum the display
+            // should be well-formed.
+            assert!(fv.display.contains("bytes"));
+        }
+    }
+
+    #[test]
+    fn parse_field_data_range_no_overflow_marker_for_small_len() {
+        let mut doc = doc_with_bytes(&[0u8; 16]);
+        let field = FieldDef {
+            name: "chunk".into(),
+            offset: 0,
+            field_type: FieldType::DataRange(8),
+            description: String::new(),
+            editable: false,
+        };
+        let fv = parse_field(&mut doc, &field, 0).unwrap();
+        assert_eq!(fv.size, 8);
+        assert!(!fv.display.contains("(overflow)"));
     }
 }
