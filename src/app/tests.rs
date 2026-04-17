@@ -299,6 +299,7 @@ fn forward_search_wraps_to_start() {
 
     assert_eq!(app.cursor, 0);
     assert!(app.status_message.contains("wrapped"));
+    assert_eq!(app.status_level, StatusLevel::Notice);
 }
 
 #[test]
@@ -313,6 +314,7 @@ fn backward_search_wraps_to_end() {
 
     assert_eq!(app.cursor, 12);
     assert!(app.status_message.contains("wrapped"));
+    assert_eq!(app.status_level, StatusLevel::Notice);
 }
 
 #[test]

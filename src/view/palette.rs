@@ -47,6 +47,7 @@ pub struct Palette {
     pub gutter: Style,
     pub separator: Style,
     pub status: Style,
+    pub notice: Style,
     pub warning: Style,
     pub error: Style,
     pub dirty: Style,
@@ -66,6 +67,7 @@ pub struct Palette {
     pub inspector_value: Style,
     pub inspector_active: Style,
     pub inspector_edit: Style,
+    pub inspector_highlight: Style,
 }
 
 impl Palette {
@@ -83,6 +85,9 @@ impl Palette {
             gutter: Style::default().fg(Color::Rgb(80, 80, 80)),
             separator: Style::default().fg(Color::Rgb(80, 80, 80)),
             status: Style::default().fg(Color::Rgb(220, 220, 220)),
+            notice: Style::default()
+                .fg(Color::Rgb(120, 200, 255))
+                .add_modifier(Modifier::BOLD),
             warning: Style::default()
                 .bg(Color::Rgb(220, 180, 0))
                 .fg(Color::Rgb(30, 30, 30))
@@ -128,6 +133,10 @@ impl Palette {
             inspector_edit: Style::default()
                 .bg(Color::Rgb(130, 180, 230))
                 .fg(Color::Rgb(30, 30, 30)),
+            inspector_highlight: Style::default()
+                .fg(Color::Rgb(255, 220, 120))
+                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::BOLD),
         }
     }
 
@@ -136,6 +145,9 @@ impl Palette {
             gutter: Style::default().fg(Color::Indexed(245)),
             separator: Style::default().fg(Color::Indexed(245)),
             status: Style::default().fg(Color::Indexed(252)),
+            notice: Style::default()
+                .fg(Color::Indexed(117))
+                .add_modifier(Modifier::BOLD),
             warning: Style::default()
                 .bg(Color::Indexed(220))
                 .fg(Color::Indexed(235))
@@ -181,6 +193,10 @@ impl Palette {
             inspector_edit: Style::default()
                 .bg(Color::Indexed(153))
                 .fg(Color::Indexed(235)),
+            inspector_highlight: Style::default()
+                .fg(Color::Indexed(222))
+                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::BOLD),
         }
     }
 
@@ -189,6 +205,9 @@ impl Palette {
             gutter: Style::default().fg(Color::DarkGray),
             separator: Style::default().fg(Color::DarkGray),
             status: Style::default().fg(Color::White),
+            notice: Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
             warning: Style::default()
                 .bg(Color::Yellow)
                 .fg(Color::Black)
@@ -232,6 +251,10 @@ impl Palette {
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::UNDERLINED),
             inspector_edit: Style::default().bg(Color::LightBlue).fg(Color::Black),
+            inspector_highlight: Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::BOLD),
         }
     }
 
@@ -241,6 +264,9 @@ impl Palette {
             gutter: base,
             separator: base,
             status: base,
+            notice: base
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
             warning: base
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::UNDERLINED),
@@ -264,6 +290,9 @@ impl Palette {
             inspector_value: base,
             inspector_active: base.add_modifier(Modifier::REVERSED),
             inspector_edit: base.add_modifier(Modifier::UNDERLINED),
+            inspector_highlight: base
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
         }
     }
 }

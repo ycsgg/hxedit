@@ -61,8 +61,8 @@ impl App {
         if let Some(found) = found {
             self.cursor = found;
             if wrapped {
-                self.set_info_status(format!(
-                    "found {} at display 0x{:x} (wrapped)",
+                self.set_notice_status(format!(
+                    "wrapped search: found {} at display 0x{:x}",
                     search.kind.label(),
                     found
                 ));

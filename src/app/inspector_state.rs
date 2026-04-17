@@ -179,6 +179,16 @@ impl App {
         )
     }
 
+    pub(crate) fn inspector_highlight_range(&self) -> Option<(u64, u64)> {
+        let inspector = self.inspector.as_ref()?;
+        match inspector.rows.get(inspector.selected_row)? {
+            InspectorRow::Field {
+                abs_offset, size, ..
+            } if *size > 0 => Some((*abs_offset, abs_offset + *size as u64 - 1)),
+            _ => None,
+        }
+    }
+
     /// Re-run format detection/parsing and refresh the inspector panel.
     pub(crate) fn refresh_inspector(&mut self) {
         if !self.show_inspector {

@@ -15,6 +15,7 @@ pub fn build(
     palette: &Palette,
     bytes_per_line: usize,
     selection: Option<(u64, u64)>,
+    inspector_highlight: Option<(u64, u64)>,
 ) -> Vec<Line<'static>> {
     rows.iter()
         .enumerate()
@@ -23,6 +24,9 @@ pub fn build(
             for (col_idx, slot) in row.iter().enumerate() {
                 let offset = row_offsets[row_idx] + col_idx as u64;
                 let mut base = slot_style(*slot, palette);
+                if highlighted(inspector_highlight, offset) {
+                    base = palette.inspector_highlight.patch(base);
+                }
                 if selected(selection, offset) {
                     base = palette.selection.patch(base);
                 }
@@ -61,6 +65,12 @@ fn selected(selection: Option<(u64, u64)>, offset: u64) -> bool {
         .unwrap_or(false)
 }
 
+fn highlighted(highlight: Option<(u64, u64)>, offset: u64) -> bool {
+    highlight
+        .map(|(start, end)| offset >= start && offset <= end)
+        .unwrap_or(false)
+}
+
 fn style_for_nibble(
     base: Style,
     is_cursor: bool,
@@ -76,5 +86,63 @@ fn style_for_nibble(
         Some(NibblePhase::Low) if !is_high => palette.cursor_nibble.patch(base),
         Some(_) => palette.cursor.patch(base),
         None => palette.cursor.patch(base),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::style::Modifier;
+
+    use super::build;
+    use crate::core::document::ByteSlot;
+    use crate::mode::Mode;
+    use crate::view::palette::{ColorLevel, Palette};
+
+    #[test]
+    fn inspector_highlight_underlines_selected_field_bytes() {
+        let lines = build(
+            &[vec![ByteSlot::Present(0x41), ByteSlot::Present(0x42)]],
+            &[0],
+            99,
+            Mode::Normal,
+            &Palette::new(ColorLevel::Basic),
+            2,
+            None,
+            Some((1, 1)),
+        );
+
+        let line = &lines[0];
+        assert!(!line.spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+        assert!(line.spans[3]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn cursor_keeps_field_highlight_modifier() {
+        let lines = build(
+            &[vec![ByteSlot::Present(0x41)]],
+            &[0],
+            0,
+            Mode::Normal,
+            &Palette::new(ColorLevel::Basic),
+            1,
+            None,
+            Some((0, 0)),
+        );
+
+        let line = &lines[0];
+        assert!(line.spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+        assert!(line.spans[1]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
     }
 }

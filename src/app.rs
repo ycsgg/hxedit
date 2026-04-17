@@ -206,6 +206,7 @@ pub(crate) enum SearchDirection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StatusLevel {
     Info,
+    Notice,
     Warning,
     Error,
 }
@@ -232,6 +233,10 @@ impl App {
 
     pub(crate) fn set_info_status(&mut self, message: impl Into<String>) {
         self.set_status(StatusLevel::Info, message);
+    }
+
+    pub(crate) fn set_notice_status(&mut self, message: impl Into<String>) {
+        self.set_status(StatusLevel::Notice, message);
     }
 
     pub(crate) fn set_warning_status(&mut self, message: impl Into<String>) {

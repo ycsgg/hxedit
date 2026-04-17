@@ -67,6 +67,7 @@ pub(crate) fn build(info: StatusInfo<'_>, palette: &Palette) -> Line<'static> {
             info.message.to_owned(),
             match info.message_level {
                 StatusLevel::Info => palette.status,
+                StatusLevel::Notice => palette.notice,
                 StatusLevel::Warning => palette.warning,
                 StatusLevel::Error => palette.error,
             },
@@ -111,6 +112,32 @@ mod tests {
         assert_eq!(warning_span.style.fg, Some(Color::Black));
         assert_eq!(warning_span.style.bg, Some(Color::Yellow));
         assert!(warning_span.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn notice_messages_use_notice_style() {
+        let palette = Palette::new(ColorLevel::Basic);
+        let line = build(
+            StatusInfo {
+                mode: Mode::Normal,
+                path: "sample.bin",
+                cursor: 0,
+                display_len: 1,
+                visible_len: 1,
+                selection_span: None,
+                selection_logical_len: None,
+                paste_info: None,
+                dirty: false,
+                message: "wrapped search",
+                message_level: StatusLevel::Notice,
+                readonly: false,
+            },
+            &palette,
+        );
+
+        let notice_span = line.spans.last().expect("message span");
+        assert_eq!(notice_span.style.fg, Some(Color::Cyan));
+        assert!(notice_span.style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]

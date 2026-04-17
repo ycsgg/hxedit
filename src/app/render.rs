@@ -211,6 +211,7 @@ impl App {
         }
 
         let selection = self.selection_range();
+        let inspector_highlight = self.inspector_highlight_range();
         MainLines {
             gutter: gutter::build(
                 &visible_rows.offsets,
@@ -225,6 +226,7 @@ impl App {
                 &self.palette,
                 self.config.bytes_per_line,
                 selection,
+                inspector_highlight,
             ),
             ascii: ascii_grid::build(
                 &visible_rows.rows,
