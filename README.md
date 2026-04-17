@@ -14,6 +14,11 @@ cargo run -- <file>
 hxedit --readonly --offset 0x100 --inspector some.bin
 ```
 
+## CI / Release
+
+- Every push / pull request runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets` in GitHub Actions
+- Pushing a tag like `v0.1.0` also builds release archives for Linux x86_64, macOS x86_64 / arm64, and Windows x86_64, then publishes a GitHub Release with `SHA256SUMS.txt`
+
 ## Features
 
 - **Non-destructive editing** — overwrite bytes, insert new bytes, or mark bytes as deleted; all changes are undoable
