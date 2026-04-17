@@ -311,8 +311,9 @@ mod tests {
     #[test]
     fn detect_returns_truecolor_in_windows_terminal() {
         let in_wt = std::env::var("WT_SESSION").is_ok();
+        let no_color = std::env::var("NO_COLOR").is_ok();
         let level = ColorLevel::detect(false);
-        if in_wt {
+        if in_wt && !no_color {
             assert_eq!(level, ColorLevel::TrueColor);
         }
     }
@@ -323,8 +324,9 @@ mod tests {
             std::env::var("COLORTERM").as_deref(),
             Ok("truecolor") | Ok("24bit")
         );
+        let no_color = std::env::var("NO_COLOR").is_ok();
         let level = ColorLevel::detect(false);
-        if colorterm_is_truecolor {
+        if colorterm_is_truecolor && !no_color {
             assert_eq!(level, ColorLevel::TrueColor);
         }
     }

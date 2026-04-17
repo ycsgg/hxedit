@@ -394,6 +394,61 @@ fn export_command_writes_logical_selection_to_file() {
 }
 
 #[test]
+fn replace_command_overwrites_all_equal_length_matches() {
+    let mut app = app_with_bytes(b"abcabc");
+    app.execute_command(Command::Replace {
+        needle: b"ab".to_vec(),
+        replacement: b"xy".to_vec(),
+        allow_resize: false,
+    })
+    .unwrap();
+
+    assert_eq!(app.document.len(), 6);
+    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"xycxyc");
+    assert!(app.status_message.contains("replaced 2 matches"));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"abcabc");
+}
+
+#[test]
+fn replace_bang_can_resize_matches() {
+    let mut app = app_with_bytes(b"abcabc");
+    app.execute_command(Command::Replace {
+        needle: b"ab".to_vec(),
+        replacement: b"Z".to_vec(),
+        allow_resize: true,
+    })
+    .unwrap();
+
+    assert_eq!(app.document.len(), 4);
+    assert_eq!(app.document.logical_bytes(0, 3).unwrap(), b"ZcZc");
+    assert!(app.status_message.contains("4→2 bytes"));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(app.document.len(), 6);
+    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"abcabc");
+}
+
+#[test]
+fn replace_command_respects_visual_selection_scope() {
+    let mut app = app_with_bytes(b"abxxab");
+    app.toggle_visual();
+    app.move_horizontal(3);
+
+    app.execute_command(Command::Replace {
+        needle: b"ab".to_vec(),
+        replacement: b"xy".to_vec(),
+        allow_resize: false,
+    })
+    .unwrap();
+
+    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"xyxxab");
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(app.selection_range(), None);
+}
+
+#[test]
 fn undo_reverts_overwrite_paste_as_one_action() {
     let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
     app.cursor = 1;

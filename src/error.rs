@@ -16,6 +16,8 @@ pub enum HxError {
     InvalidOffset(String),
     #[error("invalid fill count: {0}")]
     InvalidFillCount(String),
+    #[error("invalid replace command: {0}")]
+    InvalidReplace(String),
     #[error("invalid paste count: {0}")]
     InvalidPasteCount(String),
     #[error("invalid paste data: {0}")]

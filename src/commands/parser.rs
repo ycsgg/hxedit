@@ -10,6 +10,12 @@ use crate::util::parse::{parse_hex_bytes, parse_hex_stream, parse_offset};
 
 const DEFAULT_EXPORT_NAME: &str = "selection_bytes";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplaceInputMode {
+    Hex,
+    Ascii,
+}
+
 /// Parse command-line mode input into an executable command.
 pub fn parse_command(input: &str) -> HxResult<Command> {
     let trimmed = input.trim();
@@ -29,6 +35,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         }),
         "fill" => parse_fill(rest),
         "zero" => parse_zero(rest),
+        "re" | "replace" | "re!" | "replace!" => parse_replace(name, rest),
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
         | "paste?!" => parse_paste(name, rest, false),
         "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?" | "pi!?"
@@ -255,6 +262,67 @@ fn parse_export(input: Option<&str>) -> HxResult<Command> {
     };
 
     Ok(Command::Export { format })
+}
+
+fn parse_replace(name: &str, input: Option<&str>) -> HxResult<Command> {
+    let allow_resize = name.ends_with('!');
+    let rest = input.ok_or(HxError::MissingArgument("replace arguments"))?;
+    let (mode, body) = parse_replace_mode(rest);
+    let (needle_src, replacement_src) = body
+        .split_once("->")
+        .or_else(|| body.split_once("=>"))
+        .ok_or_else(|| HxError::InvalidReplace("expected <needle> -> <replacement>".to_owned()))?;
+
+    let needle = parse_replace_bytes(mode, needle_src.trim())?;
+    let replacement = parse_replace_bytes(mode, replacement_src.trim())?;
+
+    if needle.is_empty() {
+        return Err(HxError::InvalidReplace(
+            "needle must not be empty".to_owned(),
+        ));
+    }
+    if !allow_resize && needle.len() != replacement.len() {
+        return Err(HxError::InvalidReplace(
+            "equal-length replace requires same-size needle/replacement; use :re! to resize"
+                .to_owned(),
+        ));
+    }
+
+    Ok(Command::Replace {
+        needle,
+        replacement,
+        allow_resize,
+    })
+}
+
+fn parse_replace_mode(input: &str) -> (ReplaceInputMode, &str) {
+    let trimmed = input.trim();
+    for (prefix, mode) in [
+        ("hex ", ReplaceInputMode::Hex),
+        ("x ", ReplaceInputMode::Hex),
+        ("ascii ", ReplaceInputMode::Ascii),
+        ("text ", ReplaceInputMode::Ascii),
+        ("a ", ReplaceInputMode::Ascii),
+    ] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            return (mode, rest.trim());
+        }
+    }
+    (ReplaceInputMode::Hex, trimmed)
+}
+
+fn parse_replace_bytes(mode: ReplaceInputMode, input: &str) -> HxResult<Vec<u8>> {
+    match mode {
+        ReplaceInputMode::Hex => parse_hex_stream(input),
+        ReplaceInputMode::Ascii => Ok(strip_wrapping_quotes(input).as_bytes().to_vec()),
+    }
+}
+
+fn strip_wrapping_quotes(input: &str) -> &str {
+    input
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(input)
 }
 
 #[cfg(test)]

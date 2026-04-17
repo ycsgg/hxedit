@@ -23,6 +23,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 - **Format inspector** — built-in parsing for ELF, PNG, and ZIP structures with field-level editing
 - **Hash computation** — compute MD5, SHA1, SHA256, SHA512, or CRC32 of a selection or the entire file
 - **Clipboard integration** — copy selections as hex, binary, numeric, or base64 text; paste from clipboard as hex or base64
+- **Batch transforms** — fill repeated patterns, replace matching byte/text sequences, and export selections as raw bytes or C/Python literals
 - **Large file support** — paged I/O with configurable cache for responsive editing of files much larger than memory
 - **Read-only mode** — automatically falls back to read-only when the file cannot be opened for writing
 - **Adaptive colors** — auto-detects terminal color support (true-color / 256-color / 16-color / no color)
@@ -121,10 +122,22 @@ Search wraps around automatically — forward search continues from the start af
 | `:pi [!] [n]` | Insert-paste at cursor |
 | `:pi? [!] [n]` | Preview insert-paste |
 | `:c [fmt] [disp]` | Copy visual selection |
+| `:export <path>` | Export visual selection as raw bytes to a new file |
+| `:export c [name]` | Copy visual selection as a C array literal |
+| `:export py [name]` | Copy visual selection as a Python bytes literal |
 
 Copy format options: `bin` (binary text), `b` (byte groups, default), `db` (2-byte), `qb` (4-byte)
 
 Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (little-endian numeric), `b64` (base64)
+
+### Transform
+
+| Command | Description |
+|---------|-------------|
+| `:fill <hex-pattern> <len>` | Overwrite bytes from cursor with a repeated hex pattern |
+| `:zero <len>` | Overwrite bytes from cursor with `00` |
+| `:re [hex\|ascii] <needle> -> <replacement>` | Replace all non-overlapping equal-length matches in the selection or entire file |
+| `:re! [hex\|ascii] <needle> -> <replacement>` | Replace with length changes allowed (uses real delete/insert) |
 
 ### Hash
 
@@ -167,6 +180,7 @@ Hashes the visual selection if active, otherwise the entire file.
 - Supports ELF, PNG, and ZIP formats
 - Works best on a wide terminal; shows a warning if the terminal is too narrow
 - Nested sections (e.g. ELF Program Headers) are collapsed by default; use `Space` / `Enter` on a header to expand
+- The currently selected inspector field highlights its byte range in the hex grid
 - Editable fields can be modified, but PNG/ZIP edits show warnings since structure consistency is not automatically repaired
 - Read-only fields report that they are view-only
 

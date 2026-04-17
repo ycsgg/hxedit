@@ -1,8 +1,22 @@
-use crate::app::{App, SearchDirection, SearchKind, SearchState};
+use crate::app::{App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState};
 use crate::commands::parser::parse_command;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::error::{HxError, HxResult};
 use crate::mode::Mode;
+
+#[derive(Debug, Clone, Copy)]
+struct ReplaceStats {
+    match_count: usize,
+    before_bytes: usize,
+    after_bytes: usize,
+    changed_bytes: usize,
+}
+
+#[derive(Debug)]
+struct ReplaceOutcome {
+    ops: Vec<EditOp>,
+    stats: ReplaceStats,
+}
 
 impl App {
     pub(crate) fn submit_command(&mut self) -> HxResult<()> {
@@ -41,6 +55,11 @@ impl App {
             } => self.execute_paste_command(raw, preview, limit, true),
             Command::Copy { format, display } => self.copy_selection(format, display),
             Command::Export { format } => self.execute_export_command(format),
+            Command::Replace {
+                needle,
+                replacement,
+                allow_resize,
+            } => self.execute_replace_command(&needle, &replacement, allow_resize),
             Command::Inspector => {
                 self.execute_inspector_command();
                 Ok(())
@@ -209,6 +228,196 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn execute_replace_command(
+        &mut self,
+        needle: &[u8],
+        replacement: &[u8],
+        allow_resize: bool,
+    ) -> HxResult<()> {
+        if needle.is_empty() {
+            return Err(HxError::InvalidReplace(
+                "needle must not be empty".to_owned(),
+            ));
+        }
+        if !allow_resize && needle.len() != replacement.len() {
+            return Err(HxError::InvalidReplace(
+                "equal-length replace requires same-size needle/replacement; use :re! to resize"
+                    .to_owned(),
+            ));
+        }
+        if self.document.is_empty() {
+            self.set_info_status("replace: no matches");
+            return Ok(());
+        }
+
+        let active_selection = self.selection_range();
+        let (start, end) = active_selection.unwrap_or((0, self.document.len() - 1));
+        let matches = self.collect_replace_matches(start, end, needle)?;
+        if matches.is_empty() {
+            self.set_info_status("replace: no matches");
+            return Ok(());
+        }
+
+        let cursor_before = self.cursor;
+        let mode_before = self.mode;
+        let cursor_after = matches[0];
+        let outcome = if allow_resize {
+            self.apply_replace_resizing(&matches, needle, replacement)?
+        } else {
+            self.apply_replace_same_size(&matches, replacement)?
+        };
+
+        if active_selection.is_some() {
+            self.selection_anchor = None;
+            self.mode = Mode::Normal;
+        }
+        let mode_after = if matches!(self.mode, Mode::Command) {
+            self.normalize_mode(self.command_return_mode.unwrap_or(Mode::Normal))
+        } else {
+            self.mode
+        };
+        let cursor_after = self.clamp_cursor_for_mode(cursor_after, mode_after);
+        self.cursor = cursor_after;
+        self.refresh_inspector();
+
+        self.push_undo_step(
+            outcome.ops,
+            cursor_before,
+            mode_before,
+            cursor_after,
+            mode_after,
+        );
+
+        if outcome.stats.changed_bytes == 0 {
+            self.set_info_status(format!(
+                "replace matched {} spans; bytes unchanged",
+                outcome.stats.match_count
+            ));
+        } else if allow_resize {
+            self.set_info_status(format!(
+                "replaced {} matches; total {}→{} bytes",
+                outcome.stats.match_count, outcome.stats.before_bytes, outcome.stats.after_bytes
+            ));
+        } else {
+            self.set_info_status(format!(
+                "replaced {} matches; total {} bytes",
+                outcome.stats.match_count, outcome.stats.after_bytes
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn collect_replace_matches(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        needle: &[u8],
+    ) -> HxResult<Vec<u64>> {
+        if start > end_inclusive || needle.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut matches = Vec::new();
+        let mut search_start = start;
+        let end = end_inclusive.min(self.document.len().saturating_sub(1));
+
+        while search_start <= end {
+            let Some(found) = self.document.search_forward(search_start, needle)? else {
+                break;
+            };
+            let found_end = found + needle.len() as u64 - 1;
+            if found > end || found_end > end {
+                break;
+            }
+
+            matches.push(found);
+            search_start = found.saturating_add(needle.len() as u64);
+        }
+
+        Ok(matches)
+    }
+
+    fn apply_replace_same_size(
+        &mut self,
+        matches: &[u64],
+        replacement: &[u8],
+    ) -> HxResult<ReplaceOutcome> {
+        let mut changes = Vec::new();
+
+        for &offset in matches {
+            let ids = self
+                .document
+                .cell_ids_range(offset, replacement.len() as u64);
+            for (id, &byte) in ids.into_iter().zip(replacement.iter()) {
+                if self.document.is_tombstone(id) {
+                    return Err(HxError::OffsetOutOfRange);
+                }
+                let before = self.document.replacement_state(id);
+                self.document.replace_display_byte_by_id(id, byte)?;
+                let after = self.document.replacement_state(id);
+                if after != before {
+                    changes.push(ReplacementChange { id, before, after });
+                }
+            }
+        }
+
+        Ok(ReplaceOutcome {
+            ops: if changes.is_empty() {
+                Vec::new()
+            } else {
+                vec![EditOp::ReplaceBytes {
+                    changes: changes.clone(),
+                }]
+            },
+            stats: ReplaceStats {
+                match_count: matches.len(),
+                before_bytes: matches.len() * replacement.len(),
+                after_bytes: matches.len() * replacement.len(),
+                changed_bytes: changes.len(),
+            },
+        })
+    }
+
+    fn apply_replace_resizing(
+        &mut self,
+        matches: &[u64],
+        needle: &[u8],
+        replacement: &[u8],
+    ) -> HxResult<ReplaceOutcome> {
+        let mut ops = Vec::new();
+
+        for &offset in matches.iter().rev() {
+            let removed = self
+                .document
+                .delete_range_real(offset, needle.len() as u64)?;
+            if !removed.is_empty() {
+                ops.push(EditOp::RealDelete {
+                    offset,
+                    cells: removed,
+                });
+            }
+
+            let inserted = self.document.insert_bytes(offset, replacement)?;
+            if !inserted.is_empty() {
+                ops.push(EditOp::Insert {
+                    offset,
+                    cells: inserted,
+                });
+            }
+        }
+
+        Ok(ReplaceOutcome {
+            ops,
+            stats: ReplaceStats {
+                match_count: matches.len(),
+                before_bytes: matches.len() * needle.len(),
+                after_bytes: matches.len() * replacement.len(),
+                changed_bytes: matches.len() * needle.len().max(replacement.len()),
+            },
+        })
     }
 
     fn execute_inspector_command(&mut self) {

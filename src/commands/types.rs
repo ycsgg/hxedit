@@ -93,6 +93,11 @@ pub enum Command {
     Export {
         format: ExportFormat,
     },
+    Replace {
+        needle: Vec<u8>,
+        replacement: Vec<u8>,
+        allow_resize: bool,
+    },
     SearchAscii {
         pattern: Vec<u8>,
         backward: bool,

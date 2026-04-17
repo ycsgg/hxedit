@@ -225,8 +225,10 @@ impl App {
                 self.mode,
                 &self.palette,
                 self.config.bytes_per_line,
-                selection,
-                inspector_highlight,
+                hex_grid::HexGridOverlays {
+                    selection,
+                    inspector_highlight,
+                },
             ),
             ascii: ascii_grid::build(
                 &visible_rows.rows,

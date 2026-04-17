@@ -37,6 +37,16 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "zero <len>".to_owned(),
             details: "overwrite bytes from cursor with 0x00 for len bytes".to_owned(),
         },
+        "re" | "replace" | "re!" | "replace!" => CommandHint {
+            syntax: format!("{name} [hex|ascii] <needle> -> <replacement>"),
+            details: if name.ends_with('!') {
+                "replace all non-overlapping matches in the active selection or entire file; ! allows length changes via real delete/insert"
+                    .to_owned()
+            } else {
+                "replace all non-overlapping matches with equal-length data; defaults to hex mode, or use ascii for text"
+                    .to_owned()
+            },
+        },
         "insp" | "inspector" => CommandHint {
             syntax: "insp | inspector".to_owned(),
             details: "toggle format inspector panel".to_owned(),
@@ -210,6 +220,10 @@ fn known_commands() -> Vec<&'static str> {
         "wq",
         "fill",
         "zero",
+        "re",
+        "replace",
+        "re!",
+        "replace!",
         "g",
         "goto",
         "s",
@@ -309,5 +323,12 @@ mod tests {
         assert!(hint.syntax.contains("sha256"));
         assert!(hint.syntax.contains("crc32"));
         assert!(hint.details.contains("selection"));
+    }
+
+    #[test]
+    fn replace_hint_mentions_ascii_and_resize_mode() {
+        let hint = hint_for("re!");
+        assert!(hint.syntax.contains("ascii"));
+        assert!(hint.details.contains("length changes"));
     }
 }
