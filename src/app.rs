@@ -32,7 +32,7 @@ use crate::cli::Cli;
 use crate::config::Config;
 use crate::core::document::Document;
 use crate::core::piece_table::CellId;
-use crate::format::parse::InspectorRow;
+use crate::format::parse::{InspectorRow, NodePath};
 use crate::input::keymap::map_key;
 use crate::mode::Mode;
 use crate::profile::{Profiler, StartupStats};
@@ -94,8 +94,10 @@ pub(crate) struct InspectorState {
     pub selected_row: usize,
     /// If editing a field, the edit state.
     pub editing: Option<InspectorEdit>,
-    /// Node ids whose children are hidden. Indexed by pre-order struct walk.
-    pub collapsed_nodes: BTreeSet<usize>,
+    /// Paths of struct nodes whose children are hidden. Uses stable
+    /// `(name, sibling_index)` paths so collapse state survives sibling
+    /// insertions/removals between reparses.
+    pub collapsed_nodes: BTreeSet<NodePath>,
 }
 
 /// Edit state for a field in the inspector panel.

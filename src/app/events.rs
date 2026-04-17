@@ -821,7 +821,7 @@ mod tests {
         assert_eq!(inspector.rows.len(), 4);
         assert_eq!(inspector.selected_row, 0); // Parent header
 
-        // Collapse Parent (node_id=0) — fields AND child go away.
+        // Collapse Parent — fields AND child go away.
         app.handle_action(Action::InspectorToggleCollapse);
 
         let inspector = app.inspector.as_ref().unwrap();
@@ -833,7 +833,9 @@ mod tests {
                 ..
             }
         ));
-        assert!(inspector.collapsed_nodes.contains(&0));
+        assert!(inspector
+            .collapsed_nodes
+            .contains(&vec![("Parent".to_owned(), 0)]));
     }
 
     #[test]
@@ -856,7 +858,9 @@ mod tests {
         app.handle_action(Action::InspectorEnter);
 
         let inspector = app.inspector.as_ref().unwrap();
-        assert!(inspector.collapsed_nodes.contains(&0));
+        assert!(inspector
+            .collapsed_nodes
+            .contains(&vec![("Parent".to_owned(), 0)]));
         assert_eq!(app.mode, Mode::Inspector);
     }
 

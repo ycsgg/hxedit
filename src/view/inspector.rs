@@ -345,7 +345,7 @@ mod tests {
             &[InspectorRow::Header {
                 name: "Section".into(),
                 depth: 0,
-                node_id: 0,
+                node_path: vec![("Section".into(), 0)],
                 collapsed: true,
                 has_children: true,
             }],
@@ -374,7 +374,7 @@ mod tests {
             &[InspectorRow::Header {
                 name: "Section".into(),
                 depth: 0,
-                node_id: 0,
+                node_path: vec![("Section".into(), 0)],
                 collapsed: false,
                 has_children: true,
             }],
@@ -402,7 +402,7 @@ mod tests {
             &[InspectorRow::Header {
                 name: "Empty".into(),
                 depth: 0,
-                node_id: 0,
+                node_path: vec![("Empty".into(), 0)],
                 collapsed: false,
                 has_children: false,
             }],

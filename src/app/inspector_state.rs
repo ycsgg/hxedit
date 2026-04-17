@@ -1,7 +1,7 @@
 use crate::app::{App, InspectorState};
 use crate::error::{HxError, HxResult};
 use crate::format;
-use crate::format::parse::{InspectorRow, StructValue};
+use crate::format::parse::{InspectorRow, NodePath, StructValue};
 use crate::format::types::FieldDef;
 use crate::mode::Mode;
 use crate::view::inspector as inspector_view;
@@ -309,10 +309,10 @@ impl App {
         let abs_offset = match row {
             InspectorRow::Field { abs_offset, .. } => *abs_offset,
             InspectorRow::Header {
-                node_id,
+                node_path,
                 has_children: true,
                 ..
-            } => match base_offset_for_node(&inspector.structs, *node_id) {
+            } => match base_offset_for_path(&inspector.structs, node_path) {
                 Some(off) => off,
                 None => return,
             },
@@ -391,27 +391,25 @@ impl App {
             return;
         };
 
-        let node_id = match row {
+        let node_path = match row {
             InspectorRow::Header {
-                node_id,
+                node_path,
                 has_children: true,
                 ..
-            } => *node_id,
+            } => node_path.clone(),
             _ => return,
         };
 
-        if !inspector.collapsed_nodes.insert(node_id) {
-            inspector.collapsed_nodes.remove(&node_id);
+        if !inspector.collapsed_nodes.insert(node_path.clone()) {
+            inspector.collapsed_nodes.remove(&node_path);
         }
 
         inspector.rows = format::parse::flatten(&inspector.structs, &inspector.collapsed_nodes);
         inspector.editing = None;
 
-        if let Some(new_pos) = inspector
-            .rows
-            .iter()
-            .position(|r| matches!(r, InspectorRow::Header { node_id: nid, .. } if *nid == node_id))
-        {
+        if let Some(new_pos) = inspector.rows.iter().position(
+            |r| matches!(r, InspectorRow::Header { node_path: np, .. } if np == &node_path),
+        ) {
             inspector.selected_row = new_pos;
         } else {
             inspector.selected_row = first_selectable_row(&inspector.rows);
@@ -557,27 +555,42 @@ pub(crate) fn is_selectable(row: &InspectorRow) -> bool {
     )
 }
 
-/// Look up the `base_offset` of the struct at `target_node_id`.
+/// Look up the `base_offset` of the struct at `target_path`.
 ///
-/// Node ids are assigned during the same pre-order walk that `flatten()` uses,
-/// so this traversal matches what the row list saw.
-fn base_offset_for_node(structs: &[StructValue], target_node_id: usize) -> Option<u64> {
-    fn visit(sv: &StructValue, counter: &mut usize, target: usize) -> Option<u64> {
-        let id = *counter;
-        *counter += 1;
-        if id == target {
+/// Uses the same `(name, sibling_index)` accounting as `flatten`, so this
+/// traversal matches the paths emitted into the row list.
+fn base_offset_for_path(structs: &[StructValue], target_path: &NodePath) -> Option<u64> {
+    use std::collections::HashMap;
+
+    fn visit(
+        sv: &StructValue,
+        parent_path: &NodePath,
+        sibling_index: usize,
+        target: &NodePath,
+    ) -> Option<u64> {
+        let mut path = parent_path.clone();
+        path.push((sv.name.clone(), sibling_index));
+        if &path == target {
             return Some(sv.base_offset);
         }
+        let mut counts: HashMap<String, usize> = HashMap::new();
         for child in &sv.children {
-            if let Some(off) = visit(child, counter, target) {
+            let entry = counts.entry(child.name.clone()).or_insert(0);
+            let idx = *entry;
+            *entry += 1;
+            if let Some(off) = visit(child, &path, idx, target) {
                 return Some(off);
             }
         }
         None
     }
-    let mut counter = 0;
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    let root: NodePath = Vec::new();
     for sv in structs {
-        if let Some(off) = visit(sv, &mut counter, target_node_id) {
+        let entry = counts.entry(sv.name.clone()).or_insert(0);
+        let idx = *entry;
+        *entry += 1;
+        if let Some(off) = visit(sv, &root, idx, target_path) {
             return Some(off);
         }
     }
