@@ -40,7 +40,7 @@ pub fn hint_for(input: &str) -> CommandHint {
         "re" | "replace" | "re!" | "replace!" => CommandHint {
             syntax: format!("{name} [hex|ascii] <needle> -> <replacement>"),
             details: if name.ends_with('!') {
-                "replace all non-overlapping matches in the active selection or entire file; ! allows length changes via real delete/insert"
+                "replace all non-overlapping matches in the active selection (visual or selected inspector field) or entire file; ! allows length changes via real delete/insert"
                     .to_owned()
             } else {
                 "replace all non-overlapping matches with equal-length data; defaults to hex mode, or use ascii for text"
@@ -62,7 +62,7 @@ pub fn hint_for(input: &str) -> CommandHint {
         "g" | "goto" => CommandHint {
             syntax: format!("{name} <offset|end|+delta|-delta>"),
             details:
-                "jump to an absolute offset, end, or a relative delta; supports decimal or 0x-prefixed hex"
+                "jump to an absolute offset, end, or a relative delta; supports decimal or 0x-prefixed hex, and reports the moved byte delta on success"
                     .to_owned(),
         },
         "s" | "s!" => CommandHint {
@@ -95,12 +95,12 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "export <path> | export bin <path> | export c [name] | export py [name]"
                 .to_owned(),
             details:
-                "export the active visual selection as raw bytes to a file, or copy a C/Python literal to the clipboard"
+                "export the active selection (visual or selected inspector field) as raw bytes to a file, or copy a C/Python literal to the clipboard"
                     .to_owned(),
         },
         "hash" => CommandHint {
             syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
-            details: "compute hash of the current visual selection, or the entire file if no selection is active".to_owned(),
+            details: "compute hash of the current selection (visual or selected inspector field), or the entire file if no selection is active".to_owned(),
         },
         other => {
             let suggestions = known_commands()
@@ -159,7 +159,7 @@ fn copy_hint(name: &str, rest: Option<&str>) -> CommandHint {
     CommandHint {
         syntax,
         details:
-            "fmt: bin=binary b=byte(default) db=2-byte qb=4-byte; disp: r=raw(default) nb=big-endian nums nl=little-endian nums b64=base64"
+            "copy the active selection; fmt: bin=binary b=byte(default) db=2-byte qb=4-byte; disp: r=raw(default) nb=big-endian nums nl=little-endian nums b64=base64"
                 .to_owned(),
     }
 }

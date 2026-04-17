@@ -110,7 +110,7 @@ impl App {
         format: CopyFormat,
         display: CopyDisplay,
     ) -> HxResult<()> {
-        let Some((start, end)) = self.selection_range() else {
+        let Some((start, end)) = self.active_selection_range() else {
             return Err(HxError::MissingSelection);
         };
         let display_span = end - start + 1;

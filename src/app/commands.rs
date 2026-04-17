@@ -130,9 +130,14 @@ impl App {
     }
 
     fn execute_goto_command(&mut self, target: GotoTarget) -> HxResult<()> {
+        let cursor_before = self.cursor;
         let offset = self.resolve_goto_target(target)?;
         self.cursor = self.document.goto(offset)?;
-        self.set_info_status(format!("goto 0x{:x}", self.cursor));
+        self.set_info_status(format!(
+            "moved {} → 0x{:x}",
+            format_move_delta(cursor_before, self.cursor),
+            self.cursor
+        ));
         Ok(())
     }
 
@@ -166,7 +171,7 @@ impl App {
     }
 
     fn execute_export_command(&mut self, format: ExportFormat) -> HxResult<()> {
-        let Some((start, end)) = self.selection_range() else {
+        let Some((start, end)) = self.active_selection_range() else {
             return Err(HxError::MissingSelection);
         };
 
@@ -252,7 +257,8 @@ impl App {
             return Ok(());
         }
 
-        let active_selection = self.selection_range();
+        let visual_selection = self.selection_range();
+        let active_selection = self.active_selection_range();
         let (start, end) = active_selection.unwrap_or((0, self.document.len() - 1));
         let matches = self.collect_replace_matches(start, end, needle)?;
         if matches.is_empty() {
@@ -269,7 +275,7 @@ impl App {
             self.apply_replace_same_size(&matches, replacement)?
         };
 
-        if active_selection.is_some() {
+        if visual_selection.is_some() {
             self.selection_anchor = None;
             self.mode = Mode::Normal;
         }
@@ -476,7 +482,8 @@ impl App {
     }
 
     fn execute_hash_command(&mut self, algorithm: HashAlgorithm) -> HxResult<()> {
-        let (start, end) = if let Some((start, end)) = self.selection_range() {
+        let selection = self.active_selection_range();
+        let (start, end) = if let Some((start, end)) = selection {
             (start, end)
         } else if self.document.is_empty() {
             self.set_info_status(format!("{}: no data to hash", algorithm.label()));
@@ -497,7 +504,7 @@ impl App {
             .iter()
             .map(|b| format!("{:02x}", b))
             .collect::<String>();
-        let scope = if self.selection_range().is_some() {
+        let scope = if selection.is_some() {
             format!("sel 0x{:x}-0x{:x}", start, end)
         } else {
             "entire file".to_owned()
@@ -535,6 +542,14 @@ fn hex_preview(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn format_move_delta(before: u64, after: u64) -> String {
+    if after >= before {
+        format!("+0x{:x}", after - before)
+    } else {
+        format!("-0x{:x}", before - after)
+    }
 }
 
 fn search_direction(backward: bool) -> SearchDirection {

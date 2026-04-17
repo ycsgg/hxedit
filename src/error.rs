@@ -38,7 +38,7 @@ pub enum HxError {
     UnknownCommand(String),
     #[error("missing command argument: {0}")]
     MissingArgument(&'static str),
-    #[error("operation requires an active visual selection")]
+    #[error("operation requires an active selection (visual or inspector field)")]
     MissingSelection,
     #[error("selection length must be a multiple of {0} bytes for this copy mode")]
     CopyAlignment(usize),

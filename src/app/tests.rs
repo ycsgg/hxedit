@@ -6,6 +6,8 @@ use crate::app::{App, SearchDirection, StatusLevel};
 use crate::cli::Cli;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::core::document::ByteSlot;
+use crate::format::parse::{FieldValue, StructValue};
+use crate::format::types::{FieldDef, FieldType};
 use crate::mode::{Mode, NibblePhase};
 
 fn app_with_len(len: usize) -> App {
@@ -45,6 +47,44 @@ fn app_with_bytes(bytes: &[u8]) -> App {
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 4;
+    app
+}
+
+fn app_with_inspector_field(bytes: &[u8], offset: u64, size: usize) -> App {
+    let mut app = app_with_bytes(bytes);
+    let field = FieldDef {
+        name: "field".to_owned(),
+        offset,
+        field_type: FieldType::Bytes(size),
+        description: String::new(),
+        editable: false,
+    };
+    let structs = vec![StructValue {
+        name: "Header".to_owned(),
+        base_offset: 0,
+        fields: vec![FieldValue {
+            def: field,
+            abs_offset: offset,
+            raw_bytes: bytes[offset as usize..offset as usize + size].to_vec(),
+            display: format!("{} bytes", size),
+            size,
+        }],
+        children: Vec::new(),
+    }];
+    let collapsed_nodes = std::collections::BTreeSet::new();
+    let rows = crate::format::parse::flatten(&structs, &collapsed_nodes);
+    app.show_inspector = true;
+    app.inspector = Some(crate::app::InspectorState {
+        format_name: "TEST".to_owned(),
+        structs,
+        rows,
+        scroll_offset: 0,
+        selected_row: 1,
+        editing: None,
+        collapsed_nodes,
+    });
+    app.mode = Mode::Inspector;
+    app.cursor = offset;
     app
 }
 
@@ -341,6 +381,26 @@ fn goto_command_supports_end_and_relative_offsets() {
 }
 
 #[test]
+fn goto_command_reports_moved_delta() {
+    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
+    app.cursor = 1;
+
+    app.execute_command(Command::Goto {
+        target: GotoTarget::Relative(2),
+    })
+    .unwrap();
+    assert!(app.status_message.contains("moved +0x2"));
+    assert!(app.status_message.contains("→ 0x3"));
+
+    app.execute_command(Command::Goto {
+        target: GotoTarget::Relative(-1),
+    })
+    .unwrap();
+    assert!(app.status_message.contains("moved -0x1"));
+    assert!(app.status_message.contains("→ 0x2"));
+}
+
+#[test]
 fn paste_overwrite_replaces_existing_bytes_in_place() {
     let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
     app.cursor = 1;
@@ -391,6 +451,20 @@ fn export_command_writes_logical_selection_to_file() {
 
     assert_eq!(fs::read(&path).unwrap(), b"ac");
     assert!(app.status_message.contains("logical bytes"));
+}
+
+#[test]
+fn export_command_uses_selected_inspector_field_range() {
+    let mut app = app_with_inspector_field(b"hello world", 6, 5);
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("field.bin");
+
+    app.execute_command(Command::Export {
+        format: ExportFormat::Binary { path: path.clone() },
+    })
+    .unwrap();
+
+    assert_eq!(fs::read(&path).unwrap(), b"world");
 }
 
 #[test]
@@ -565,6 +639,18 @@ fn hash_command_on_visual_selection_uses_selection_range() {
     .unwrap();
     assert!(app.status_message.contains("md5"));
     assert!(app.status_message.contains("sel 0x"));
+}
+
+#[test]
+fn hash_command_on_selected_inspector_field_uses_field_range() {
+    let mut app = app_with_inspector_field(b"hello world", 6, 5);
+    app.execute_command(Command::Hash {
+        algorithm: HashAlgorithm::Sha256,
+    })
+    .unwrap();
+
+    assert!(app.status_message.contains("sel 0x6-0xa"));
+    assert!(app.status_message.contains("486ea46224d1bb4f"));
 }
 
 #[test]

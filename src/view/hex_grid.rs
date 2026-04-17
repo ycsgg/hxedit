@@ -7,10 +7,11 @@ use crate::util::format::hex_pair;
 use crate::view::byte_style::slot_style;
 use crate::view::palette::Palette;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct HexGridOverlays {
     pub selection: Option<(u64, u64)>,
     pub inspector_highlight: Option<(u64, u64)>,
+    pub search_matches: Vec<(u64, u64)>,
 }
 
 pub fn build(
@@ -31,6 +32,9 @@ pub fn build(
                 let mut base = slot_style(*slot, palette);
                 if highlighted(overlays.inspector_highlight, offset) {
                     base = palette.inspector_highlight.patch(base);
+                }
+                if highlighted_any(&overlays.search_matches, offset) {
+                    base = palette.search_hit.patch(base);
                 }
                 if selected(overlays.selection, offset) {
                     base = palette.selection.patch(base);
@@ -76,6 +80,12 @@ fn highlighted(highlight: Option<(u64, u64)>, offset: u64) -> bool {
         .unwrap_or(false)
 }
 
+fn highlighted_any(highlights: &[(u64, u64)], offset: u64) -> bool {
+    highlights
+        .iter()
+        .any(|(start, end)| offset >= *start && offset <= *end)
+}
+
 fn style_for_nibble(
     base: Style,
     is_cursor: bool,
@@ -115,6 +125,7 @@ mod tests {
             HexGridOverlays {
                 selection: None,
                 inspector_highlight: Some((1, 1)),
+                search_matches: Vec::new(),
             },
         );
 
@@ -141,6 +152,73 @@ mod tests {
             HexGridOverlays {
                 selection: None,
                 inspector_highlight: Some((0, 0)),
+                search_matches: Vec::new(),
+            },
+        );
+
+        let line = &lines[0];
+        assert!(line.spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+        assert!(line.spans[1]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn search_matches_underlines_all_hit_bytes() {
+        let lines = build(
+            &[vec![
+                ByteSlot::Present(0x41),
+                ByteSlot::Present(0x42),
+                ByteSlot::Present(0x43),
+            ]],
+            &[0],
+            99,
+            Mode::Normal,
+            &Palette::new(ColorLevel::Basic),
+            3,
+            HexGridOverlays {
+                selection: None,
+                inspector_highlight: None,
+                search_matches: vec![(1, 2)],
+            },
+        );
+
+        let line = &lines[0];
+        assert!(!line.spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+        assert!(line.spans[3]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+        assert!(line.spans[4]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+        assert!(line.spans[6]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn cursor_keeps_search_highlight_modifier() {
+        let lines = build(
+            &[vec![ByteSlot::Present(0x41)]],
+            &[0],
+            0,
+            Mode::Normal,
+            &Palette::new(ColorLevel::Basic),
+            1,
+            HexGridOverlays {
+                selection: None,
+                inspector_highlight: None,
+                search_matches: vec![(0, 0)],
             },
         );
 

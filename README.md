@@ -17,9 +17,9 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 ## Features
 
 - **Non-destructive editing** — overwrite bytes, insert new bytes, or mark bytes as deleted; all changes are undoable
-- **Visual selection** — select a range of bytes for delete, copy, or hash operations
+- **Visual / inspector selection** — operate on a byte range from visual mode or the selected inspector field
 - **Undo / Redo** — full multi-step undo and redo with `Ctrl+Z` / `Ctrl+Y` or `:undo` / `:redo`
-- **Search** — search by ASCII text or hex bytes, forward and backward, with automatic wrap-around
+- **Search** — search by ASCII text or hex bytes, forward and backward, with automatic wrap-around and visible-hit highlighting in the hex grid
 - **Format inspector** — built-in parsing for ELF, PNG, and ZIP structures with field-level editing
 - **Hash computation** — compute MD5, SHA1, SHA256, SHA512, or CRC32 of a selection or the entire file
 - **Clipboard integration** — copy selections as hex, binary, numeric, or base64 text; paste from clipboard as hex or base64
@@ -111,7 +111,9 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 | `:S <hex>` | Search hex bytes downward |
 | `:S! <hex>` | Search hex bytes upward |
 
-Search wraps around automatically — forward search continues from the start after EOF, backward search continues from the end after BOF.
+Search wraps around automatically — forward search continues from the start after EOF, backward search continues from the end after BOF. The current search also highlights all visible hits in the hex grid.
+
+Successful `:g` commands report how many display bytes were moved, e.g. `moved +0x1000 → 0x1234`.
 
 ### Clipboard
 
@@ -121,10 +123,10 @@ Search wraps around automatically — forward search continues from the start af
 | `:p? [!] [n]` | Preview overwrite-paste |
 | `:pi [!] [n]` | Insert-paste at cursor |
 | `:pi? [!] [n]` | Preview insert-paste |
-| `:c [fmt] [disp]` | Copy visual selection |
-| `:export <path>` | Export visual selection as raw bytes to a new file |
-| `:export c [name]` | Copy visual selection as a C array literal |
-| `:export py [name]` | Copy visual selection as a Python bytes literal |
+| `:c [fmt] [disp]` | Copy the active selection |
+| `:export <path>` | Export the active selection as raw bytes to a new file |
+| `:export c [name]` | Copy the active selection as a C array literal |
+| `:export py [name]` | Copy the active selection as a Python bytes literal |
 
 Copy format options: `bin` (binary text), `b` (byte groups, default), `db` (2-byte), `qb` (4-byte)
 
@@ -136,7 +138,7 @@ Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (littl
 |---------|-------------|
 | `:fill <hex-pattern> <len>` | Overwrite bytes from cursor with a repeated hex pattern |
 | `:zero <len>` | Overwrite bytes from cursor with `00` |
-| `:re [hex\|ascii] <needle> -> <replacement>` | Replace all non-overlapping equal-length matches in the selection or entire file |
+| `:re [hex\|ascii] <needle> -> <replacement>` | Replace all non-overlapping equal-length matches in the active selection or entire file |
 | `:re! [hex\|ascii] <needle> -> <replacement>` | Replace with length changes allowed (uses real delete/insert) |
 
 ### Hash
@@ -149,7 +151,7 @@ Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (littl
 | `:hash sha512` | Compute SHA-512 |
 | `:hash crc32` | Compute CRC32 |
 
-Hashes the visual selection if active, otherwise the entire file.
+Hashes the active selection (visual or selected inspector field) if active, otherwise the entire file.
 
 ### Inspector
 

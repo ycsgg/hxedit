@@ -52,6 +52,7 @@ pub struct Palette {
     pub error: Style,
     pub dirty: Style,
     pub selection: Style,
+    pub search_hit: Style,
     pub deleted: Style,
     pub null: Style,
     pub printable: Style,
@@ -103,6 +104,11 @@ impl Palette {
             selection: Style::default()
                 .bg(Color::Rgb(40, 80, 160))
                 .fg(Color::Rgb(240, 240, 240))
+                .add_modifier(Modifier::BOLD),
+            search_hit: Style::default()
+                .fg(Color::Rgb(255, 220, 120))
+                .bg(Color::Rgb(40, 80, 160))
+                .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
             deleted: Style::default().fg(Color::Rgb(200, 60, 60)),
             null: Style::default().fg(Color::Rgb(100, 100, 100)),
@@ -165,6 +171,10 @@ impl Palette {
                 .bg(Color::Indexed(25))
                 .fg(Color::Indexed(231))
                 .add_modifier(Modifier::BOLD),
+            search_hit: Style::default()
+                .fg(Color::Indexed(222))
+                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::BOLD),
             deleted: Style::default().fg(Color::Indexed(160)),
             null: Style::default().fg(Color::Indexed(245)),
             printable: Style::default().fg(Color::Indexed(123)),
@@ -225,6 +235,10 @@ impl Palette {
                 .bg(Color::Blue)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
+            search_hit: Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::BOLD),
             deleted: Style::default().fg(Color::Red),
             null: Style::default().fg(Color::DarkGray),
             printable: Style::default().fg(Color::Cyan),
@@ -277,6 +291,9 @@ impl Palette {
                 .add_modifier(Modifier::REVERSED),
             dirty: base.add_modifier(Modifier::BOLD),
             selection: base.add_modifier(Modifier::REVERSED),
+            search_hit: base
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
             deleted: base,
             null: base,
             printable: base,

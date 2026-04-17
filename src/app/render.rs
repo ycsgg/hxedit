@@ -212,6 +212,7 @@ impl App {
 
         let selection = self.selection_range();
         let inspector_highlight = self.inspector_highlight_range();
+        let search_matches = self.visible_search_matches(visible_rows);
         MainLines {
             gutter: gutter::build(
                 &visible_rows.offsets,
@@ -228,6 +229,7 @@ impl App {
                 hex_grid::HexGridOverlays {
                     selection,
                     inspector_highlight,
+                    search_matches,
                 },
             ),
             ascii: ascii_grid::build(
@@ -240,6 +242,45 @@ impl App {
                 selection,
             ),
         }
+    }
+
+    fn visible_search_matches(&self, visible_rows: &VisibleRows) -> Vec<(u64, u64)> {
+        let Some(search) = self.last_search.as_ref() else {
+            return Vec::new();
+        };
+        if search.pattern.is_empty() {
+            return Vec::new();
+        }
+
+        let mut slots = Vec::new();
+        for (row_idx, row) in visible_rows.rows.iter().enumerate() {
+            let row_offset = visible_rows
+                .offsets
+                .get(row_idx)
+                .copied()
+                .unwrap_or_default();
+            for (col_idx, slot) in row.iter().enumerate() {
+                slots.push((row_offset + col_idx as u64, *slot));
+            }
+        }
+
+        if slots.len() < search.pattern.len() {
+            return Vec::new();
+        }
+
+        let mut matches = Vec::new();
+        for start_idx in 0..=slots.len() - search.pattern.len() {
+            let matched = search.pattern.iter().enumerate().all(|(idx, expected)| {
+                matches!(slots[start_idx + idx].1, ByteSlot::Present(byte) if byte == *expected)
+            });
+            if matched {
+                matches.push((
+                    slots[start_idx].0,
+                    slots[start_idx + search.pattern.len() - 1].0,
+                ));
+            }
+        }
+        matches
     }
 
     fn render_main_grids(
@@ -344,5 +385,52 @@ impl App {
                 inspector_area.y + 1 + visible_row as u16,
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::App;
+    use crate::cli::Cli;
+    use crate::commands::types::Command;
+
+    fn app_with_bytes(bytes: &[u8]) -> App {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("sample.bin");
+        fs::write(&file, bytes).unwrap();
+        let cli = Cli {
+            file,
+            bytes_per_line: 16,
+            page_size: 4096,
+            cache_pages: 8,
+            profile: false,
+            readonly: false,
+            no_color: true,
+            offset: None,
+            inspector: false,
+        };
+        let mut app = App::from_cli(cli).unwrap();
+        app.view_rows = 2;
+        app
+    }
+
+    #[test]
+    fn visible_search_matches_collects_all_hits_on_screen() {
+        let mut app = app_with_bytes(b"aba xx aba");
+        app.execute_command(Command::SearchAscii {
+            pattern: b"aba".to_vec(),
+            backward: false,
+        })
+        .unwrap();
+
+        let visible_rows = app.collect_visible_rows(1);
+        assert_eq!(
+            app.visible_search_matches(&visible_rows),
+            vec![(0, 2), (7, 9)]
+        );
     }
 }

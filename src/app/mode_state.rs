@@ -79,8 +79,25 @@ impl App {
         }
     }
 
+    fn inspector_selection_is_active(&self) -> bool {
+        self.mode.is_inspector()
+            || self
+                .command_return_mode
+                .is_some_and(|mode| mode.is_inspector())
+    }
+
     pub(crate) fn selection_range(&self) -> Option<(u64, u64)> {
         let anchor = self.selection_anchor?;
         Some((anchor.min(self.cursor), anchor.max(self.cursor)))
+    }
+
+    pub(crate) fn active_selection_range(&self) -> Option<(u64, u64)> {
+        self.selection_range().or_else(|| {
+            if self.inspector_selection_is_active() {
+                self.inspector_highlight_range()
+            } else {
+                None
+            }
+        })
     }
 }
