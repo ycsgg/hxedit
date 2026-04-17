@@ -8,6 +8,14 @@ const ZIP_DATA_DESCRIPTOR_FLAG: u16 = 0x0008;
 
 /// Detect and parse ZIP format by scanning Local File Headers from the start.
 pub fn detect(doc: &mut Document) -> Option<FormatDef> {
+    detect_with_cap(doc, super::super::detect::DEFAULT_ENTRY_CAP)
+}
+
+/// Detect and parse ZIP format, stopping after `entry_cap` local file headers.
+///
+/// When the cap is reached and more headers follow, a trailing informational
+/// struct is emitted so the user can raise the cap via `:insp more`.
+pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef> {
     if doc.len() < 4 {
         return None;
     }
@@ -20,8 +28,19 @@ pub fn detect(doc: &mut Document) -> Option<FormatDef> {
     let mut structs = Vec::new();
     let mut offset: u64 = 0;
     let mut entry_idx = 0;
+    let mut more_remain = false;
 
-    while offset + 30 <= doc.len() && entry_idx < 64 {
+    while offset + 30 <= doc.len() {
+        if entry_idx >= entry_cap {
+            // Before declaring more-entries, confirm the next bytes are still a
+            // local file header; otherwise normal termination wins.
+            if let Some(sig) = read_bytes_raw(doc, offset, 4) {
+                if sig == ZIP_LOCAL_MAGIC {
+                    more_remain = true;
+                }
+            }
+            break;
+        }
         let sig = read_bytes_raw(doc, offset, 4)?;
         if sig != ZIP_LOCAL_MAGIC {
             break;
@@ -191,6 +210,18 @@ pub fn detect(doc: &mut Document) -> Option<FormatDef> {
 
     if structs.is_empty() {
         return None;
+    }
+
+    if more_remain {
+        structs.push(StructDef {
+            name: format!(
+                "… more entries beyond {} (use `:insp more` to load more)",
+                entry_idx
+            ),
+            base_offset: offset,
+            fields: vec![],
+            children: vec![],
+        });
     }
 
     Some(FormatDef {

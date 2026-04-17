@@ -158,6 +158,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 | Command | Description |
 |---------|-------------|
 | `:insp` | Toggle inspector panel |
+| `:insp more` | Reveal the next batch of PNG / ZIP entries beyond the current cap |
 | `:format` | Reset to auto-detected format |
 | `:format elf\|png\|zip` | Force a specific format |
 

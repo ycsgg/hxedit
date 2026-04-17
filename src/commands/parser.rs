@@ -48,7 +48,11 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         "redo" => Ok(Command::Redo {
             steps: parse_redo_steps(rest)?,
         }),
-        "insp" | "inspector" => Ok(Command::Inspector),
+        "insp" | "inspector" => match rest.map(str::trim) {
+            None | Some("") => Ok(Command::Inspector),
+            Some("more") => Ok(Command::InspectorMore),
+            Some(other) => Err(HxError::UnknownCommand(format!("insp {other}"))),
+        },
         "format" => Ok(Command::Format {
             name: rest.filter(|value| !value.is_empty()).map(str::to_owned),
         }),

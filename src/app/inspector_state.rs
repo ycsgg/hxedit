@@ -214,9 +214,13 @@ impl App {
             .map(|state| state.format_name.clone());
 
         let detected = if let Some(name) = self.inspector_format_override.as_deref() {
-            format::detect::detect_by_name(name, &mut self.document)
+            format::detect::detect_by_name_with_cap(
+                name,
+                &mut self.document,
+                self.inspector_entry_cap,
+            )
         } else {
-            format::detect::detect_format(&mut self.document)
+            format::detect::detect_format_with_cap(&mut self.document, self.inspector_entry_cap)
         };
 
         if let Some(def) = detected {

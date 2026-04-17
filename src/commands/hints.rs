@@ -47,10 +47,21 @@ pub fn hint_for(input: &str) -> CommandHint {
                     .to_owned()
             },
         },
-        "insp" | "inspector" => CommandHint {
-            syntax: "insp | inspector".to_owned(),
-            details: "toggle format inspector panel".to_owned(),
-        },
+        "insp" | "inspector" => {
+            let is_more = rest.map(str::trim) == Some("more");
+            CommandHint {
+                syntax: if is_more {
+                    "insp more".to_owned()
+                } else {
+                    "insp | inspector | insp more".to_owned()
+                },
+                details: if is_more {
+                    "reveal the next batch of PNG / ZIP entries beyond the current cap".to_owned()
+                } else {
+                    "toggle format inspector panel; `:insp more` reveals the next batch of paginated entries (PNG / ZIP)".to_owned()
+                },
+            }
+        }
         "format" => CommandHint {
             syntax: "format [elf|png|zip]".to_owned(),
             details: "auto-detect format when omitted, or force a built-in inspector".to_owned(),

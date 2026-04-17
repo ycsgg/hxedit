@@ -5,8 +5,17 @@ use crate::format::types::*;
 /// PNG signature: 89 50 4e 47 0d 0a 1a 0a
 const PNG_MAGIC: [u8; 8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
-/// Detect and parse PNG format.
+/// Detect and parse PNG format with the default entry cap.
 pub fn detect(doc: &mut Document) -> Option<FormatDef> {
+    detect_with_cap(doc, super::super::detect::DEFAULT_ENTRY_CAP)
+}
+
+/// Detect and parse PNG format, stopping after `entry_cap` chunks.
+///
+/// When the cap is reached and more chunks follow, a trailing informational
+/// struct is emitted so the user knows the list is not exhausted. The cap is
+/// raised by `:insp more` from the UI layer.
+pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef> {
     if doc.len() < 8 {
         return None;
     }
@@ -32,7 +41,12 @@ pub fn detect(doc: &mut Document) -> Option<FormatDef> {
     // Iterate chunks
     let mut offset: u64 = 8;
     let mut chunk_idx = 0;
-    while offset + 12 <= doc.len() && chunk_idx < 64 {
+    let mut more_remain = false;
+    while offset + 12 <= doc.len() {
+        if chunk_idx >= entry_cap {
+            more_remain = true;
+            break;
+        }
         let len_bytes = read_bytes_raw(doc, offset, 4)?;
         let chunk_len =
             u32::from_be_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as u64;
@@ -177,6 +191,18 @@ pub fn detect(doc: &mut Document) -> Option<FormatDef> {
         chunk_idx += 1;
     }
 
+    if more_remain {
+        structs.push(StructDef {
+            name: format!(
+                "… more chunks beyond {} (use `:insp more` to load more)",
+                chunk_idx
+            ),
+            base_offset: offset,
+            fields: vec![],
+            children: vec![],
+        });
+    }
+
     Some(FormatDef {
         name: "PNG".to_string(),
         structs,
@@ -253,5 +279,43 @@ mod tests {
         let def = detect(&mut doc).expect("detect succeeds");
         // Expect only signature + the one truncated chunk.
         assert_eq!(def.structs.len(), 2);
+    }
+
+    #[test]
+    fn emits_more_entries_marker_when_cap_reached() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("many.png");
+
+        // Build a PNG with many zero-length chunks so the cap is reached
+        // before IEND. Each chunk header is 12 bytes (len=0, type, crc).
+        let chunks = 10;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&super::PNG_MAGIC);
+        for _ in 0..chunks {
+            bytes.extend_from_slice(&0_u32.to_be_bytes()); // length
+            bytes.extend_from_slice(b"tEXt"); // type
+            bytes.extend_from_slice(&0_u32.to_be_bytes()); // crc
+        }
+
+        let mut doc = write_png(&path, bytes);
+        // Cap lower than chunk count to force the trailing marker.
+        let def = super::detect_with_cap(&mut doc, 3).expect("detect succeeds");
+        let last = def.structs.last().expect("has trailing struct");
+        assert!(
+            last.name.contains("more chunks"),
+            "expected pagination marker, got {}",
+            last.name
+        );
+
+        // Raising the cap past the chunk count should drop the marker.
+        let def_full = super::detect_with_cap(&mut doc, 64).expect("detect succeeds");
+        assert!(
+            !def_full
+                .structs
+                .last()
+                .map(|s| s.name.contains("more chunks"))
+                .unwrap_or(false),
+            "no trailing marker when cap >= entries"
+        );
     }
 }

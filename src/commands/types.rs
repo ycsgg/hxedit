@@ -107,6 +107,9 @@ pub enum Command {
         backward: bool,
     },
     Inspector,
+    /// `:insp more` — raise the per-format entry cap by one batch and
+    /// re-parse so pagination-aware formats (PNG / ZIP) reveal more entries.
+    InspectorMore,
     Format {
         name: Option<String>,
     },

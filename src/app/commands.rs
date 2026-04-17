@@ -64,6 +64,10 @@ impl App {
                 self.execute_inspector_command();
                 Ok(())
             }
+            Command::InspectorMore => {
+                self.execute_inspector_more_command();
+                Ok(())
+            }
             Command::Format { name } => {
                 self.execute_format_command(name);
                 Ok(())
@@ -444,8 +448,41 @@ impl App {
         }
     }
 
+    fn execute_inspector_more_command(&mut self) {
+        if !self.show_inspector || self.inspector.is_none() {
+            self.set_warning_status("inspector not active; run `:insp` first");
+            return;
+        }
+        let before = self.inspector_entry_cap;
+        let after = before.saturating_add(crate::format::detect::DEFAULT_ENTRY_CAP);
+        self.inspector_entry_cap = after;
+        self.refresh_inspector();
+        let more_pending = self
+            .inspector
+            .as_ref()
+            .map(|state| {
+                state
+                    .structs
+                    .iter()
+                    .any(|s| s.name.starts_with('…') && s.name.contains("more"))
+            })
+            .unwrap_or(false);
+        if more_pending {
+            self.set_info_status(format!(
+                "inspector cap raised to {after}; more entries still pending"
+            ));
+        } else {
+            self.set_info_status(format!(
+                "inspector cap raised to {after}; all entries loaded"
+            ));
+        }
+    }
+
     fn execute_format_command(&mut self, name: Option<String>) {
         self.show_inspector = true;
+        // Reset pagination on explicit format switches so a leftover high cap
+        // from a previous format doesn't silently over-parse the new one.
+        self.inspector_entry_cap = crate::format::detect::DEFAULT_ENTRY_CAP;
         match name {
             Some(name) => self.execute_named_format_command(name),
             None => {

@@ -71,6 +71,10 @@ pub struct App {
     show_inspector: bool,
     /// Manual format override for the inspector, e.g. `elf`.
     inspector_format_override: Option<String>,
+    /// Per-format entry cap for pagination-aware parsers (PNG / ZIP).
+    /// Starts at `DEFAULT_ENTRY_CAP` and grows by `ENTRY_CAP_BATCH` on each
+    /// `:insp more` until all entries are loaded.
+    inspector_entry_cap: usize,
     /// Inspector runtime state. Some when show_inspector == true and format detected.
     inspector: Option<InspectorState>,
     /// Distinguishes “no detected format” from “detected but failed to parse”.
@@ -306,6 +310,7 @@ impl App {
             config,
             show_inspector,
             inspector_format_override: None,
+            inspector_entry_cap: crate::format::detect::DEFAULT_ENTRY_CAP,
             inspector: None,
             inspector_error: None,
             last_render_error: None,
