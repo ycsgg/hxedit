@@ -207,6 +207,7 @@ fn read_bytes(doc: &mut Document, offset: u64, len: usize) -> HxResult<Vec<u8>> 
 /// Parse a single field: read raw bytes from the document and format as display string.
 fn parse_field(doc: &mut Document, field: &FieldDef, base_offset: u64) -> HxResult<FieldValue> {
     let abs_offset = base_offset + field.offset;
+    let doc_len = doc.len();
     let (raw_bytes, size, display) = match &field.field_type {
         FieldType::DataRange(len) => {
             let len = *len;
@@ -219,8 +220,15 @@ fn parse_field(doc: &mut Document, field: &FieldDef, base_offset: u64) -> HxResu
             (Vec::new(), len as usize, display)
         }
         _ => {
-            let size = field.field_type.byte_size().unwrap_or(0);
-            let raw_bytes = read_bytes(doc, abs_offset, size)?;
+            let declared_size = field.field_type.byte_size().unwrap_or(0);
+            // Clamp the reported size to what's actually available in the
+            // document. `read_bytes` pads with zeros so `raw_bytes.len()` is
+            // always `declared_size`, but if we report that to the edit path
+            // it will happily try to write past EOF for fields that straddle
+            // the end of file.
+            let available = doc_len.saturating_sub(abs_offset);
+            let size = declared_size.min(available as usize);
+            let raw_bytes = read_bytes(doc, abs_offset, declared_size)?;
             let display = format_value(&field.field_type, &raw_bytes);
             (raw_bytes, size, display)
         }
@@ -443,7 +451,13 @@ pub fn format_value(field_type: &FieldType, raw: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
     use super::*;
+    use crate::config::Config;
+    use crate::core::document::Document;
 
     fn field(name: &str, offset: u64) -> FieldValue {
         FieldValue {
@@ -609,5 +623,48 @@ mod tests {
             })
             .collect();
         assert_eq!(ids_a, ids_b);
+    }
+
+    fn doc_with_bytes(bytes: &[u8]) -> Document {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("blob.bin");
+        fs::write(&path, bytes).unwrap();
+        let doc = Document::open(&path, &Config::default()).unwrap();
+        // Leak the tempdir — tests are short-lived and the file stays alive
+        // via the still-open Document handle until the process exits.
+        std::mem::forget(dir);
+        doc
+    }
+
+    #[test]
+    fn parse_field_clamps_size_when_declared_bytes_overflow_eof() {
+        // Document has only 2 bytes, but the field type declares 4.
+        let mut doc = doc_with_bytes(&[0x61, 0x62]);
+        let field = FieldDef {
+            name: "tail".into(),
+            offset: 1,
+            field_type: FieldType::Utf8(4),
+            description: String::new(),
+            editable: true,
+        };
+        let fv = parse_field(&mut doc, &field, 0).unwrap();
+        // Only 1 byte actually available past offset 1.
+        assert_eq!(fv.size, 1);
+        // raw_bytes still padded to 4 for display purposes.
+        assert_eq!(fv.raw_bytes.len(), 4);
+    }
+
+    #[test]
+    fn parse_field_size_matches_declared_when_bytes_available() {
+        let mut doc = doc_with_bytes(&[0x61, 0x62, 0x63, 0x64, 0x65]);
+        let field = FieldDef {
+            name: "word".into(),
+            offset: 0,
+            field_type: FieldType::U32Le,
+            description: String::new(),
+            editable: true,
+        };
+        let fv = parse_field(&mut doc, &field, 0).unwrap();
+        assert_eq!(fv.size, 4);
     }
 }

@@ -208,6 +208,10 @@ impl App {
             .inspector
             .as_ref()
             .map(|state| state.collapsed_nodes.clone());
+        let previous_format = self
+            .inspector
+            .as_ref()
+            .map(|state| state.format_name.clone());
 
         let detected = if let Some(name) = self.inspector_format_override.as_deref() {
             format::detect::detect_by_name(name, &mut self.document)
@@ -255,6 +259,19 @@ impl App {
         } else {
             self.inspector = None;
             self.inspector_error = None;
+            // When detection previously succeeded and now fails, it's almost
+            // always because the user just overwrote part of the magic or
+            // header. Surfacing this makes it obvious why the panel suddenly
+            // went blank.
+            if let Some(prev_format) = previous_format {
+                self.set_warning_status(format!(
+                    "format lost: {} header/magic no longer matches",
+                    prev_format
+                ));
+                if matches!(self.mode, Mode::InspectorEdit | Mode::Inspector) {
+                    self.mode = Mode::Normal;
+                }
+            }
         }
     }
 
