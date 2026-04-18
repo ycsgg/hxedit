@@ -197,5 +197,5 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 
 - The repository pins Rust to `1.94.1` via `rust-toolchain.toml`, and GitHub Actions installs the same toolchain explicitly
 - Every push / pull request runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets` on Ubuntu / Windows
-- Pushing a tag like `v0.1.0` also builds release archives for Linux x86_64, macOS arm64, and Windows x86_64, then publishes a GitHub Release with `SHA256SUMS.txt`
-- Intel macOS release artifacts are no longer produced; GitHub-hosted CI now only relies on Ubuntu / Windows for regular verification
+- Pushing a tag like `v0.1.0` also builds release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, then publishes a GitHub Release with `SHA256SUMS.txt`
+- Intel macOS release artifacts are no longer produced; GitHub-hosted CI only relies on Ubuntu / Windows for regular verification
