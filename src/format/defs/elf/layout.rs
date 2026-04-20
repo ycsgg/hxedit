@@ -318,3 +318,71 @@ pub(super) fn gnu_property_label(prop_type: u32) -> &'static str {
         _ => "UNKNOWN",
     }
 }
+
+pub(super) fn symbol_bind_label(bind: u8) -> &'static str {
+    match bind {
+        0 => "LOCAL",
+        1 => "GLOBAL",
+        2 => "WEAK",
+        _ => "OTHER",
+    }
+}
+
+pub(super) fn symbol_type_label(sym_type: u8) -> &'static str {
+    match sym_type {
+        0 => "NOTYPE",
+        1 => "OBJECT",
+        2 => "FUNC",
+        3 => "SECTION",
+        4 => "FILE",
+        5 => "COMMON",
+        6 => "TLS",
+        _ => "OTHER",
+    }
+}
+
+pub(super) fn symbol_visibility_label(visibility: u8) -> &'static str {
+    match visibility {
+        0 => "DEFAULT",
+        1 => "INTERNAL",
+        2 => "HIDDEN",
+        3 => "PROTECTED",
+        _ => "OTHER",
+    }
+}
+
+pub(super) fn split_relocation_info(is_64: bool, info: u64) -> (u64, u64) {
+    if is_64 {
+        (info >> 32, info & 0xffff_ffff)
+    } else {
+        (info >> 8, info & 0xff)
+    }
+}
+
+pub(super) fn relocation_type_label(machine: u16, is_64: bool, reloc_type: u32) -> &'static str {
+    match (machine, is_64, reloc_type) {
+        (0x3e, true, 0) => "R_X86_64_NONE",
+        (0x3e, true, 1) => "R_X86_64_64",
+        (0x3e, true, 2) => "R_X86_64_PC32",
+        (0x3e, true, 6) => "R_X86_64_GLOB_DAT",
+        (0x3e, true, 7) => "R_X86_64_JUMP_SLOT",
+        (0x3e, true, 8) => "R_X86_64_RELATIVE",
+        (0x3e, true, 10) => "R_X86_64_32",
+        (0x3e, true, 11) => "R_X86_64_32S",
+        (0x03, false, 0) => "R_386_NONE",
+        (0x03, false, 1) => "R_386_32",
+        (0x03, false, 2) => "R_386_PC32",
+        (0x03, false, 6) => "R_386_GLOB_DAT",
+        (0x03, false, 7) => "R_386_JMP_SLOT",
+        (0x03, false, 8) => "R_386_RELATIVE",
+        (0xb7, true, 257) => "R_AARCH64_ABS64",
+        (0xb7, true, 1025) => "R_AARCH64_GLOB_DAT",
+        (0xb7, true, 1026) => "R_AARCH64_JUMP_SLOT",
+        (0xb7, true, 1027) => "R_AARCH64_RELATIVE",
+        (0xf3, true, 0) => "R_RISCV_NONE",
+        (0xf3, true, 1) => "R_RISCV_32",
+        (0xf3, true, 2) => "R_RISCV_64",
+        (0xf3, true, 3) => "R_RISCV_RELATIVE",
+        _ => "UNKNOWN",
+    }
+}

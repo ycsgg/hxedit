@@ -5,7 +5,9 @@ use tempfile::tempdir;
 use super::{
     detect_with_cap, DT_NEEDED, DT_NULL, DT_SONAME, ELF64_EHDR_SIZE, ELF64_PHDR_SIZE,
     ELF64_SHDR_SIZE, ELF_MAGIC, GNU_PROPERTY_X86_FEATURE_1_AND, NT_GNU_PROPERTY_TYPE_0, PT_DYNAMIC,
-    PT_GNU_PROPERTY, PT_INTERP, PT_LOAD, PT_NOTE, SHT_DYNAMIC, SHT_NOTE, SHT_PROGBITS, SHT_STRTAB,
+    PT_GNU_PROPERTY, PT_INTERP, PT_LOAD, PT_NOTE, SHT_DYNAMIC, SHT_DYNSYM, SHT_GNU_HASH,
+    SHT_GNU_VERDEF, SHT_GNU_VERNEED, SHT_GNU_VERSYM, SHT_HASH, SHT_NOTE, SHT_PROGBITS, SHT_RELA,
+    SHT_STRTAB, SHT_SYMTAB,
 };
 use crate::config::Config;
 use crate::core::document::Document;
@@ -270,6 +272,302 @@ fn build_elf64_with_dynamic_and_notes() -> Vec<u8> {
 
     bytes
 }
+fn build_elf64_with_symbols_and_versions() -> Vec<u8> {
+    #[derive(Clone)]
+    struct TestSection {
+        name: &'static str,
+        sh_type: u32,
+        flags: u64,
+        data: Vec<u8>,
+        link: u32,
+        info: u32,
+        addralign: u64,
+        entsize: u64,
+    }
+
+    fn build_strtab(entries: &[&str]) -> (Vec<u8>, Vec<u32>) {
+        let mut bytes = vec![0_u8];
+        let mut offsets = Vec::with_capacity(entries.len());
+        for entry in entries {
+            offsets.push(bytes.len() as u32);
+            bytes.extend_from_slice(entry.as_bytes());
+            bytes.push(0);
+        }
+        (bytes, offsets)
+    }
+
+    fn push_sym64(
+        buf: &mut Vec<u8>,
+        st_name: u32,
+        st_info: u8,
+        st_other: u8,
+        st_shndx: u16,
+        st_value: u64,
+        st_size: u64,
+    ) {
+        buf.extend_from_slice(&st_name.to_le_bytes());
+        buf.push(st_info);
+        buf.push(st_other);
+        buf.extend_from_slice(&st_shndx.to_le_bytes());
+        buf.extend_from_slice(&st_value.to_le_bytes());
+        buf.extend_from_slice(&st_size.to_le_bytes());
+    }
+
+    fn push_rela64(buf: &mut Vec<u8>, r_offset: u64, sym_index: u32, reloc_type: u32) {
+        let r_info = ((sym_index as u64) << 32) | reloc_type as u64;
+        buf.extend_from_slice(&r_offset.to_le_bytes());
+        buf.extend_from_slice(&r_info.to_le_bytes());
+        buf.extend_from_slice(&0_i64.to_le_bytes());
+    }
+
+    let (strtab, strtab_offsets) = build_strtab(&["local_func"]);
+    let local_func_name = strtab_offsets[0];
+
+    let (dynstr, dynstr_offsets) = build_strtab(&["libc.so.6", "puts", "GLIBC_2.2.5", "sample"]);
+    let libc_name = dynstr_offsets[0];
+    let puts_name = dynstr_offsets[1];
+    let glibc_ver = dynstr_offsets[2];
+    let sample_name = dynstr_offsets[3];
+
+    let mut symtab = Vec::new();
+    push_sym64(&mut symtab, 0, 0, 0, 0, 0, 0);
+    push_sym64(&mut symtab, local_func_name, 0x02, 0x00, 0, 0x401000, 4);
+
+    let mut dynsym = Vec::new();
+    push_sym64(&mut dynsym, 0, 0, 0, 0, 0, 0);
+    push_sym64(&mut dynsym, puts_name, 0x12, 0x00, 0, 0, 0);
+
+    let mut rela = Vec::new();
+    push_rela64(&mut rela, 0x404000, 1, 7);
+
+    let mut sysv_hash = Vec::new();
+    sysv_hash.extend_from_slice(&1_u32.to_le_bytes());
+    sysv_hash.extend_from_slice(&2_u32.to_le_bytes());
+    sysv_hash.extend_from_slice(&1_u32.to_le_bytes());
+    sysv_hash.extend_from_slice(&0_u32.to_le_bytes());
+    sysv_hash.extend_from_slice(&0_u32.to_le_bytes());
+
+    let mut gnu_hash = Vec::new();
+    gnu_hash.extend_from_slice(&1_u32.to_le_bytes());
+    gnu_hash.extend_from_slice(&1_u32.to_le_bytes());
+    gnu_hash.extend_from_slice(&1_u32.to_le_bytes());
+    gnu_hash.extend_from_slice(&6_u32.to_le_bytes());
+    gnu_hash.extend_from_slice(&1_u64.to_le_bytes());
+    gnu_hash.extend_from_slice(&1_u32.to_le_bytes());
+    gnu_hash.extend_from_slice(&0x1234_5678_u32.to_le_bytes());
+
+    let mut verdef = Vec::new();
+    verdef.extend_from_slice(&1_u16.to_le_bytes());
+    verdef.extend_from_slice(&0_u16.to_le_bytes());
+    verdef.extend_from_slice(&1_u16.to_le_bytes());
+    verdef.extend_from_slice(&1_u16.to_le_bytes());
+    verdef.extend_from_slice(&0x1111_u32.to_le_bytes());
+    verdef.extend_from_slice(&20_u32.to_le_bytes());
+    verdef.extend_from_slice(&0_u32.to_le_bytes());
+    verdef.extend_from_slice(&sample_name.to_le_bytes());
+    verdef.extend_from_slice(&0_u32.to_le_bytes());
+
+    let mut verneed = Vec::new();
+    verneed.extend_from_slice(&1_u16.to_le_bytes());
+    verneed.extend_from_slice(&1_u16.to_le_bytes());
+    verneed.extend_from_slice(&libc_name.to_le_bytes());
+    verneed.extend_from_slice(&16_u32.to_le_bytes());
+    verneed.extend_from_slice(&0_u32.to_le_bytes());
+    verneed.extend_from_slice(&0x2222_u32.to_le_bytes());
+    verneed.extend_from_slice(&0_u16.to_le_bytes());
+    verneed.extend_from_slice(&2_u16.to_le_bytes());
+    verneed.extend_from_slice(&glibc_ver.to_le_bytes());
+    verneed.extend_from_slice(&0_u32.to_le_bytes());
+
+    let mut versym = Vec::new();
+    versym.extend_from_slice(&1_u16.to_le_bytes());
+    versym.extend_from_slice(&2_u16.to_le_bytes());
+
+    let mut shstrtab = vec![0_u8];
+    let mut sh_name_offsets = Vec::new();
+    for name in [
+        ".shstrtab",
+        ".strtab",
+        ".symtab",
+        ".dynstr",
+        ".dynsym",
+        ".rela.plt",
+        ".hash",
+        ".gnu.hash",
+        ".gnu.version_d",
+        ".gnu.version_r",
+        ".gnu.version",
+    ] {
+        sh_name_offsets.push(shstrtab.len() as u32);
+        shstrtab.extend_from_slice(name.as_bytes());
+        shstrtab.push(0);
+    }
+
+    let sections = vec![
+        TestSection {
+            name: ".shstrtab",
+            sh_type: SHT_STRTAB,
+            flags: 0,
+            data: shstrtab.clone(),
+            link: 0,
+            info: 0,
+            addralign: 1,
+            entsize: 0,
+        },
+        TestSection {
+            name: ".strtab",
+            sh_type: SHT_STRTAB,
+            flags: 0,
+            data: strtab,
+            link: 0,
+            info: 0,
+            addralign: 1,
+            entsize: 0,
+        },
+        TestSection {
+            name: ".symtab",
+            sh_type: SHT_SYMTAB,
+            flags: 0,
+            data: symtab,
+            link: 2,
+            info: 1,
+            addralign: 8,
+            entsize: 24,
+        },
+        TestSection {
+            name: ".dynstr",
+            sh_type: SHT_STRTAB,
+            flags: 0x2,
+            data: dynstr,
+            link: 0,
+            info: 0,
+            addralign: 1,
+            entsize: 0,
+        },
+        TestSection {
+            name: ".dynsym",
+            sh_type: SHT_DYNSYM,
+            flags: 0x2,
+            data: dynsym,
+            link: 4,
+            info: 1,
+            addralign: 8,
+            entsize: 24,
+        },
+        TestSection {
+            name: ".rela.plt",
+            sh_type: SHT_RELA,
+            flags: 0x2,
+            data: rela,
+            link: 5,
+            info: 0,
+            addralign: 8,
+            entsize: 24,
+        },
+        TestSection {
+            name: ".hash",
+            sh_type: SHT_HASH,
+            flags: 0x2,
+            data: sysv_hash,
+            link: 5,
+            info: 0,
+            addralign: 4,
+            entsize: 4,
+        },
+        TestSection {
+            name: ".gnu.hash",
+            sh_type: SHT_GNU_HASH,
+            flags: 0x2,
+            data: gnu_hash,
+            link: 5,
+            info: 0,
+            addralign: 8,
+            entsize: 0,
+        },
+        TestSection {
+            name: ".gnu.version_d",
+            sh_type: SHT_GNU_VERDEF,
+            flags: 0x2,
+            data: verdef,
+            link: 4,
+            info: 0,
+            addralign: 4,
+            entsize: 0,
+        },
+        TestSection {
+            name: ".gnu.version_r",
+            sh_type: SHT_GNU_VERNEED,
+            flags: 0x2,
+            data: verneed,
+            link: 4,
+            info: 0,
+            addralign: 4,
+            entsize: 0,
+        },
+        TestSection {
+            name: ".gnu.version",
+            sh_type: SHT_GNU_VERSYM,
+            flags: 0x2,
+            data: versym,
+            link: 5,
+            info: 0,
+            addralign: 2,
+            entsize: 2,
+        },
+    ];
+
+    let mut offset = 0x100usize;
+    let mut placements = Vec::new();
+    for section in &sections {
+        let align = section.addralign.max(1) as usize;
+        offset = offset.div_ceil(align) * align;
+        placements.push(offset);
+        offset += section.data.len();
+    }
+
+    let shoff = offset.div_ceil(0x40) * 0x40;
+    let total_len = shoff + (sections.len() + 1) * SHDR_SIZE;
+    let mut bytes = vec![0_u8; total_len];
+
+    bytes[0..4].copy_from_slice(&ELF_MAGIC);
+    bytes[4] = 2;
+    bytes[5] = 1;
+    bytes[6] = 1;
+    write_u16_le(&mut bytes, 16, 3);
+    write_u16_le(&mut bytes, 18, 0x3e);
+    write_u32_le(&mut bytes, 20, 1);
+    write_u64_le(&mut bytes, 40, shoff as u64);
+    write_u16_le(&mut bytes, 52, HEADER_SIZE as u16);
+    write_u16_le(&mut bytes, 54, 0);
+    write_u16_le(&mut bytes, 56, 0);
+    write_u16_le(&mut bytes, 58, SHDR_SIZE as u16);
+    write_u16_le(&mut bytes, 60, (sections.len() + 1) as u16);
+    write_u16_le(&mut bytes, 62, 1);
+
+    for (section, &section_offset) in sections.iter().zip(&placements) {
+        bytes[section_offset..section_offset + section.data.len()].copy_from_slice(&section.data);
+    }
+
+    for (index, section) in sections.iter().enumerate() {
+        let sh = shoff + SHDR_SIZE * (index + 1);
+        let sh_name = sh_name_offsets
+            .iter()
+            .zip(sections.iter().map(|section| section.name))
+            .find_map(|(offset, name)| (name == section.name).then_some(*offset))
+            .unwrap();
+        write_u32_le(&mut bytes, sh, sh_name);
+        write_u32_le(&mut bytes, sh + 4, section.sh_type);
+        write_u64_le(&mut bytes, sh + 8, section.flags);
+        write_u64_le(&mut bytes, sh + 24, placements[index] as u64);
+        write_u64_le(&mut bytes, sh + 32, section.data.len() as u64);
+        write_u32_le(&mut bytes, sh + 40, section.link);
+        write_u32_le(&mut bytes, sh + 44, section.info);
+        write_u64_le(&mut bytes, sh + 48, section.addralign);
+        write_u64_le(&mut bytes, sh + 56, section.entsize);
+    }
+
+    bytes
+}
 
 fn write_elf(path: &std::path::Path, bytes: &[u8]) -> Document {
     fs::write(path, bytes).unwrap();
@@ -374,4 +672,35 @@ fn parses_gnu_property_notes() {
 
     let property = find_struct(&structs, "GNU_PROPERTY_X86_FEATURE_1_AND").expect("gnu property");
     assert!(property.name.contains("Property 0"));
+}
+
+#[test]
+fn parses_symbols_strings_and_relocations() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("symbols.elf");
+    let mut doc = write_elf(&path, &build_elf64_with_symbols_and_versions());
+
+    let def = format::detect::detect_format_with_cap(&mut doc, 32).expect("ELF detected");
+    let structs = format::parse::parse_format(&def, &mut doc).expect("parse succeeds");
+
+    assert!(find_struct(&structs, "String 0x1: local_func").is_some());
+    assert!(find_struct(&structs, "Symbol 1: local_func [FUNC/LOCAL/DEFAULT]").is_some());
+    assert!(find_struct(&structs, "Symbol 1: puts [FUNC/GLOBAL/DEFAULT]").is_some());
+    assert!(find_struct(&structs, "Relocation 0: R_X86_64_JUMP_SLOT -> puts").is_some());
+}
+
+#[test]
+fn parses_hash_and_version_sections() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("versions.elf");
+    let mut doc = write_elf(&path, &build_elf64_with_symbols_and_versions());
+
+    let def = format::detect::detect_format_with_cap(&mut doc, 32).expect("ELF detected");
+    let structs = format::parse::parse_format(&def, &mut doc).expect("parse succeeds");
+
+    assert!(find_struct(&structs, "SysV Hash").is_some());
+    assert!(find_struct(&structs, "GNU Hash").is_some());
+    assert!(find_struct(&structs, "Verneed 0: libc.so.6").is_some());
+    assert!(find_struct(&structs, "Verdaux: sample").is_some());
+    assert!(find_struct(&structs, "Versym 1: puts -> GLIBC_2.2.5").is_some());
 }

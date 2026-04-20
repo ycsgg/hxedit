@@ -219,7 +219,7 @@ impl ElfParser<'_> {
                 },
                 FieldDef {
                     name: "sh_flags".into(),
-                    offset: if self.is_64 { 8 } else { 8 },
+                    offset: 8,
                     field_type: FieldType::Flags {
                         inner: Box::new(word_t.clone()),
                         flags: section_flag_variants(),

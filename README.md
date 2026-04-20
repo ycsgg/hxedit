@@ -182,7 +182,8 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 
 - Supports ELF, PNG, and ZIP formats
 - Works best on a wide terminal; shows a warning if the terminal is too narrow
-- Nested sections (e.g. ELF Program Headers) are collapsed by default; use `Space` / `Enter` on a header to expand
+- ELF currently covers headers, program/section tables, dynamic tags, notes/GNU properties, symbols, relocations, hash tables, and version metadata
+- Nested sections (e.g. ELF Program Headers / Section Header Table children) are collapsed by default; use `Space` / `Enter` on a header to expand
 - The currently selected inspector field highlights its byte range in the hex grid
 - Editable fields can be modified, but PNG/ZIP edits show warnings since structure consistency is not automatically repaired
 - Read-only fields report that they are view-only

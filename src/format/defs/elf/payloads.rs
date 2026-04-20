@@ -84,6 +84,54 @@ impl ElfParser<'_> {
             }
         }
 
+        if section.sh_type == SHT_STRTAB {
+            if let Some(strings) = self.build_string_table_struct(section) {
+                children.push(strings);
+            }
+        }
+
+        if matches!(section.sh_type, SHT_SYMTAB | SHT_DYNSYM) {
+            if let Some(symbols) = self.build_symbol_table_struct(section, sections) {
+                children.push(symbols);
+            }
+        }
+
+        if matches!(section.sh_type, SHT_REL | SHT_RELA) {
+            if let Some(relocations) = self.build_relocation_table_struct(section, sections) {
+                children.push(relocations);
+            }
+        }
+
+        if section.sh_type == SHT_HASH {
+            if let Some(hash) = self.build_sysv_hash_struct(section) {
+                children.push(hash);
+            }
+        }
+
+        if section.sh_type == SHT_GNU_HASH {
+            if let Some(hash) = self.build_gnu_hash_struct(section) {
+                children.push(hash);
+            }
+        }
+
+        if section.sh_type == SHT_GNU_VERNEED {
+            if let Some(verneed) = self.build_verneed_struct(section, sections) {
+                children.push(verneed);
+            }
+        }
+
+        if section.sh_type == SHT_GNU_VERDEF {
+            if let Some(verdef) = self.build_verdef_struct(section, sections) {
+                children.push(verdef);
+            }
+        }
+
+        if section.sh_type == SHT_GNU_VERSYM {
+            if let Some(versym) = self.build_versym_struct(section, sections) {
+                children.push(versym);
+            }
+        }
+
         children
     }
 

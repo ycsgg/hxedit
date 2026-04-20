@@ -124,10 +124,37 @@ struct SectionHeaderInfo {
     entsize: u64,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct SymbolInfo {
+    index: usize,
+    entry_offset: u64,
+    name_offset: u32,
+    name: String,
+    info: u8,
+    other: u8,
+    shndx: u16,
+    value: u64,
+    size: u64,
+}
+
+struct HeaderSummary {
+    fields: Vec<FieldDef>,
+    phoff: u64,
+    phnum: usize,
+    phentsize: u64,
+    shoff: u64,
+    shnum: usize,
+    shentsize: u64,
+    shstrndx: usize,
+}
+
 mod header;
 mod layout;
 mod payloads;
 mod structures;
+mod symbols;
+mod versions;
 
 use layout::*;
 
@@ -187,23 +214,32 @@ impl<'a> ElfParser<'a> {
             return None;
         }
 
-        let (fields, phoff, phnum, phentsize, shoff, shnum, shentsize, shstrndx) =
-            self.build_header_fields()?;
+        let header = self.build_header_fields()?;
 
-        let program_headers = self.parse_program_headers(phoff, phnum, phentsize);
-        let section_headers = self.parse_section_headers(shoff, shnum, shentsize, shstrndx);
+        let program_headers =
+            self.parse_program_headers(header.phoff, header.phnum, header.phentsize);
+        let section_headers = self.parse_section_headers(
+            header.shoff,
+            header.shnum,
+            header.shentsize,
+            header.shstrndx,
+        );
 
         let mut children = Vec::new();
         if !program_headers.is_empty() {
             children.push(self.build_program_header_table(
-                phoff,
-                phnum,
+                header.phoff,
+                header.phnum,
                 &program_headers,
                 &section_headers,
             ));
         }
         if !section_headers.is_empty() {
-            children.push(self.build_section_header_table(shoff, shnum, &section_headers));
+            children.push(self.build_section_header_table(
+                header.shoff,
+                header.shnum,
+                &section_headers,
+            ));
         }
 
         Some(FormatDef {
@@ -216,7 +252,7 @@ impl<'a> ElfParser<'a> {
                 }
                 .to_string(),
                 base_offset: 0,
-                fields,
+                fields: header.fields,
                 children,
             }],
         })
@@ -255,6 +291,20 @@ impl<'a> ElfParser<'a> {
             self.u64_t()
         } else {
             self.u32_t()
+        }
+    }
+
+    fn sword_t(&self) -> FieldType {
+        if self.is_64 {
+            if self.is_le {
+                FieldType::I64Le
+            } else {
+                FieldType::I64Be
+            }
+        } else if self.is_le {
+            FieldType::I32Le
+        } else {
+            FieldType::I32Be
         }
     }
 

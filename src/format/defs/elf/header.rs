@@ -1,9 +1,7 @@
 use super::*;
 
 impl ElfParser<'_> {
-    pub(super) fn build_header_fields(
-        &mut self,
-    ) -> Option<(Vec<FieldDef>, u64, usize, u64, u64, usize, u64, usize)> {
+    pub(super) fn build_header_fields(&mut self) -> Option<HeaderSummary> {
         let u16_t = self.u16_t();
         let u32_t = self.u32_t();
         let u64_t = self.u64_t();
@@ -267,9 +265,16 @@ impl ElfParser<'_> {
             )
         };
 
-        Some((
-            fields, phoff, phnum, phentsize, shoff, shnum, shentsize, shstrndx,
-        ))
+        Some(HeaderSummary {
+            fields,
+            phoff,
+            phnum,
+            phentsize,
+            shoff,
+            shnum,
+            shentsize,
+            shstrndx,
+        })
     }
 
     pub(super) fn parse_program_headers(
