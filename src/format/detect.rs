@@ -3,9 +3,9 @@ use crate::format::defs;
 use crate::format::types::FormatDef;
 
 /// Default per-format entry cap used when the UI layer has not requested a
-/// higher value. 64 keeps ELF Program Header Table / PNG chunk count /
-/// ZIP local file header lists at a manageable inspector height on first
-/// open; `:insp more` raises it in batches.
+/// higher value. 64 keeps ELF repeated tables / PNG chunk count / ZIP local
+/// file header lists at a manageable inspector height on first open;
+/// `:insp more` raises it in batches.
 pub const DEFAULT_ENTRY_CAP: usize = 64;
 
 /// Try to auto-detect the file format.
@@ -17,9 +17,9 @@ pub fn detect_format(doc: &mut Document) -> Option<FormatDef> {
 }
 
 /// Like `detect_format`, but threads a per-format entry cap through to parsers
-/// that support pagination (PNG / ZIP). ELF currently ignores the cap.
+/// that support pagination (ELF / PNG / ZIP).
 pub fn detect_format_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef> {
-    if let Some(def) = defs::elf::detect(doc) {
+    if let Some(def) = defs::elf::detect_with_cap(doc, entry_cap) {
         return Some(def);
     }
     if let Some(def) = defs::png::detect_with_cap(doc, entry_cap) {
@@ -42,7 +42,7 @@ pub fn detect_by_name_with_cap(
     entry_cap: usize,
 ) -> Option<FormatDef> {
     match name.to_lowercase().as_str() {
-        "elf" => defs::elf::detect(doc),
+        "elf" => defs::elf::detect_with_cap(doc, entry_cap),
         "png" => defs::png::detect_with_cap(doc, entry_cap),
         "zip" => defs::zip::detect_with_cap(doc, entry_cap),
         _ => None,

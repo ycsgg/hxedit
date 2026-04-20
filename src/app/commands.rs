@@ -2,6 +2,7 @@ use crate::app::{App, EditOp, ReplacementChange, SearchDirection, SearchKind, Se
 use crate::commands::parser::parse_command;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::error::{HxError, HxResult};
+use crate::format::parse::StructValue;
 use crate::mode::Mode;
 
 #[derive(Debug, Clone, Copy)]
@@ -460,12 +461,7 @@ impl App {
         let more_pending = self
             .inspector
             .as_ref()
-            .map(|state| {
-                state
-                    .structs
-                    .iter()
-                    .any(|s| s.name.starts_with('…') && s.name.contains("more"))
-            })
+            .map(|state| has_pending_more_marker(&state.structs))
             .unwrap_or(false);
         if more_pending {
             self.set_info_status(format!(
@@ -566,6 +562,13 @@ impl App {
         }
         Ok(())
     }
+}
+
+fn has_pending_more_marker(structs: &[StructValue]) -> bool {
+    structs.iter().any(|structure| {
+        (structure.name.starts_with('…') && structure.name.contains("more"))
+            || has_pending_more_marker(&structure.children)
+    })
 }
 
 fn repeated_pattern(pattern: &[u8], len: usize) -> Vec<u8> {

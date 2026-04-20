@@ -88,6 +88,102 @@ fn app_with_inspector_field(bytes: &[u8], offset: u64, size: usize) -> App {
     app
 }
 
+fn build_paginated_elf64(section_count: usize) -> Vec<u8> {
+    const EHDR_SIZE: usize = 64;
+    const PHDR_OFFSET: usize = EHDR_SIZE;
+    const PHDR_SIZE: usize = 56;
+    const SHDR_OFFSET: usize = 0x200;
+    const SHDR_SIZE: usize = 64;
+    const SHSTRTAB_OFFSET: usize = 0x120;
+    const TEXT_OFFSET: usize = 0x100;
+
+    fn write_u16_le(buf: &mut [u8], offset: usize, value: u16) {
+        buf[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_u32_le(buf: &mut [u8], offset: usize, value: u32) {
+        buf[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_u64_le(buf: &mut [u8], offset: usize, value: u64) {
+        buf[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    let names: Vec<String> = std::iter::once(".shstrtab".to_owned())
+        .chain(std::iter::once(".text".to_owned()))
+        .chain((0..section_count.saturating_sub(3)).map(|idx| format!(".extra_{idx}")))
+        .collect();
+
+    let mut strtab = vec![0_u8];
+    let mut name_offsets = Vec::with_capacity(names.len());
+    for name in &names {
+        let start = strtab.len() as u32;
+        strtab.extend_from_slice(name.as_bytes());
+        strtab.push(0);
+        name_offsets.push(start);
+    }
+
+    let total_sections = 1 + names.len();
+    let total_len = SHDR_OFFSET + total_sections * SHDR_SIZE;
+    let mut bytes = vec![0_u8; total_len.max(SHSTRTAB_OFFSET + strtab.len())];
+
+    bytes[0..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
+    bytes[4] = 2;
+    bytes[5] = 1;
+    bytes[6] = 1;
+
+    write_u16_le(&mut bytes, 16, 2);
+    write_u16_le(&mut bytes, 18, 0x3e);
+    write_u32_le(&mut bytes, 20, 1);
+    write_u64_le(&mut bytes, 24, 0x401000);
+    write_u64_le(&mut bytes, 32, PHDR_OFFSET as u64);
+    write_u64_le(&mut bytes, 40, SHDR_OFFSET as u64);
+    write_u16_le(&mut bytes, 52, EHDR_SIZE as u16);
+    write_u16_le(&mut bytes, 54, PHDR_SIZE as u16);
+    write_u16_le(&mut bytes, 56, 1);
+    write_u16_le(&mut bytes, 58, SHDR_SIZE as u16);
+    write_u16_le(&mut bytes, 60, total_sections as u16);
+    write_u16_le(&mut bytes, 62, 1);
+
+    write_u32_le(&mut bytes, PHDR_OFFSET, 1);
+    write_u32_le(&mut bytes, PHDR_OFFSET + 4, 0x5);
+    write_u64_le(&mut bytes, PHDR_OFFSET + 8, TEXT_OFFSET as u64);
+    write_u64_le(&mut bytes, PHDR_OFFSET + 16, 0x401000);
+    write_u64_le(&mut bytes, PHDR_OFFSET + 24, 0x401000);
+    write_u64_le(&mut bytes, PHDR_OFFSET + 32, 4);
+    write_u64_le(&mut bytes, PHDR_OFFSET + 40, 4);
+    write_u64_le(&mut bytes, PHDR_OFFSET + 48, 0x1000);
+
+    bytes[TEXT_OFFSET..TEXT_OFFSET + 4].copy_from_slice(&[0x90, 0x90, 0x90, 0xc3]);
+    bytes[SHSTRTAB_OFFSET..SHSTRTAB_OFFSET + strtab.len()].copy_from_slice(&strtab);
+
+    let shstrtab = SHDR_OFFSET + SHDR_SIZE;
+    write_u32_le(&mut bytes, shstrtab, name_offsets[0]);
+    write_u32_le(&mut bytes, shstrtab + 4, 3);
+    write_u64_le(&mut bytes, shstrtab + 24, SHSTRTAB_OFFSET as u64);
+    write_u64_le(&mut bytes, shstrtab + 32, strtab.len() as u64);
+    write_u64_le(&mut bytes, shstrtab + 48, 1);
+
+    let text = SHDR_OFFSET + SHDR_SIZE * 2;
+    write_u32_le(&mut bytes, text, name_offsets[1]);
+    write_u32_le(&mut bytes, text + 4, 1);
+    write_u64_le(&mut bytes, text + 8, 0x6);
+    write_u64_le(&mut bytes, text + 16, 0x401000);
+    write_u64_le(&mut bytes, text + 24, TEXT_OFFSET as u64);
+    write_u64_le(&mut bytes, text + 32, 4);
+    write_u64_le(&mut bytes, text + 48, 16);
+
+    for (idx, name_offset) in name_offsets.iter().enumerate().skip(2) {
+        let header = SHDR_OFFSET + SHDR_SIZE * (idx + 1);
+        write_u32_le(&mut bytes, header, *name_offset);
+        write_u32_le(&mut bytes, header + 4, 1);
+        write_u64_le(&mut bytes, header + 8, 0x2);
+        write_u64_le(&mut bytes, header + 48, 1);
+    }
+
+    bytes
+}
+
 #[test]
 fn app_falls_back_to_readonly_when_write_open_is_denied() {
     let dir = tempdir().unwrap();
@@ -212,6 +308,20 @@ fn readonly_mode_allows_save_as_new_path() {
 
     assert_eq!(fs::read(&target).unwrap(), [0x11_u8, 0x22]);
     assert!(app.document.is_readonly());
+}
+
+#[test]
+fn inspector_more_detects_nested_elf_pagination_markers() {
+    let mut app = app_with_bytes(&build_paginated_elf64(70));
+    app.show_inspector = true;
+    app.inspector_format_override = Some("elf".to_owned());
+    app.inspector_entry_cap = 1;
+    app.refresh_inspector();
+
+    app.execute_command(Command::InspectorMore).unwrap();
+
+    assert_eq!(app.status_level, StatusLevel::Info);
+    assert!(app.status_message.contains("more entries still pending"));
 }
 
 #[test]

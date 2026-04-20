@@ -56,9 +56,10 @@ pub fn hint_for(input: &str) -> CommandHint {
                     "insp | inspector | insp more".to_owned()
                 },
                 details: if is_more {
-                    "reveal the next batch of PNG / ZIP entries beyond the current cap".to_owned()
+                    "reveal the next batch of ELF / PNG / ZIP entries beyond the current cap"
+                        .to_owned()
                 } else {
-                    "toggle format inspector panel; `:insp more` reveals the next batch of paginated entries (PNG / ZIP)".to_owned()
+                    "toggle format inspector panel; `:insp more` reveals the next batch of paginated entries (ELF / PNG / ZIP)".to_owned()
                 },
             }
         }
