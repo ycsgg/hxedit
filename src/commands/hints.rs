@@ -56,15 +56,15 @@ pub fn hint_for(input: &str) -> CommandHint {
                     "insp | inspector | insp more".to_owned()
                 },
                 details: if is_more {
-                    "reveal the next batch of ELF / PNG / ZIP entries beyond the current cap"
+                    "reveal the next batch of paginated inspector entries beyond the current cap"
                         .to_owned()
                 } else {
-                    "toggle format inspector panel; `:insp more` reveals the next batch of paginated entries (ELF / PNG / ZIP)".to_owned()
+                    "toggle format inspector panel; `:insp more` reveals the next batch of paginated entries when a format uses capped lists".to_owned()
                 },
             }
         }
         "format" => CommandHint {
-            syntax: "format [elf|png|zip]".to_owned(),
+            syntax: "format [elf|png|zip|gzip]".to_owned(),
             details: "auto-detect format when omitted, or force a built-in inspector".to_owned(),
         },
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"

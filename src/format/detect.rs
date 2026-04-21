@@ -28,6 +28,9 @@ pub fn detect_format_with_cap(doc: &mut Document, entry_cap: usize) -> Option<Fo
     if let Some(def) = defs::zip::detect_with_cap(doc, entry_cap) {
         return Some(def);
     }
+    if let Some(def) = defs::gzip::detect_with_cap(doc, entry_cap) {
+        return Some(def);
+    }
     None
 }
 
@@ -45,6 +48,7 @@ pub fn detect_by_name_with_cap(
         "elf" => defs::elf::detect_with_cap(doc, entry_cap),
         "png" => defs::png::detect_with_cap(doc, entry_cap),
         "zip" => defs::zip::detect_with_cap(doc, entry_cap),
+        "gzip" | "gz" => defs::gzip::detect_with_cap(doc, entry_cap),
         _ => None,
     }
 }
