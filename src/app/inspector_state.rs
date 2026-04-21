@@ -326,7 +326,7 @@ impl App {
             InspectorRow::Header { .. } => return,
         };
         self.cursor = abs_offset;
-        self.ensure_cursor_visible();
+        self.center_cursor_in_view();
     }
 
     /// Ensure the selected inspector row stays within the visible panel window.

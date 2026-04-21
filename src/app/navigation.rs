@@ -44,6 +44,27 @@ impl App {
         self.viewport_top = align_offset(self.viewport_top, self.config.bytes_per_line);
     }
 
+    pub(crate) fn center_cursor_in_view(&mut self) {
+        if self.document.is_empty() {
+            self.viewport_top = 0;
+            return;
+        }
+        let row_size = self.config.bytes_per_line as u64;
+        let cursor_row = align_offset(self.cursor_anchor_offset(), self.config.bytes_per_line);
+        let visible_rows = self.visible_rows();
+        let bottom = self.viewport_top + visible_rows.saturating_sub(1) * row_size;
+        if cursor_row >= self.viewport_top && cursor_row <= bottom {
+            return;
+        }
+        let center_rows = visible_rows / 2;
+        let max_top = self.max_viewport_top();
+        self.viewport_top = align_offset(
+            cursor_row.saturating_sub(center_rows.saturating_mul(row_size)),
+            self.config.bytes_per_line,
+        )
+        .min(max_top);
+    }
+
     pub(crate) fn scroll_viewport(&mut self, rows: i64) {
         if self.document.is_empty() {
             return;

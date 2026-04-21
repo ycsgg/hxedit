@@ -239,6 +239,32 @@ fn scroll_viewport_stops_at_last_page() {
 }
 
 #[test]
+fn inspector_jump_centers_target_row_in_hex_view() {
+    let bytes = vec![0_u8; 256];
+    let mut app = app_with_inspector_field(&bytes, 160, 1);
+    app.cursor = 0;
+    app.viewport_top = 0;
+
+    app.sync_cursor_to_inspector();
+
+    assert_eq!(app.cursor, 160);
+    assert_eq!(app.viewport_top, 128);
+}
+
+#[test]
+fn inspector_jump_keeps_viewport_when_target_is_already_visible() {
+    let bytes = vec![0_u8; 256];
+    let mut app = app_with_inspector_field(&bytes, 160, 1);
+    app.cursor = 0;
+    app.viewport_top = 128;
+
+    app.sync_cursor_to_inspector();
+
+    assert_eq!(app.cursor, 160);
+    assert_eq!(app.viewport_top, 128);
+}
+
+#[test]
 fn edit_mode_undo_restores_previous_nibble_state() {
     let mut app = app_with_len(16);
     app.mode = Mode::EditHex {
