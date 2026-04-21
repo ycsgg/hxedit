@@ -614,6 +614,17 @@ mod tests {
     }
 
     #[test]
+    fn inspector_warns_when_editing_jpeg_field() {
+        let mut app = app_with_inspector_field_for("JPEG");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("JPEG inspector edits"));
+    }
+
+    #[test]
     fn hidden_inspector_focus_falls_back_to_normal_mode() {
         let mut app = app_with_inspector_field();
         app.last_columns = Some(crate::view::layout::MainColumns {
@@ -697,7 +708,9 @@ mod tests {
         assert!(app.show_inspector);
         assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
         assert!(app.status_message.contains("no format detected"));
-        assert!(app.status_message.contains("ELF / PNG / ZIP / GZIP / TAR"));
+        assert!(app
+            .status_message
+            .contains("ELF / PNG / ZIP / GZIP / TAR / JPEG"));
     }
 
     #[test]
