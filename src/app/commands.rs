@@ -268,6 +268,11 @@ impl App {
                     .to_owned(),
             ));
         }
+        if matches!(self.main_view, crate::app::MainView::Disassembly(_)) && allow_resize {
+            return Err(HxError::DisassemblyUnavailable(
+                "view is overwrite-only; use :re without ! for equal-length replace".to_owned(),
+            ));
+        }
         if self.document.is_empty() {
             self.set_info_status("replace: no matches");
             return Ok(());
