@@ -122,6 +122,7 @@ mod tests {
 
     fn columns() -> MainColumns {
         MainColumns {
+            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
             gutter: Rect::new(0, 0, 8, 5),
             sep1: Rect::new(8, 0, 1, 5),
             hex: Rect::new(9, 0, 49, 5),

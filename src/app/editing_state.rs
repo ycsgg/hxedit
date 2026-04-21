@@ -6,6 +6,11 @@ impl App {
     /// Delete the byte at cursor (normal) or the entire selection (visual).
     /// Both use tombstone deletion — the cell keeps its display slot.
     pub(crate) fn delete_at_cursor_or_selection(&mut self) -> HxResult<()> {
+        if matches!(self.main_view, crate::app::MainView::Disassembly(_)) {
+            return Err(crate::error::HxError::DisassemblyUnavailable(
+                "view is overwrite-only; use :dis off for layout-changing edits".to_owned(),
+            ));
+        }
         if matches!(self.mode, Mode::Visual) {
             return self.delete_selection();
         }

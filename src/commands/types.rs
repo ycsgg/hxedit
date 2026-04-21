@@ -117,4 +117,8 @@ pub enum Command {
     Hash {
         algorithm: HashAlgorithm,
     },
+    Disassemble {
+        arch: Option<String>,
+    },
+    DisassembleOff,
 }

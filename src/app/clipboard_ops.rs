@@ -188,6 +188,11 @@ impl App {
 
         let mode_label = if insert { "insert-pasted" } else { "pasted" };
 
+        if insert && matches!(self.main_view, crate::app::MainView::Disassembly(_)) {
+            return Err(crate::error::HxError::DisassemblyUnavailable(
+                "view is overwrite-only; use :dis off for layout-changing edits".to_owned(),
+            ));
+        }
         if insert {
             let pasted = self.apply_paste_insert(&bytes)?;
             if pasted == 0 {

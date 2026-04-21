@@ -85,6 +85,13 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 .ok_or_else(|| HxError::InvalidHashAlgorithm(arg.to_owned()))?;
             Ok(Command::Hash { algorithm: algo })
         }
+        "dis" | "disassemble" => match rest.map(str::trim) {
+            None | Some("") => Ok(Command::Disassemble { arch: None }),
+            Some("off") => Ok(Command::DisassembleOff),
+            Some(arg) => Ok(Command::Disassemble {
+                arch: Some(arg.to_owned()),
+            }),
+        },
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
 }

@@ -150,6 +150,8 @@ Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (littl
 | `:hash sha256` | Compute SHA-256 |
 | `:hash sha512` | Compute SHA-512 |
 | `:hash crc32` | Compute CRC32 |
+| `:dis [arch]` | Enter phase-1 disassembly view for recognized ELF / PE / Mach-O executables |
+| `:dis off` | Return from disassembly view to the normal hex/ascii view |
 
 Hashes the active selection (visual or selected inspector field) if active, otherwise the entire file.
 
@@ -161,6 +163,13 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 | `:insp more` | Reveal the next batch of paginated entries beyond the current cap |
 | `:format` | Reset to auto-detected format |
 | `:format elf\|png\|zip\|gzip\|tar\|jpeg` | Force a specific format |
+
+## Disassembly (Phase 1)
+
+- `:dis` currently delivers the stage-1 foundation: executable container detect, arch resolution, main-view switch, and a reviewable placeholder disassembly pane
+- 当前布局已把右侧 instruction text 区域放宽，bytes 列只保留较窄的占位宽度，便于先 review 反汇编主视图方向
+- Current goal is architecture / container plumbing first; full decoded instruction rows, instruction-aware navigation, and overwrite patch refresh will land in later phases
+- Disassembly view is already treated as overwrite-only for layout-changing edits such as insert/delete/paste-insert
 
 ## Status Bar
 

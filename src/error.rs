@@ -32,6 +32,10 @@ pub enum HxError {
     InvalidRedoCount(String),
     #[error("invalid hash algorithm: {0}; supported: md5 sha1 sha256 sha512 crc32")]
     InvalidHashAlgorithm(String),
+    #[error("unknown disassembly arch: {0}")]
+    UnknownDisassemblyArch(String),
+    #[error("disassembly unavailable: {0}")]
+    DisassemblyUnavailable(String),
     #[error("invalid hex pattern: {0}")]
     InvalidHexPattern(String),
     #[error("unknown command: {0}")]

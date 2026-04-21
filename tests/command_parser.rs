@@ -246,3 +246,18 @@ fn parses_hash_commands() {
         }
     );
 }
+
+#[test]
+fn parses_disassembly_commands() {
+    assert_eq!(
+        parse_command("dis").unwrap(),
+        Command::Disassemble { arch: None }
+    );
+    assert_eq!(
+        parse_command("dis x86_64").unwrap(),
+        Command::Disassemble {
+            arch: Some("x86_64".to_owned())
+        }
+    );
+    assert_eq!(parse_command("dis off").unwrap(), Command::DisassembleOff);
+}

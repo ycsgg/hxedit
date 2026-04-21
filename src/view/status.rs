@@ -5,6 +5,7 @@ use crate::mode::Mode;
 use crate::view::palette::Palette;
 
 pub(crate) struct StatusInfo<'a> {
+    pub main_view_label: Option<&'a str>,
     pub mode: Mode,
     pub path: &'a str,
     pub cursor: u64,
@@ -31,6 +32,14 @@ pub(crate) fn build(info: StatusInfo<'_>, palette: &Palette) -> Line<'static> {
         Span::raw("  "),
         Span::styled(format!("vis {}", info.visible_len), palette.status),
     ];
+
+    if let Some(main_view_label) = info.main_view_label {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("view {}", main_view_label),
+            palette.status,
+        ));
+    }
 
     if let Some(selection_span) = info.selection_span {
         spans.push(Span::raw("  "));
@@ -90,6 +99,7 @@ mod tests {
         let palette = Palette::new(ColorLevel::Basic);
         let line = build(
             StatusInfo {
+                main_view_label: None,
                 mode: Mode::EditHex {
                     phase: NibblePhase::High,
                 },
@@ -119,6 +129,7 @@ mod tests {
         let palette = Palette::new(ColorLevel::Basic);
         let line = build(
             StatusInfo {
+                main_view_label: None,
                 mode: Mode::Normal,
                 path: "sample.bin",
                 cursor: 0,
@@ -145,6 +156,7 @@ mod tests {
         let palette = Palette::new(ColorLevel::Basic);
         let line = build(
             StatusInfo {
+                main_view_label: None,
                 mode: Mode::EditHex {
                     phase: NibblePhase::High,
                 },
@@ -174,6 +186,7 @@ mod tests {
         let palette = Palette::new(ColorLevel::NoColor);
         let line = build(
             StatusInfo {
+                main_view_label: Some("DIS"),
                 mode: Mode::Normal,
                 path: "sample.bin",
                 cursor: 0x10,
@@ -197,6 +210,7 @@ mod tests {
             .collect::<String>();
         assert!(text.contains("len 12"));
         assert!(text.contains("vis 10"));
+        assert!(text.contains("view DIS"));
         assert!(text.contains("sel(span) 4"));
         assert!(text.contains("sel(logical) 3"));
     }

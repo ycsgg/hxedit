@@ -12,6 +12,18 @@ impl App {
 
     pub(crate) fn move_vertical(&mut self, rows: i64) {
         self.ensure_insert_pending_committed();
+        if matches!(self.main_view, crate::app::MainView::Disassembly(_)) {
+            self.move_vertical_disassembly(rows);
+            return;
+        }
+        let delta = rows.saturating_mul(self.config.bytes_per_line as i64);
+        self.cursor = self.offset_with_delta(self.cursor, delta);
+        if let Mode::EditHex { ref mut phase } = self.mode {
+            *phase = crate::mode::NibblePhase::High;
+        }
+    }
+
+    fn move_vertical_disassembly(&mut self, rows: i64) {
         let delta = rows.saturating_mul(self.config.bytes_per_line as i64);
         self.cursor = self.offset_with_delta(self.cursor, delta);
         if let Mode::EditHex { ref mut phase } = self.mode {

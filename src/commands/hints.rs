@@ -114,6 +114,17 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
             details: "compute hash of the current selection (visual or selected inspector field), or the entire file if no selection is active".to_owned(),
         },
+        "dis" | "disassemble" => {
+            let syntax = match rest.map(str::trim) {
+                Some("off") => "dis off".to_owned(),
+                Some(arg) if !arg.is_empty() => format!("{name} {arg}"),
+                _ => "dis [x86|x86_64|arm|aarch64|riscv64|off]".to_owned(),
+            };
+            CommandHint {
+                syntax,
+                details: "enter disassembly main view for ELF/PE/Mach-O using detected executable metadata; `dis off` returns to hex view".to_owned(),
+            }
+        }
         other => {
             let suggestions = known_commands()
                 .into_iter()
@@ -252,6 +263,8 @@ fn known_commands() -> Vec<&'static str> {
         "copy",
         "export",
         "hash",
+        "dis",
+        "disassemble",
         "p",
         "paste",
         "p!",

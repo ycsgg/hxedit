@@ -32,19 +32,28 @@ use crate::cli::Cli;
 use crate::config::Config;
 use crate::core::document::Document;
 use crate::core::piece_table::CellId;
+use crate::disasm::DisassemblyState;
 use crate::format::parse::{InspectorRow, NodePath};
 use crate::input::keymap::map_key;
 use crate::mode::Mode;
 use crate::profile::{Profiler, StartupStats};
+use crate::view::layout::MainPaneKind;
 use crate::view::{layout, palette::Palette};
 use navigation::align_offset;
 
 /// Owns the editor runtime: document state, viewport state, and the TUI loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MainView {
+    Hex,
+    Disassembly(DisassemblyState),
+}
+
 pub struct App {
     config: Config,
     document: Document,
     palette: Palette,
     mode: Mode,
+    main_view: MainView,
     cursor: u64,
     viewport_top: u64,
     command_buffer: String,
@@ -57,6 +66,7 @@ pub struct App {
     should_quit: bool,
     view_rows: usize,
     last_columns: Option<layout::MainColumns>,
+    last_main_pane_kind: MainPaneKind,
     last_command_area: Option<Rect>,
     selection_anchor: Option<u64>,
     mouse_selection_anchor: Option<u64>,
@@ -271,6 +281,7 @@ impl App {
             palette: Palette::new(config.color_level),
             viewport_top: align_offset(cursor, config.bytes_per_line),
             mode: Mode::Normal,
+            main_view: MainView::Hex,
             command_buffer: String::new(),
             command_cursor_pos: 0,
             command_history: Vec::new(),
@@ -289,6 +300,7 @@ impl App {
             should_quit: false,
             view_rows: 1,
             last_columns: None,
+            last_main_pane_kind: MainPaneKind::Hex,
             last_command_area: None,
             selection_anchor: None,
             mouse_selection_anchor: None,

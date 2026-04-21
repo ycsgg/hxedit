@@ -1,7 +1,9 @@
 use crate::app::{App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState};
 use crate::commands::parser::parse_command;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
+use crate::disasm::DisassemblyState;
 use crate::error::{HxError, HxResult};
+use crate::executable::{detect_executable_info, override_arch};
 use crate::format::parse::StructValue;
 use crate::mode::Mode;
 
@@ -80,6 +82,11 @@ impl App {
                 self.execute_search_command(SearchKind::Hex, pattern, backward)
             }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
+            Command::Disassemble { arch } => self.execute_disassemble_command(arch.as_deref()),
+            Command::DisassembleOff => {
+                self.execute_disassemble_off_command();
+                Ok(())
+            }
         }
     }
 
@@ -512,6 +519,45 @@ impl App {
         let search = SearchState { kind, pattern };
         self.last_search = Some(search.clone());
         self.run_search(&search, search_direction(backward))
+    }
+
+    fn execute_disassemble_command(&mut self, arch: Option<&str>) -> HxResult<()> {
+        let mut info = detect_executable_info(&mut self.document).ok_or_else(|| {
+            crate::error::HxError::DisassemblyUnavailable(
+                "not a recognized executable container".to_owned(),
+            )
+        })?;
+        if let Some(raw_arch) = arch {
+            info = override_arch(&info, raw_arch)?;
+        }
+        let target = if info.span_containing(self.cursor).is_some() {
+            self.cursor
+        } else if let Some(entry) = info.entry_offset {
+            entry
+        } else if let Some(span) = info.first_executable_span() {
+            span.start
+        } else {
+            0
+        };
+        self.cursor = self.clamp_offset(target);
+        self.main_view = crate::app::MainView::Disassembly(DisassemblyState::new(
+            info.clone(),
+            self.viewport_top,
+        ));
+        self.center_cursor_in_view();
+        self.set_info_status(format!(
+            "disassembly: {} {} ({}) @ 0x{:x}",
+            info.kind.label(),
+            info.arch.label(),
+            info.bitness.label(),
+            self.cursor
+        ));
+        Ok(())
+    }
+
+    fn execute_disassemble_off_command(&mut self) {
+        self.main_view = crate::app::MainView::Hex;
+        self.set_info_status("disassembly off");
     }
 
     fn execute_hash_command(&mut self, algorithm: HashAlgorithm) -> HxResult<()> {

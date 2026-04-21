@@ -812,3 +812,68 @@ fn hash_command_on_empty_file_reports_no_data() {
     .unwrap();
     assert!(app.status_message.contains("no data"));
 }
+
+#[test]
+fn disassemble_command_switches_main_view() {
+    let bytes = {
+        let mut bytes = vec![0_u8; 0x200];
+        bytes[0..4].copy_from_slice(b"\x7fELF");
+        bytes[4] = 2;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+        bytes[18..20].copy_from_slice(&0x3eu16.to_le_bytes());
+        bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+        bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
+        bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+        bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
+        bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
+        let ph = 64usize;
+        bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
+        bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
+        bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[ph + 32..ph + 40].copy_from_slice(&4u64.to_le_bytes());
+        bytes[0x100..0x104].copy_from_slice(&[0x90, 0x90, 0x90, 0xc3]);
+        bytes
+    };
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    assert!(matches!(
+        app.main_view,
+        crate::app::MainView::Disassembly(_)
+    ));
+    assert_eq!(app.cursor, 0x100);
+    assert!(app.status_message.contains("disassembly:"));
+}
+
+#[test]
+fn disassemble_off_returns_to_hex_view() {
+    let bytes = {
+        let mut bytes = vec![0_u8; 0x200];
+        bytes[0..4].copy_from_slice(b"\x7fELF");
+        bytes[4] = 2;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+        bytes[18..20].copy_from_slice(&0x3eu16.to_le_bytes());
+        bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+        bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
+        bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+        bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
+        bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
+        let ph = 64usize;
+        bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
+        bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
+        bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[ph + 32..ph + 40].copy_from_slice(&4u64.to_le_bytes());
+        bytes
+    };
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.execute_command(Command::DisassembleOff).unwrap();
+    assert!(matches!(app.main_view, crate::app::MainView::Hex));
+}

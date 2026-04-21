@@ -12,6 +12,14 @@ keywords = ["hex", "editor", "tui", "binary", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 publish = false
 
+[features]
+default = ["disasm-capstone", "disasm-capstone-x86", "disasm-capstone-arm64"]
+disasm = []
+disasm-capstone = ["disasm", "dep:capstone"]
+disasm-capstone-x86 = ["disasm-capstone", "capstone/arch_x86"]
+disasm-capstone-arm64 = ["disasm-capstone", "capstone/arch_arm64"]
+disasm-iced-x86 = ["disasm"]
+
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
@@ -25,6 +33,7 @@ sha1 = "0.10"
 sha2 = "0.10"
 supports-color = "3"
 thiserror = "2.0"
+capstone = { version = "0.14", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

@@ -232,6 +232,11 @@ impl App {
         if self.document.is_readonly() {
             return Err(HxError::ReadOnly);
         }
+        if insert && matches!(self.main_view, crate::app::MainView::Disassembly(_)) {
+            return Err(HxError::DisassemblyUnavailable(
+                "view is overwrite-only; use :dis off for layout-changing edits".to_owned(),
+            ));
+        }
         self.mode = if insert {
             Mode::InsertHex { pending: None }
         } else {
@@ -628,6 +633,7 @@ mod tests {
     fn hidden_inspector_focus_falls_back_to_normal_mode() {
         let mut app = app_with_inspector_field();
         app.last_columns = Some(crate::view::layout::MainColumns {
+            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
             gutter: Rect::new(0, 0, 4, 4),
             sep1: Rect::new(4, 0, 1, 4),
             hex: Rect::new(5, 0, 20, 4),
@@ -650,6 +656,7 @@ mod tests {
         let mut app = app_with_inspector_field();
         app.mode = Mode::Normal;
         app.last_columns = Some(crate::view::layout::MainColumns {
+            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
             gutter: Rect::new(0, 0, 4, 4),
             sep1: Rect::new(4, 0, 1, 4),
             hex: Rect::new(5, 0, 20, 4),
@@ -673,6 +680,7 @@ mod tests {
         let mut app = app_with_inspector_field();
         app.mode = Mode::Normal;
         app.last_columns = Some(crate::view::layout::MainColumns {
+            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
             gutter: Rect::new(0, 0, 8, 4),
             sep1: Rect::new(8, 0, 1, 4),
             hex: Rect::new(9, 0, 90, 4),
@@ -693,6 +701,7 @@ mod tests {
         let mut app = app_with_len(8);
         app.mode = Mode::Normal;
         app.last_columns = Some(crate::view::layout::MainColumns {
+            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
             gutter: Rect::new(0, 0, 8, 4),
             sep1: Rect::new(8, 0, 1, 4),
             hex: Rect::new(9, 0, 90, 4),
@@ -718,6 +727,7 @@ mod tests {
         let mut app = app_with_inspector_field_editable("TEST", false);
         app.mode = Mode::Normal;
         app.last_columns = Some(crate::view::layout::MainColumns {
+            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
             gutter: Rect::new(0, 0, 8, 4),
             sep1: Rect::new(8, 0, 1, 4),
             hex: Rect::new(9, 0, 90, 4),
