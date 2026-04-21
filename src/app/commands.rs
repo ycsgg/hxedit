@@ -1,6 +1,7 @@
 use crate::app::{App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState};
 use crate::commands::parser::parse_command;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
+use crate::disasm::backend::resolve_backend_kind;
 use crate::disasm::DisassemblyState;
 use crate::error::{HxError, HxResult};
 use crate::executable::{detect_executable_info, override_arch};
@@ -80,6 +81,9 @@ impl App {
             }
             Command::SearchHex { pattern, backward } => {
                 self.execute_search_command(SearchKind::Hex, pattern, backward)
+            }
+            Command::SearchInstruction { pattern, backward } => {
+                self.execute_instruction_search_command(pattern, backward)
             }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
             Command::Disassemble { arch } => self.execute_disassemble_command(arch.as_deref()),
@@ -516,7 +520,23 @@ impl App {
         pattern: Vec<u8>,
         backward: bool,
     ) -> HxResult<()> {
-        let search = SearchState { kind, pattern };
+        let search = SearchState {
+            kind,
+            query: crate::app::SearchQuery::Bytes(pattern),
+        };
+        self.last_search = Some(search.clone());
+        self.run_search(&search, search_direction(backward))
+    }
+
+    fn execute_instruction_search_command(
+        &mut self,
+        pattern: String,
+        backward: bool,
+    ) -> HxResult<()> {
+        let search = SearchState {
+            kind: SearchKind::Instruction,
+            query: crate::app::SearchQuery::Instruction(pattern.to_ascii_lowercase()),
+        };
         self.last_search = Some(search.clone());
         self.run_search(&search, search_direction(backward))
     }
@@ -530,6 +550,7 @@ impl App {
         if let Some(raw_arch) = arch {
             info = override_arch(&info, raw_arch)?;
         }
+        let backend = resolve_backend_kind(&info, None)?;
         let target = if info.span_containing(self.cursor).is_some() {
             self.cursor
         } else if let Some(entry) = info.entry_offset {
@@ -540,16 +561,14 @@ impl App {
             0
         };
         self.cursor = self.clamp_offset(target);
-        self.main_view = crate::app::MainView::Disassembly(DisassemblyState::new(
-            info.clone(),
-            self.viewport_top,
-        ));
-        self.center_cursor_in_view();
+        self.main_view =
+            crate::app::MainView::Disassembly(DisassemblyState::new(info.clone(), backend, target));
         self.set_info_status(format!(
-            "disassembly: {} {} ({}) @ 0x{:x}",
+            "disassembly: {} {} ({}, {}) @ 0x{:x}",
             info.kind.label(),
             info.arch.label(),
             info.bitness.label(),
+            backend.label(),
             self.cursor
         ));
         Ok(())

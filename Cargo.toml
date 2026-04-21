@@ -13,9 +13,15 @@ categories = ["command-line-utilities", "development-tools"]
 publish = false
 
 [features]
-default = ["disasm-capstone", "disasm-capstone-x86", "disasm-capstone-arm64"]
+default = [
+    "disasm-capstone",
+    "disasm-capstone-full",
+    "disasm-capstone-x86",
+    "disasm-capstone-arm64",
+]
 disasm = []
 disasm-capstone = ["disasm", "dep:capstone"]
+disasm-capstone-full = ["disasm-capstone", "capstone/full"]
 disasm-capstone-x86 = ["disasm-capstone", "capstone/arch_x86"]
 disasm-capstone-arm64 = ["disasm-capstone", "capstone/arch_arm64"]
 disasm-iced-x86 = ["disasm"]

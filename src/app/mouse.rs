@@ -47,14 +47,9 @@ impl App {
                     self.mode = Mode::Inspector;
                 }
 
-                if let Some(hit) = crate::input::mouse::hit_test(
-                    columns,
-                    mouse_event.column,
-                    mouse_event.row,
-                    self.viewport_top,
-                    self.config.bytes_per_line,
-                    self.document.len(),
-                ) {
+                if let Some(hit) =
+                    self.main_view_mouse_hit(columns, mouse_event.column, mouse_event.row)
+                {
                     if let Some(visible_row) = hit.inspector_row {
                         if self.show_inspector {
                             self.mode = Mode::Inspector;
@@ -136,14 +131,9 @@ impl App {
                 let Some(columns) = self.last_columns else {
                     return;
                 };
-                let Some(hit) = crate::input::mouse::hit_test(
-                    columns,
-                    mouse_event.column,
-                    mouse_event.row,
-                    self.viewport_top,
-                    self.config.bytes_per_line,
-                    self.document.len(),
-                ) else {
+                let Some(hit) =
+                    self.main_view_mouse_hit(columns, mouse_event.column, mouse_event.row)
+                else {
                     return;
                 };
 
@@ -158,6 +148,35 @@ impl App {
                 self.mouse_selection_anchor = None;
             }
             _ => {}
+        }
+    }
+
+    fn main_view_mouse_hit(
+        &mut self,
+        columns: crate::view::layout::MainColumns,
+        x: u16,
+        y: u16,
+    ) -> Option<crate::input::mouse::MouseHit> {
+        match &self.main_view {
+            crate::app::MainView::Hex => crate::input::mouse::hit_test(
+                columns,
+                x,
+                y,
+                self.viewport_top,
+                self.config.bytes_per_line,
+                self.document.len(),
+            ),
+            crate::app::MainView::Disassembly(state) => {
+                let state = state.clone();
+                let rows = self
+                    .collect_disassembly_rows(
+                        &state,
+                        state.viewport_top,
+                        self.visible_rows() as usize,
+                    )
+                    .ok()?;
+                crate::input::mouse::disassembly_hit_test(columns, x, y, &rows)
+            }
         }
     }
 }

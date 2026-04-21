@@ -98,6 +98,9 @@ impl ExecutableInfo {
     }
 
     pub fn span_containing(&self, offset: u64) -> Option<&CodeSpan> {
-        self.code_spans.iter().find(|span| span.contains(offset))
+        self.code_spans
+            .iter()
+            .filter(|span| span.contains(offset))
+            .min_by_key(|span| span.end_inclusive - span.start)
     }
 }

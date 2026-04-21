@@ -106,6 +106,10 @@ pub enum Command {
         pattern: Vec<u8>,
         backward: bool,
     },
+    SearchInstruction {
+        pattern: String,
+        backward: bool,
+    },
     Inspector,
     /// `:insp more` — raise the per-format entry cap by one batch and
     /// re-parse so pagination-aware formats (ELF / PNG / ZIP) reveal more

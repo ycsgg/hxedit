@@ -93,6 +93,14 @@ pub fn hint_for(input: &str) -> CommandHint {
                 "search hex bytes downward like: S 7f 45 4c 46".to_owned()
             },
         },
+        "si" | "si!" | "search-instruction" | "search-insn" => CommandHint {
+            syntax: format!("{name} <instruction-text>"),
+            details: if name.ends_with('!') {
+                "search decoded instruction text upward in disassembly view; matches mnemonic and operands, then jumps to the matching instruction row".to_owned()
+            } else {
+                "search decoded instruction text downward in disassembly view; matches mnemonic and operands, then jumps to the matching instruction row".to_owned()
+            },
+        },
         "u" | "undo" => CommandHint {
             syntax: format!("{name} [steps]"),
             details: "undo one change by default; pass a positive number to undo more".to_owned(),
@@ -122,7 +130,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             };
             CommandHint {
                 syntax,
-                details: "enter disassembly main view for ELF/PE/Mach-O using detected executable metadata; `dis off` returns to hex view".to_owned(),
+                details: "enter the read-only disassembly main view for ELF/PE/Mach-O using detected executable metadata and the current decode backend; `dis off` returns to hex view".to_owned(),
             }
         }
         other => {
@@ -253,6 +261,12 @@ fn known_commands() -> Vec<&'static str> {
         "s!",
         "S",
         "S!",
+        "si",
+        "si!",
+        "search-instruction",
+        "search-instruction!",
+        "search-insn",
+        "search-insn!",
         "u",
         "undo",
         "redo",

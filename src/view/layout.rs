@@ -65,9 +65,9 @@ pub fn split_main(
     main_pane_kind: MainPaneKind,
 ) -> MainColumns {
     let inner = block.inner(area);
-    let (main_hex_fill, main_ascii_fill) = match main_pane_kind {
-        MainPaneKind::Hex => (3, 2),
-        MainPaneKind::Disassembly => (3, 4),
+    let (main_hex_fill, main_ascii_fill, inspector_fill) = match main_pane_kind {
+        MainPaneKind::Hex => (3, 1, 2),
+        MainPaneKind::Disassembly => (2, 4, 3),
     };
 
     if show_inspector && inner.width >= MIN_INSPECTOR_WIDTH {
@@ -80,7 +80,7 @@ pub fn split_main(
                 Constraint::Length(1),
                 Constraint::Fill(main_ascii_fill),
                 Constraint::Length(1),
-                Constraint::Fill(2),
+                Constraint::Fill(inspector_fill),
             ])
             .split(inner);
         MainColumns {
@@ -147,5 +147,28 @@ mod tests {
         let block = Block::default();
         let columns = split_main(&block, area, 8, false, MainPaneKind::Hex);
         assert!(columns.hex.width >= columns.ascii.width);
+    }
+
+    #[test]
+    fn hex_layout_with_inspector_matches_inspector_branch_proportions() {
+        let area = Rect::new(0, 0, 120, 24);
+        let block = Block::default();
+        let columns = split_main(&block, area, 8, true, MainPaneKind::Hex);
+        let inspector = columns.inspector.expect("inspector visible");
+        assert!(columns.hex.width > inspector.width);
+        assert!(inspector.width > columns.ascii.width);
+    }
+
+    #[test]
+    fn disassembly_layout_keeps_inspector_at_least_as_wide_as_hex_layout() {
+        let area = Rect::new(0, 0, 120, 24);
+        let block = Block::default();
+        let hex = split_main(&block, area, 8, true, MainPaneKind::Hex);
+        let dis = split_main(&block, area, 8, true, MainPaneKind::Disassembly);
+        assert!(
+            dis.inspector.expect("dis inspector").width
+                >= hex.inspector.expect("hex inspector").width
+        );
+        assert!(dis.ascii.width > dis.hex.width);
     }
 }

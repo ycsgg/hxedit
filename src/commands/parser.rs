@@ -79,6 +79,21 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 backward: name.ends_with('!'),
             })
         }
+        "si"
+        | "si!"
+        | "search-instruction"
+        | "search-instruction!"
+        | "search-insn"
+        | "search-insn!" => {
+            let arg = rest.ok_or(HxError::MissingArgument("instruction search pattern"))?;
+            if arg.is_empty() {
+                return Err(HxError::EmptySearch);
+            }
+            Ok(Command::SearchInstruction {
+                pattern: arg.to_owned(),
+                backward: name.ends_with('!'),
+            })
+        }
         "hash" => {
             let arg = rest.ok_or(HxError::MissingArgument("hash algorithm"))?;
             let algo = HashAlgorithm::parse(arg)

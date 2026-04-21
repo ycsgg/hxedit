@@ -69,6 +69,14 @@ pub struct Palette {
     pub inspector_active: Style,
     pub inspector_edit: Style,
     pub inspector_highlight: Style,
+    pub disasm_label: Style,
+    pub disasm_bytes: Style,
+    pub disasm_mnemonic: Style,
+    pub disasm_operand: Style,
+    pub disasm_data: Style,
+    pub disasm_register: Style,
+    pub disasm_immediate: Style,
+    pub disasm_punctuation: Style,
 }
 
 impl Palette {
@@ -145,6 +153,18 @@ impl Palette {
                 .bg(Color::Rgb(80, 80, 80))
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
+            disasm_label: Style::default()
+                .fg(Color::Rgb(196, 176, 122))
+                .add_modifier(Modifier::BOLD),
+            disasm_bytes: Style::default().fg(Color::Rgb(135, 178, 212)),
+            disasm_mnemonic: Style::default()
+                .fg(Color::Rgb(128, 210, 170))
+                .add_modifier(Modifier::BOLD),
+            disasm_operand: Style::default().fg(Color::Rgb(220, 220, 220)),
+            disasm_data: Style::default().fg(Color::Rgb(216, 162, 102)),
+            disasm_register: Style::default().fg(Color::Rgb(110, 190, 240)),
+            disasm_immediate: Style::default().fg(Color::Rgb(244, 194, 96)),
+            disasm_punctuation: Style::default().fg(Color::Rgb(132, 132, 132)),
         }
     }
 
@@ -209,6 +229,18 @@ impl Palette {
                 .fg(Color::Indexed(222))
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
+            disasm_label: Style::default()
+                .fg(Color::Indexed(180))
+                .add_modifier(Modifier::BOLD),
+            disasm_bytes: Style::default().fg(Color::Indexed(110)),
+            disasm_mnemonic: Style::default()
+                .fg(Color::Indexed(114))
+                .add_modifier(Modifier::BOLD),
+            disasm_operand: Style::default().fg(Color::Indexed(252)),
+            disasm_data: Style::default().fg(Color::Indexed(173)),
+            disasm_register: Style::default().fg(Color::Indexed(117)),
+            disasm_immediate: Style::default().fg(Color::Indexed(222)),
+            disasm_punctuation: Style::default().fg(Color::Indexed(245)),
         }
     }
 
@@ -271,6 +303,18 @@ impl Palette {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
+            disasm_label: Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+            disasm_bytes: Style::default().fg(Color::Cyan),
+            disasm_mnemonic: Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            disasm_operand: Style::default().fg(Color::White),
+            disasm_data: Style::default().fg(Color::Magenta),
+            disasm_register: Style::default().fg(Color::Cyan),
+            disasm_immediate: Style::default().fg(Color::Yellow),
+            disasm_punctuation: Style::default().fg(Color::DarkGray),
         }
     }
 
@@ -312,6 +356,14 @@ impl Palette {
             inspector_highlight: base
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::UNDERLINED),
+            disasm_label: base.add_modifier(Modifier::BOLD),
+            disasm_bytes: base,
+            disasm_mnemonic: base.add_modifier(Modifier::BOLD),
+            disasm_operand: base,
+            disasm_data: base.add_modifier(Modifier::UNDERLINED),
+            disasm_register: base.add_modifier(Modifier::UNDERLINED),
+            disasm_immediate: base.add_modifier(Modifier::BOLD),
+            disasm_punctuation: base,
         }
     }
 }

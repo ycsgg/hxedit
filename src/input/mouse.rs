@@ -1,5 +1,6 @@
 use ratatui::layout::Rect;
 
+use crate::disasm::DisasmRow;
 use crate::mode::NibblePhase;
 use crate::util::geometry::rect_contains;
 use crate::view::layout::MainColumns;
@@ -10,6 +11,40 @@ pub struct MouseHit {
     pub offset: u64,
     pub phase: Option<NibblePhase>,
     pub inspector_row: Option<usize>,
+}
+
+pub fn disassembly_hit_test(
+    columns: MainColumns,
+    x: u16,
+    y: u16,
+    rows: &[DisasmRow],
+) -> Option<MouseHit> {
+    if let Some(inspector) = columns.inspector {
+        if rect_contains(inspector, x, y) {
+            return inspector_hit(inspector, y);
+        }
+    }
+
+    let row_idx = row_from_point(columns.gutter, x, y)
+        .or_else(|| row_from_point(columns.hex, x, y))
+        .or_else(|| row_from_point(columns.ascii, x, y))?;
+    let row = rows.get(row_idx)?;
+
+    let (offset, phase) =
+        if rect_contains(columns.gutter, x, y) || rect_contains(columns.ascii, x, y) {
+            (row.offset, None)
+        } else if rect_contains(columns.hex, x, y) {
+            let (byte_idx, phase) = disasm_hex_col_from_x(x - columns.hex.x, row.bytes.len())?;
+            (row.offset + byte_idx as u64, phase)
+        } else {
+            return None;
+        };
+
+    Some(MouseHit {
+        offset,
+        phase,
+        inspector_row: None,
+    })
 }
 
 pub fn hit_test(
@@ -116,9 +151,29 @@ fn hex_col_from_x(x: u16, bytes_per_line: usize) -> Option<(usize, Option<Nibble
     None
 }
 
+fn disasm_hex_col_from_x(x: u16, byte_count: usize) -> Option<(usize, Option<NibblePhase>)> {
+    let mut cursor_x = 0_u16;
+    for col in 0..byte_count {
+        let separator_width = usize::from(col + 1 < byte_count) as u16;
+        let cell_width = 2 + separator_width;
+        if x >= cursor_x && x < cursor_x + cell_width {
+            let rel = x - cursor_x;
+            let phase = match rel {
+                0 => Some(NibblePhase::High),
+                1 => Some(NibblePhase::Low),
+                _ => None,
+            };
+            return Some((col, phase));
+        }
+        cursor_x += cell_width;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::disasm::{DisasmRow, DisasmRowKind};
 
     fn columns() -> MainColumns {
         MainColumns {
@@ -131,6 +186,45 @@ mod tests {
             sep3: None,
             inspector: None,
         }
+    }
+
+    fn disassembly_columns() -> MainColumns {
+        MainColumns {
+            main_pane_kind: crate::view::layout::MainPaneKind::Disassembly,
+            gutter: Rect::new(0, 0, 18, 5),
+            sep1: Rect::new(18, 0, 1, 5),
+            hex: Rect::new(19, 0, 24, 5),
+            sep2: Rect::new(43, 0, 1, 5),
+            ascii: Rect::new(44, 0, 30, 5),
+            sep3: None,
+            inspector: None,
+        }
+    }
+
+    fn disassembly_rows() -> Vec<DisasmRow> {
+        vec![
+            DisasmRow {
+                offset: 0x100,
+                bytes: vec![0x55],
+                text: "push rbp".to_owned(),
+                span_name: Some(".text".to_owned()),
+                kind: DisasmRowKind::Instruction,
+            },
+            DisasmRow {
+                offset: 0x101,
+                bytes: vec![0x48, 0x89, 0xe5],
+                text: "mov rbp, rsp".to_owned(),
+                span_name: Some(".text".to_owned()),
+                kind: DisasmRowKind::Instruction,
+            },
+            DisasmRow {
+                offset: 0x200,
+                bytes: vec![0x41, 0x42, 0x43],
+                text: ".db 0x41, 0x42, 0x43".to_owned(),
+                span_name: Some(".rodata".to_owned()),
+                kind: DisasmRowKind::Data,
+            },
+        ]
     }
 
     #[test]
@@ -197,5 +291,26 @@ mod tests {
     #[test]
     fn hit_test_outside_rect_does_not_panic() {
         assert_eq!(hit_test(columns(), 0, 10, 0, 16, 256), None);
+    }
+
+    #[test]
+    fn disassembly_gutter_click_selects_row_start() {
+        let hit = disassembly_hit_test(disassembly_columns(), 2, 1, &disassembly_rows()).unwrap();
+        assert_eq!(hit.offset, 0x101);
+        assert_eq!(hit.phase, None);
+    }
+
+    #[test]
+    fn disassembly_hex_click_selects_byte_and_nibble() {
+        let hit = disassembly_hit_test(disassembly_columns(), 22, 1, &disassembly_rows()).unwrap();
+        assert_eq!(hit.offset, 0x102);
+        assert_eq!(hit.phase, Some(NibblePhase::High));
+    }
+
+    #[test]
+    fn disassembly_text_click_selects_row_start() {
+        let hit = disassembly_hit_test(disassembly_columns(), 50, 2, &disassembly_rows()).unwrap();
+        assert_eq!(hit.offset, 0x200);
+        assert_eq!(hit.phase, None);
     }
 }

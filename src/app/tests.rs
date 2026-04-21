@@ -88,6 +88,29 @@ fn app_with_inspector_field(bytes: &[u8], offset: u64, size: usize) -> App {
     app
 }
 
+fn build_disassembly_elf64(code: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0_u8; 0x200];
+    bytes[0..4].copy_from_slice(b"\x7fELF");
+    bytes[4] = 2;
+    bytes[5] = 1;
+    bytes[6] = 1;
+    bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+    bytes[18..20].copy_from_slice(&0x3eu16.to_le_bytes());
+    bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
+    bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
+    bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+    bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
+    bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
+    let ph = 64usize;
+    bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
+    bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
+    bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
+    bytes[ph + 32..ph + 40].copy_from_slice(&(code.len() as u64).to_le_bytes());
+    bytes[0x100..0x100 + code.len()].copy_from_slice(code);
+    bytes
+}
+
 fn build_paginated_elf64(section_count: usize) -> Vec<u8> {
     const EHDR_SIZE: usize = 64;
     const PHDR_OFFSET: usize = EHDR_SIZE;
@@ -850,30 +873,116 @@ fn disassemble_command_switches_main_view() {
 
 #[test]
 fn disassemble_off_returns_to_hex_view() {
-    let bytes = {
-        let mut bytes = vec![0_u8; 0x200];
-        bytes[0..4].copy_from_slice(b"\x7fELF");
-        bytes[4] = 2;
-        bytes[5] = 1;
-        bytes[6] = 1;
-        bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
-        bytes[18..20].copy_from_slice(&0x3eu16.to_le_bytes());
-        bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
-        bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
-        bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
-        bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
-        bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
-        bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
-        let ph = 64usize;
-        bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
-        bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
-        bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
-        bytes[ph + 32..ph + 40].copy_from_slice(&4u64.to_le_bytes());
-        bytes
-    };
+    let bytes = build_disassembly_elf64(&[0x90, 0x90, 0x90, 0xc3]);
     let mut app = app_with_bytes(&bytes);
     app.execute_command(Command::Disassemble { arch: None })
         .unwrap();
     app.execute_command(Command::DisassembleOff).unwrap();
     assert!(matches!(app.main_view, crate::app::MainView::Hex));
+}
+
+#[test]
+fn disassembly_vertical_move_uses_instruction_boundaries() {
+    let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    assert_eq!(app.cursor, 0x100);
+    app.move_vertical(1);
+    assert_eq!(app.cursor, 0x101);
+    app.move_vertical(2);
+    assert_eq!(app.cursor, 0x105);
+    app.move_vertical(-1);
+    assert_eq!(app.cursor, 0x104);
+}
+
+#[test]
+fn disassembly_scroll_viewport_uses_instruction_rows() {
+    let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.view_rows = 2;
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    app.scroll_viewport(1);
+    match &app.main_view {
+        crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x101),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    }
+    assert_eq!(app.cursor, 0x101);
+
+    app.scroll_viewport(1);
+    match &app.main_view {
+        crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x104),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    }
+    assert_eq!(app.cursor, 0x104);
+}
+
+#[test]
+fn disassembly_scroll_up_from_raw_tail_does_not_snap_back_to_text_end() {
+    let bytes = build_disassembly_elf64(&[0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.view_rows = 2;
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    app.scroll_viewport(99);
+    let bottom_top = match &app.main_view {
+        crate::app::MainView::Disassembly(state) => state.viewport_top,
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    assert!(bottom_top >= 0x1f0);
+
+    app.scroll_viewport(-1);
+    match &app.main_view {
+        crate::app::MainView::Disassembly(state) => {
+            assert_eq!(state.viewport_top, bottom_top.saturating_sub(8));
+            assert!(state.viewport_top > 0x102);
+        }
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    }
+}
+
+#[test]
+fn instruction_search_jumps_to_matching_instruction_row() {
+    let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.view_rows = 4;
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    app.execute_command(Command::SearchInstruction {
+        pattern: "ret".to_owned(),
+        backward: false,
+    })
+    .unwrap();
+
+    assert_eq!(app.cursor, 0x105);
+    match &app.main_view {
+        crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x105),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    }
+}
+
+#[test]
+fn byte_search_in_disassembly_recenters_to_containing_instruction_row() {
+    let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.view_rows = 4;
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    app.execute_command(Command::SearchHex {
+        pattern: vec![0x89, 0xe5],
+        backward: false,
+    })
+    .unwrap();
+
+    assert_eq!(app.cursor, 0x102);
+    match &app.main_view {
+        crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x101),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    }
 }

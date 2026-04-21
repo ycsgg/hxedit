@@ -164,7 +164,13 @@ struct UndoStep {
 #[derive(Debug, Clone)]
 pub(crate) struct SearchState {
     kind: SearchKind,
-    pattern: Vec<u8>,
+    query: SearchQuery,
+}
+
+#[derive(Debug, Clone)]
+enum SearchQuery {
+    Bytes(Vec<u8>),
+    Instruction(String),
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +182,7 @@ struct PasteState {
 enum SearchKind {
     Ascii,
     Hex,
+    Instruction,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -199,6 +206,30 @@ impl SearchKind {
         match self {
             Self::Ascii => "ascii",
             Self::Hex => "hex",
+            Self::Instruction => "instruction",
+        }
+    }
+}
+
+impl SearchState {
+    fn byte_pattern(&self) -> Option<&[u8]> {
+        match &self.query {
+            SearchQuery::Bytes(pattern) => Some(pattern),
+            SearchQuery::Instruction(_) => None,
+        }
+    }
+
+    fn instruction_query(&self) -> Option<&str> {
+        match &self.query {
+            SearchQuery::Instruction(pattern) => Some(pattern.as_str()),
+            SearchQuery::Bytes(_) => None,
+        }
+    }
+
+    fn pattern_len(&self) -> usize {
+        match &self.query {
+            SearchQuery::Bytes(pattern) => pattern.len(),
+            SearchQuery::Instruction(pattern) => pattern.len(),
         }
     }
 }

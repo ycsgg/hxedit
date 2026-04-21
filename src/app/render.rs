@@ -7,6 +7,8 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use crate::app::App;
 use crate::commands::hints;
 use crate::core::document::ByteSlot;
+use crate::disasm::backend::resolve_backend;
+use crate::disasm::{decode_region_rows, DisasmRow};
 use crate::mode::Mode;
 use crate::profile::{FrameStats, RenderMainStats};
 use crate::util::format::offset_width;
@@ -86,14 +88,27 @@ impl App {
     ) -> RenderMainStats {
         let mut stats = RenderMainStats::default();
         let block = Block::default().borders(Borders::ALL);
-        let main_pane_kind = match self.main_view {
+        let main_pane_kind = match &self.main_view {
             crate::app::MainView::Hex => layout::MainPaneKind::Hex,
             crate::app::MainView::Disassembly(_) => layout::MainPaneKind::Disassembly,
+        };
+        let gutter_width = match &self.main_view {
+            crate::app::MainView::Hex => offset_width(self.document.len()) as u16,
+            crate::app::MainView::Disassembly(state) => {
+                let max_name = state
+                    .info
+                    .code_spans
+                    .iter()
+                    .filter_map(|span| span.name.as_ref().map(|name| name.chars().count()))
+                    .max()
+                    .unwrap_or(5) as u16;
+                (max_name + offset_width(self.document.len()) as u16 + 4).clamp(14, 28)
+            }
         };
         let columns = layout::split_main(
             &block,
             area,
-            offset_width(self.document.len()) as u16,
+            gutter_width,
             self.show_inspector,
             main_pane_kind,
         );
@@ -105,14 +120,20 @@ impl App {
         self.view_rows = columns.gutter.height.max(1) as usize;
         stats.rows = self.view_rows;
 
-        let row_collect_start = profiling.then(Instant::now);
-        let visible_rows = self.collect_visible_rows(columns.gutter.height as usize);
-        if let Some(start) = row_collect_start {
-            stats.row_collect = start.elapsed();
-        }
-
         let line_build_start = profiling.then(Instant::now);
-        let main_lines = self.build_main_lines(&visible_rows);
+        let main_lines = match &self.main_view {
+            crate::app::MainView::Hex => {
+                let row_collect_start = profiling.then(Instant::now);
+                let visible_rows = self.collect_visible_rows(columns.gutter.height as usize);
+                if let Some(start) = row_collect_start {
+                    stats.row_collect = start.elapsed();
+                }
+                self.build_hex_main_lines(&visible_rows)
+            }
+            crate::app::MainView::Disassembly(_) => {
+                self.build_disassembly_lines(columns.gutter.height as usize)
+            }
+        };
         if let Some(start) = line_build_start {
             stats.line_build = start.elapsed();
         }
@@ -221,7 +242,7 @@ impl App {
         VisibleRows { offsets, rows }
     }
 
-    fn build_main_lines(&self, visible_rows: &VisibleRows) -> MainLines {
+    fn build_hex_main_lines(&self, visible_rows: &VisibleRows) -> MainLines {
         if self.document.is_empty() {
             return MainLines {
                 gutter: vec![Line::raw("No data")],
@@ -237,73 +258,117 @@ impl App {
             offset_width(self.document.len()),
             &self.palette,
         );
-        match &self.main_view {
-            crate::app::MainView::Hex => {
-                let selection = self.selection_range();
-                let inspector_highlight = self.inspector_highlight_range();
-                let search_matches = self.visible_search_matches(visible_rows);
-                MainLines {
-                    gutter: gutter_lines,
-                    pane: MainPaneLines::Hex {
-                        hex: hex_grid::build(
-                            &visible_rows.rows,
-                            &visible_rows.offsets,
-                            self.cursor,
-                            self.mode,
-                            &self.palette,
-                            self.config.bytes_per_line,
-                            hex_grid::HexGridOverlays {
-                                selection,
-                                inspector_highlight,
-                                search_matches,
-                            },
-                        ),
-                        ascii: ascii_grid::build(
-                            &visible_rows.rows,
-                            &visible_rows.offsets,
-                            self.cursor,
-                            self.mode,
-                            &self.palette,
-                            self.config.bytes_per_line,
-                            selection,
-                        ),
+        let selection = self.selection_range();
+        let inspector_highlight = self.inspector_highlight_range();
+        let search_matches = self.visible_search_matches(visible_rows);
+        MainLines {
+            gutter: gutter_lines,
+            pane: MainPaneLines::Hex {
+                hex: hex_grid::build(
+                    &visible_rows.rows,
+                    &visible_rows.offsets,
+                    self.cursor,
+                    self.mode,
+                    &self.palette,
+                    self.config.bytes_per_line,
+                    hex_grid::HexGridOverlays {
+                        selection,
+                        inspector_highlight,
+                        search_matches,
                     },
-                }
+                ),
+                ascii: ascii_grid::build(
+                    &visible_rows.rows,
+                    &visible_rows.offsets,
+                    self.cursor,
+                    self.mode,
+                    &self.palette,
+                    self.config.bytes_per_line,
+                    selection,
+                ),
+            },
+        }
+    }
+
+    fn build_disassembly_lines(&mut self, row_count: usize) -> MainLines {
+        let crate::app::MainView::Disassembly(state) = &self.main_view else {
+            unreachable!("disassembly lines requested outside disassembly view");
+        };
+        let state = state.clone();
+        match self.collect_disassembly_rows(&state, state.viewport_top, row_count) {
+            Ok(rows) => {
+                self.set_disassembly_render_error(None);
+                self.main_lines_from_disassembly_rows(
+                    &rows,
+                    self.last_columns.map(|c| c.gutter.width).unwrap_or(18) as usize,
+                )
             }
-            crate::app::MainView::Disassembly(state) => {
-                let mut text_lines = vec![format!(
-                    "[phase-1 placeholder] {} {} {} {}-endian",
-                    state.info.kind.label(),
-                    state.info.arch.label(),
-                    state.info.bitness.label(),
-                    state.info.endian.label()
-                )];
-                text_lines.extend(state.info.code_spans.iter().map(|span| {
-                    format!(
-                        "code span {}: 0x{:x}-0x{:x}",
-                        span.name.as_deref().unwrap_or("<unnamed>"),
-                        span.start,
-                        span.end_inclusive
-                    )
-                }));
-                if text_lines.len() < visible_rows.rows.len() {
-                    text_lines.resize(
-                        visible_rows.rows.len(),
-                        "decode pipeline not wired yet".to_owned(),
-                    );
-                }
-                MainLines {
-                    gutter: gutter_lines,
-                    pane: MainPaneLines::Disassembly {
-                        bytes: disasm_grid::build_bytes(
-                            &visible_rows.rows,
-                            &visible_rows.offsets,
-                            &self.palette,
-                        ),
-                        text: disasm_grid::build_text(&text_lines, &self.palette),
-                    },
-                }
+            Err(err) => {
+                let message = err.to_string();
+                self.set_disassembly_render_error(Some(message.clone()));
+                self.report_render_error(format!("disassembly render failed: {message}"));
+                self.disassembly_error_lines(&message)
             }
+        }
+    }
+
+    pub(crate) fn collect_disassembly_rows(
+        &mut self,
+        state: &crate::disasm::DisassemblyState,
+        start: u64,
+        row_count: usize,
+    ) -> crate::error::HxResult<Vec<DisasmRow>> {
+        let backend = resolve_backend(&state.info, Some(state.backend))?;
+        decode_region_rows(
+            &mut self.document,
+            &state.info,
+            backend.as_ref(),
+            start,
+            row_count,
+        )
+    }
+
+    fn main_lines_from_disassembly_rows(
+        &self,
+        rows: &[DisasmRow],
+        gutter_width: usize,
+    ) -> MainLines {
+        if rows.is_empty() {
+            return MainLines {
+                gutter: vec![Line::raw("No code")],
+                pane: MainPaneLines::Disassembly {
+                    bytes: vec![Line::styled("--", self.palette.separator)],
+                    text: vec![Line::styled(
+                        "no decodable instructions in current view",
+                        self.palette.separator,
+                    )],
+                },
+            };
+        }
+
+        let cursor = self.cursor_anchor_offset();
+        MainLines {
+            gutter: disasm_grid::build_gutter(rows, gutter_width, cursor, &self.palette),
+            pane: MainPaneLines::Disassembly {
+                bytes: disasm_grid::build_bytes(rows, cursor, &self.palette),
+                text: disasm_grid::build_text(rows, cursor, &self.palette),
+            },
+        }
+    }
+
+    fn disassembly_error_lines(&self, message: &str) -> MainLines {
+        MainLines {
+            gutter: vec![Line::raw("ERR")],
+            pane: MainPaneLines::Disassembly {
+                bytes: vec![Line::styled("--", self.palette.separator)],
+                text: vec![Line::styled(message.to_owned(), self.palette.error)],
+            },
+        }
+    }
+
+    fn set_disassembly_render_error(&mut self, error: Option<String>) {
+        if let crate::app::MainView::Disassembly(state) = &mut self.main_view {
+            state.last_error = error;
         }
     }
 
@@ -311,7 +376,10 @@ impl App {
         let Some(search) = self.last_search.as_ref() else {
             return Vec::new();
         };
-        if search.pattern.is_empty() {
+        let Some(pattern) = search.byte_pattern() else {
+            return Vec::new();
+        };
+        if pattern.is_empty() {
             return Vec::new();
         }
 
@@ -327,20 +395,17 @@ impl App {
             }
         }
 
-        if slots.len() < search.pattern.len() {
+        if slots.len() < pattern.len() {
             return Vec::new();
         }
 
         let mut matches = Vec::new();
-        for start_idx in 0..=slots.len() - search.pattern.len() {
-            let matched = search.pattern.iter().enumerate().all(|(idx, expected)| {
+        for start_idx in 0..=slots.len() - pattern.len() {
+            let matched = pattern.iter().enumerate().all(|(idx, expected)| {
                 matches!(slots[start_idx + idx].1, ByteSlot::Present(byte) if byte == *expected)
             });
             if matched {
-                matches.push((
-                    slots[start_idx].0,
-                    slots[start_idx + search.pattern.len() - 1].0,
-                ));
+                matches.push((slots[start_idx].0, slots[start_idx + pattern.len() - 1].0));
             }
         }
         matches
@@ -513,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn disassembly_main_view_uses_placeholder_text_lines() {
+    fn disassembly_main_view_renders_decoded_instruction_lines() {
         let mut app = app_with_bytes(&{
             let mut bytes = vec![0_u8; 0x200];
             bytes[0..4].copy_from_slice(b"ELF");
@@ -532,22 +597,22 @@ mod tests {
             bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
             bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
             bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
-            bytes[ph + 32..ph + 40].copy_from_slice(&4u64.to_le_bytes());
-            bytes[0x100..0x104].copy_from_slice(&[0x90, 0x90, 0x90, 0xc3]);
+            bytes[ph + 32..ph + 40].copy_from_slice(&6u64.to_le_bytes());
+            bytes[0x100..0x106].copy_from_slice(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
             bytes
         });
         app.execute_command(Command::Disassemble { arch: None })
             .unwrap();
-        let visible = app.collect_visible_rows(2);
-        let lines = app.build_main_lines(&visible);
+        let lines = app.build_disassembly_lines(4);
         match lines.pane {
             MainPaneLines::Disassembly { text, .. } => {
                 let joined = text
                     .iter()
                     .flat_map(|line| line.spans.iter().map(|s| s.content.as_ref()))
                     .collect::<String>();
-                assert!(joined.contains("placeholder"));
-                assert!(joined.contains("code span"));
+                assert!(joined.contains("push"));
+                assert!(joined.contains("mov"));
+                assert!(joined.contains("ret"));
             }
             _ => panic!("expected disassembly pane"),
         }

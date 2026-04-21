@@ -183,6 +183,20 @@ fn parses_basic_commands() {
             backward: true,
         }
     );
+    assert_eq!(
+        parse_command("si mov rax").unwrap(),
+        Command::SearchInstruction {
+            pattern: "mov rax".to_owned(),
+            backward: false,
+        }
+    );
+    assert_eq!(
+        parse_command("si! ret").unwrap(),
+        Command::SearchInstruction {
+            pattern: "ret".to_owned(),
+            backward: true,
+        }
+    );
 }
 
 #[test]
@@ -202,6 +216,7 @@ fn rejects_invalid_commands() {
     assert!(parse_command("export").is_err());
     assert!(parse_command("copy nope").is_err());
     assert!(parse_command("S 0xz1").is_err());
+    assert!(parse_command("si").is_err());
     assert!(parse_command("hash").is_err());
     assert!(parse_command("hash blake2").is_err());
     assert!(parse_command("unknown").is_err());
