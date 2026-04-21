@@ -28,7 +28,7 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
     }
 
     let first = read_header(doc, 0)?;
-    if !is_valid_tar_header(&first) {
+    if !is_recognizable_tar_header(&first) {
         return None;
     }
 
@@ -40,7 +40,7 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
     while offset.saturating_add(TAR_BLOCK) <= doc.len() {
         if entry_idx >= entry_cap.max(1) {
             if let Some(next) = read_header(doc, offset) {
-                if !is_zero_block(&next) && is_valid_tar_header(&next) {
+                if !is_zero_block(&next) && is_recognizable_tar_header(&next) {
                     more_remain = true;
                 }
             }
@@ -53,11 +53,12 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
         if is_zero_block(&header) {
             break;
         }
-        if !is_valid_tar_header(&header) {
+        if !is_recognizable_tar_header(&header) {
             break;
         }
 
         let size = parse_octal_field(&header[124..136]).unwrap_or(0);
+        let checksum_ok = checksum_matches(&header);
         let typeflag = header[156];
         let name = entry_name(&header);
         let header_end = offset.saturating_add(TAR_BLOCK);
@@ -194,19 +195,29 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
 
         structs.push(StructDef {
             name: if truncated {
-                format!(
+                let label = format!(
                     "Entry {}: {} [{}] (truncated)",
                     entry_idx,
                     display_name(&name),
                     typeflag_label(typeflag)
-                )
+                );
+                if checksum_ok {
+                    label
+                } else {
+                    format!("{label} [checksum mismatch]")
+                }
             } else {
-                format!(
+                let label = format!(
                     "Entry {}: {} [{}]",
                     entry_idx,
                     display_name(&name),
                     typeflag_label(typeflag)
-                )
+                );
+                if checksum_ok {
+                    label
+                } else {
+                    format!("{label} [checksum mismatch]")
+                }
             },
             base_offset: offset,
             fields,
@@ -247,8 +258,8 @@ fn read_header(doc: &mut Document, offset: u64) -> Option<Vec<u8>> {
     read_bytes_raw(doc, offset, TAR_BLOCK as usize)
 }
 
-fn is_valid_tar_header(header: &[u8]) -> bool {
-    !is_zero_block(header) && has_ustar_magic(header) && checksum_matches(header)
+fn is_recognizable_tar_header(header: &[u8]) -> bool {
+    !is_zero_block(header) && has_ustar_magic(header)
 }
 
 fn has_ustar_magic(header: &[u8]) -> bool {
@@ -500,7 +511,24 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_checksum() {
+    fn keeps_detecting_tar_when_checksum_is_stale() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("edited.tar");
+        let entries = [TarEntry {
+            name: "payload.bin",
+            typeflag: b'0',
+            data: b"hello",
+            prefix: "",
+        }];
+        let mut doc = write_tar(&path, &build_tar(&entries));
+        doc.replace_display_byte(0, b'q').unwrap();
+
+        let def = detect(&mut doc).expect("tar should remain detectable");
+        assert!(def.structs[0].name.contains("checksum mismatch"));
+    }
+
+    #[test]
+    fn rejects_missing_ustar_magic() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("bad.tar");
         let entries = [TarEntry {
@@ -510,7 +538,7 @@ mod tests {
             prefix: "",
         }];
         let mut bytes = build_tar(&entries);
-        bytes[148..156].copy_from_slice(b"0000000\0");
+        bytes[257..262].copy_from_slice(b"xxxxx");
         let mut doc = write_tar(&path, &bytes);
         assert!(detect(&mut doc).is_none());
     }
