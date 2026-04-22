@@ -107,6 +107,19 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 arch: Some(arg.to_owned()),
             }),
         },
+        "dis!" | "disassemble!" => {
+            let rest = rest.ok_or(HxError::MissingArgument("arch offset"))?;
+            let mut parts = rest.split_whitespace();
+            let arch = parts.next().ok_or(HxError::MissingArgument("arch"))?;
+            let offset = parts.next().ok_or(HxError::MissingArgument("offset"))?;
+            if parts.next().is_some() {
+                return Err(HxError::UnknownCommand(rest.to_owned()));
+            }
+            Ok(Command::DisassembleForce {
+                arch: arch.to_owned(),
+                offset: parse_offset(offset)?,
+            })
+        }
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
 }

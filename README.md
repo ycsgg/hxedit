@@ -155,6 +155,7 @@ Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (littl
 | `:hash sha512` | Compute SHA-512 |
 | `:hash crc32` | Compute CRC32 |
 | `:dis [arch]` | Enter the current read-only disassembly view for recognized ELF / PE / Mach-O executables |
+| `:dis! <arch> <offset>` | Force raw disassembly from a display offset even without executable-container detect |
 | `:dis off` | Return from disassembly view to the normal hex/ascii view |
 
 Hashes the active selection (visual or selected inspector field) if active, otherwise the entire file.
@@ -171,15 +172,17 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 ## Disassembly (Current Stage)
 
 - `:dis` now delivers a real read-only disassembly pane: executable container detect, arch resolution, backend resolve, and decoded instruction rows in the left main view
+- `:dis! arch offset` can force a raw disassembly view on arbitrary bytes; current forced mode assumes little-endian decoding for the chosen arch
 - 默认 backend 已抽象为 registry + `CapstoneBackend`，并开启 `capstone/full`；当前实际 decode 支持 `x86` / `x86_64` / `aarch64`
 - 左侧 gutter 现在显示 `段名:offset`，非 executable sections / spans 也会以原始字节行显示，右侧用 `.db ...` 占位
 - `j` / `k`、PageUp / PageDown、以及主视图滚轮滚动在 `:dis` 下已改为按 instruction row 前后移动，不再沿用 hex row 步长
 - 鼠标点击 / 拖拽在 `:dis` 下已按 disassembly rows 命中，不再复用 hex grid 的 offset 换算
+- disassembly viewport 现在带有 row cache/checkpoints；重复滚动、搜索定位与重绘不再每次从当前 span 起点重新解码
 - 当前 dis 主视图仍保持更宽的 instruction text 区域和较窄的 bytes 列，便于 review 指令文本可读性
 - `hxedit` 的目标仍是 byte-level editor + executable browsing，不会把 `:dis` 扩成重度 binary analysis 工具；CFG、function graph、decompiler、自动函数恢复都不在近期目标内
 - 后续会优先补“方便查看”的轻量能力，例如 direct call/jump target 提示、symbol/import 名字映射、以及 PLT / GOT 一类可浏览元数据，而不是引入完整分析框架
 - Disassembly view remains overwrite-only for layout-changing edits such as insert/delete/paste-insert
-- search 定位联动、viewport cache/checkpoints、以及 overwrite patch-triggered refresh 仍在后续阶段
+- symbol/import labeling、以及更细粒度的 patch-triggered cache invalidation 仍在后续阶段
 
 ## Status Bar
 

@@ -133,6 +133,10 @@ pub fn hint_for(input: &str) -> CommandHint {
                 details: "enter the read-only disassembly main view for ELF/PE/Mach-O using detected executable metadata and the current decode backend; `dis off` returns to hex view".to_owned(),
             }
         }
+        "dis!" | "disassemble!" => CommandHint {
+            syntax: format!("{name} <x86|x86_64|arm|aarch64|riscv64> <offset>"),
+            details: "force a raw disassembly view from the given display offset even when the file is not recognized as ELF/PE/Mach-O; assumes little-endian decoding for the chosen arch".to_owned(),
+        },
         other => {
             let suggestions = known_commands()
                 .into_iter()
@@ -278,7 +282,9 @@ fn known_commands() -> Vec<&'static str> {
         "export",
         "hash",
         "dis",
+        "dis!",
         "disassemble",
+        "disassemble!",
         "p",
         "paste",
         "p!",

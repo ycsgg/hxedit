@@ -124,5 +124,9 @@ pub enum Command {
     Disassemble {
         arch: Option<String>,
     },
+    DisassembleForce {
+        arch: String,
+        offset: u64,
+    },
     DisassembleOff,
 }

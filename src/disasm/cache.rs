@@ -155,7 +155,7 @@ impl DisasmCache {
                 continue;
             }
 
-            let batch = (target_rows - cached).max(PREFETCH_ROWS).min(256);
+            let batch = (target_rows - cached).clamp(PREFETCH_ROWS, 256);
             let decoded = decode_region_rows(doc, info, backend, cursor, batch)?;
             if decoded.is_empty() {
                 break;

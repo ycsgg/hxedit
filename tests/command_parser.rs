@@ -219,6 +219,8 @@ fn rejects_invalid_commands() {
     assert!(parse_command("si").is_err());
     assert!(parse_command("hash").is_err());
     assert!(parse_command("hash blake2").is_err());
+    assert!(parse_command("dis!").is_err());
+    assert!(parse_command("dis! x86_64").is_err());
     assert!(parse_command("unknown").is_err());
 }
 
@@ -272,6 +274,13 @@ fn parses_disassembly_commands() {
         parse_command("dis x86_64").unwrap(),
         Command::Disassemble {
             arch: Some("x86_64".to_owned())
+        }
+    );
+    assert_eq!(
+        parse_command("dis! x86_64 0x20").unwrap(),
+        Command::DisassembleForce {
+            arch: "x86_64".to_owned(),
+            offset: 0x20,
         }
     );
     assert_eq!(parse_command("dis off").unwrap(), Command::DisassembleOff);

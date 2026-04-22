@@ -3,6 +3,7 @@ pub enum ExecutableKind {
     Elf,
     Pe,
     MachO,
+    Raw,
 }
 
 impl ExecutableKind {
@@ -11,6 +12,7 @@ impl ExecutableKind {
             Self::Elf => "ELF",
             Self::Pe => "PE",
             Self::MachO => "Mach-O",
+            Self::Raw => "Raw",
         }
     }
 }

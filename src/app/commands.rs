@@ -4,7 +4,7 @@ use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::disasm::backend::resolve_backend_kind;
 use crate::disasm::DisassemblyState;
 use crate::error::{HxError, HxResult};
-use crate::executable::{detect_executable_info, override_arch};
+use crate::executable::{detect_executable_info, force_raw_executable_info, override_arch};
 use crate::format::parse::StructValue;
 use crate::mode::Mode;
 
@@ -87,6 +87,9 @@ impl App {
             }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
             Command::Disassemble { arch } => self.execute_disassemble_command(arch.as_deref()),
+            Command::DisassembleForce { arch, offset } => {
+                self.execute_disassemble_force_command(&arch, offset)
+            }
             Command::DisassembleOff => {
                 self.execute_disassemble_off_command();
                 Ok(())
@@ -569,6 +572,27 @@ impl App {
         } else {
             0
         };
+        self.enter_disassembly_view(info, backend, target)
+    }
+
+    fn execute_disassemble_force_command(&mut self, arch: &str, offset: u64) -> HxResult<()> {
+        let info = force_raw_executable_info(self.document.len(), arch, offset)?;
+        let backend = resolve_backend_kind(&info, None)?;
+        self.enter_disassembly_view(info, backend, offset)
+    }
+
+    fn execute_disassemble_off_command(&mut self) {
+        self.main_view = crate::app::MainView::Hex;
+        self.reset_disassembly_cache();
+        self.set_info_status("disassembly off");
+    }
+
+    fn enter_disassembly_view(
+        &mut self,
+        info: crate::executable::ExecutableInfo,
+        backend: crate::disasm::BackendKind,
+        target: u64,
+    ) -> HxResult<()> {
         self.cursor = self.clamp_offset(target);
         self.main_view = crate::app::MainView::Disassembly(DisassemblyState::new(
             info.clone(),
@@ -586,12 +610,6 @@ impl App {
             self.cursor
         ));
         Ok(())
-    }
-
-    fn execute_disassemble_off_command(&mut self) {
-        self.main_view = crate::app::MainView::Hex;
-        self.reset_disassembly_cache();
-        self.set_info_status("disassembly off");
     }
 
     fn execute_hash_command(&mut self, algorithm: HashAlgorithm) -> HxResult<()> {

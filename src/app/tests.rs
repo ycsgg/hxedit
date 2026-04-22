@@ -888,6 +888,32 @@ fn disassemble_command_aligns_viewport_to_containing_instruction() {
 }
 
 #[test]
+fn disassemble_force_command_opens_raw_bytes_with_explicit_arch() {
+    let mut bytes = vec![0_u8; 0x40];
+    bytes[0x10..0x12].copy_from_slice(&[0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+
+    app.execute_command(Command::DisassembleForce {
+        arch: "x86_64".to_owned(),
+        offset: 0x10,
+    })
+    .unwrap();
+
+    assert_eq!(app.cursor, 0x10);
+    assert!(app.status_message.contains("Raw x86_64"));
+    let state = match &app.main_view {
+        crate::app::MainView::Disassembly(state) => state.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let rows = app
+        .collect_disassembly_rows(&state, state.viewport_top, 2)
+        .unwrap();
+    assert_eq!(rows[0].offset, 0x10);
+    assert!(rows[0].text.contains("nop"));
+    assert!(rows[1].text.contains("ret"));
+}
+
+#[test]
 fn disassemble_off_returns_to_hex_view() {
     let bytes = build_disassembly_elf64(&[0x90, 0x90, 0x90, 0xc3]);
     let mut app = app_with_bytes(&bytes);
