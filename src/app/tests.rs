@@ -872,6 +872,22 @@ fn disassemble_command_switches_main_view() {
 }
 
 #[test]
+fn disassemble_command_aligns_viewport_to_containing_instruction() {
+    let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.cursor = 0x102;
+
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    assert_eq!(app.cursor, 0x102);
+    match &app.main_view {
+        crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x101),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    }
+}
+
+#[test]
 fn disassemble_off_returns_to_hex_view() {
     let bytes = build_disassembly_elf64(&[0x90, 0x90, 0x90, 0xc3]);
     let mut app = app_with_bytes(&bytes);

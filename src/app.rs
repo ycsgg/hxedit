@@ -32,7 +32,7 @@ use crate::cli::Cli;
 use crate::config::Config;
 use crate::core::document::Document;
 use crate::core::piece_table::CellId;
-use crate::disasm::DisassemblyState;
+use crate::disasm::{DisasmCache, DisassemblyState};
 use crate::format::parse::{InspectorRow, NodePath};
 use crate::input::keymap::map_key;
 use crate::mode::Mode;
@@ -76,6 +76,7 @@ pub struct App {
     last_search: Option<SearchState>,
     last_paste: Option<PasteState>,
     profiler: Option<Profiler>,
+    disasm_cache: Option<DisasmCache>,
     // ── Inspector state ──
     /// Whether the inspector panel is shown.
     show_inspector: bool,
@@ -348,6 +349,7 @@ impl App {
                     terminal_setup: Duration::default(),
                 })
             }),
+            disasm_cache: None,
             document,
             cursor,
             config,
@@ -364,6 +366,26 @@ impl App {
         }
         app.sync_inspector_to_cursor();
         Ok(app)
+    }
+
+    pub(crate) fn reset_disassembly_cache(&mut self) {
+        if let MainView::Disassembly(state) = &self.main_view {
+            self.disasm_cache = Some(DisasmCache::new(&state.info, self.document.len()));
+        } else {
+            self.disasm_cache = None;
+        }
+    }
+
+    pub(crate) fn invalidate_disassembly_cache(&mut self) {
+        if let MainView::Disassembly(state) = &self.main_view {
+            if let Some(cache) = self.disasm_cache.as_mut() {
+                cache.reset(&state.info, self.document.len());
+            } else {
+                self.disasm_cache = Some(DisasmCache::new(&state.info, self.document.len()));
+            }
+        } else {
+            self.disasm_cache = None;
+        }
     }
 
     pub fn run(&mut self) -> Result<()> {

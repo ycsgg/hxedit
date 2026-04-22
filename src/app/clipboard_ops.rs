@@ -280,6 +280,7 @@ impl App {
             );
         }
         self.cursor = cursor_after;
+        self.invalidate_disassembly_cache();
         self.refresh_inspector();
         Ok(written)
     }
@@ -310,6 +311,7 @@ impl App {
             self.mode,
         );
         self.cursor = cursor_after;
+        self.invalidate_disassembly_cache();
         self.refresh_inspector();
         Ok(bytes.len())
     }

@@ -29,6 +29,7 @@ impl App {
             self.cursor,
             self.mode,
         );
+        self.invalidate_disassembly_cache();
         self.refresh_inspector();
         self.set_info_status(format!("deleted 0x{:x}", self.cursor));
         Ok(())
@@ -61,6 +62,7 @@ impl App {
             self.cursor,
             self.mode,
         );
+        self.invalidate_disassembly_cache();
         self.refresh_inspector();
         self.set_info_status(format!("deleted selection {} bytes", span));
         Ok(())
@@ -132,6 +134,7 @@ impl App {
                 self.mode,
             );
         }
+        self.invalidate_disassembly_cache();
         self.refresh_inspector();
         Ok(())
     }
@@ -161,6 +164,7 @@ impl App {
                         high_nibble: value,
                     }),
                 };
+                self.invalidate_disassembly_cache();
                 self.refresh_inspector();
                 self.set_info_status(format!("inserted 0x{:x}", offset));
             }
@@ -169,6 +173,7 @@ impl App {
                     .replace_display_byte(pending.offset, (pending.high_nibble << 4) | value)?;
                 self.cursor = pending.offset + 1;
                 self.commit_pending_insert();
+                self.invalidate_disassembly_cache();
                 self.refresh_inspector();
                 self.set_info_status(format!("inserted 0x{:x}", pending.offset));
             }
@@ -186,6 +191,7 @@ impl App {
                     self.document.delete_range_real(pending.offset, 1)?;
                     self.cursor = pending.offset;
                     self.mode = Mode::InsertHex { pending: None };
+                    self.invalidate_disassembly_cache();
                     self.refresh_inspector();
                     self.set_info_status(format!("deleted 0x{:x}", pending.offset));
                     return Ok(());
@@ -208,6 +214,7 @@ impl App {
                     Mode::InsertHex { pending: None },
                 );
                 self.cursor = delete_offset;
+                self.invalidate_disassembly_cache();
                 self.refresh_inspector();
                 self.set_info_status(format!("deleted 0x{:x}", delete_offset));
                 Ok(())

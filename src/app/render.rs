@@ -8,7 +8,7 @@ use crate::app::App;
 use crate::commands::hints;
 use crate::core::document::ByteSlot;
 use crate::disasm::backend::resolve_backend;
-use crate::disasm::{decode_region_rows, DisasmRow};
+use crate::disasm::DisasmRow;
 use crate::mode::Mode;
 use crate::profile::{FrameStats, RenderMainStats};
 use crate::util::format::offset_width;
@@ -319,7 +319,10 @@ impl App {
         row_count: usize,
     ) -> crate::error::HxResult<Vec<DisasmRow>> {
         let backend = resolve_backend(&state.info, Some(state.backend))?;
-        decode_region_rows(
+        let cache = self.disasm_cache.get_or_insert_with(|| {
+            crate::disasm::DisasmCache::new(&state.info, self.document.len())
+        });
+        cache.collect_rows(
             &mut self.document,
             &state.info,
             backend.as_ref(),

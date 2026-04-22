@@ -468,6 +468,9 @@ impl App {
         let cursor_before = self.cursor;
         let mode_before = self.mode;
 
+        if !ops.is_empty() {
+            self.invalidate_disassembly_cache();
+        }
         self.refresh_inspector();
         self.mode = Mode::Inspector;
         self.sync_cursor_to_inspector();

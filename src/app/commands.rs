@@ -111,6 +111,7 @@ impl App {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.cursor = self.clamp_offset(self.cursor);
+        self.invalidate_disassembly_cache();
         self.refresh_inspector();
         self.set_info_status(format!("wrote {} [{}]", saved.display(), profile));
         self.should_quit = should_quit;
@@ -307,6 +308,9 @@ impl App {
         };
         let cursor_after = self.clamp_cursor_for_mode(cursor_after, mode_after);
         self.cursor = cursor_after;
+        if !outcome.ops.is_empty() {
+            self.invalidate_disassembly_cache();
+        }
         self.refresh_inspector();
 
         self.push_undo_step(
@@ -566,8 +570,13 @@ impl App {
             0
         };
         self.cursor = self.clamp_offset(target);
-        self.main_view =
-            crate::app::MainView::Disassembly(DisassemblyState::new(info.clone(), backend, target));
+        self.main_view = crate::app::MainView::Disassembly(DisassemblyState::new(
+            info.clone(),
+            backend,
+            self.cursor,
+        ));
+        self.reset_disassembly_cache();
+        self.focus_disassembly_row_at_offset(self.cursor)?;
         self.set_info_status(format!(
             "disassembly: {} {} ({}, {}) @ 0x{:x}",
             info.kind.label(),
@@ -581,6 +590,7 @@ impl App {
 
     fn execute_disassemble_off_command(&mut self) {
         self.main_view = crate::app::MainView::Hex;
+        self.reset_disassembly_cache();
         self.set_info_status("disassembly off");
     }
 

@@ -30,6 +30,9 @@ impl App {
             self.cursor = self.clamp_cursor_for_mode(self.cursor, Mode::Normal);
         }
 
+        if undone > 0 {
+            self.invalidate_disassembly_cache();
+        }
         self.refresh_inspector();
         self.set_undo_status(undone);
         Ok(())
@@ -60,6 +63,9 @@ impl App {
             self.cursor = self.clamp_cursor_for_mode(self.cursor, Mode::Normal);
         }
 
+        if redone > 0 {
+            self.invalidate_disassembly_cache();
+        }
         self.refresh_inspector();
 
         if redone == 0 {
