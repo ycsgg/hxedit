@@ -31,6 +31,7 @@ pub struct DisasmRow {
     pub virtual_address: Option<u64>,
     pub bytes: Vec<u8>,
     pub text: String,
+    pub symbolized_names: Vec<String>,
     pub symbol_label: Option<String>,
     pub direct_target: Option<DirectBranchTarget>,
     pub span_name: Option<String>,
@@ -38,27 +39,6 @@ pub struct DisasmRow {
 }
 
 impl DisasmRow {
-    pub fn instruction(
-        offset: u64,
-        virtual_address: Option<u64>,
-        bytes: Vec<u8>,
-        text: String,
-        symbol_label: Option<String>,
-        direct_target: Option<DirectBranchTarget>,
-        span_name: Option<String>,
-    ) -> Self {
-        Self {
-            offset,
-            virtual_address,
-            bytes,
-            text,
-            symbol_label,
-            direct_target,
-            span_name,
-            kind: DisasmRowKind::Instruction,
-        }
-    }
-
     pub fn data(
         offset: u64,
         virtual_address: Option<u64>,
@@ -71,6 +51,7 @@ impl DisasmRow {
             virtual_address,
             text: format_db_bytes(&bytes),
             bytes,
+            symbolized_names: Vec::new(),
             symbol_label,
             direct_target: None,
             span_name,
@@ -90,6 +71,7 @@ impl DisasmRow {
             virtual_address,
             bytes: vec![byte],
             text: format_db_bytes(&[byte]),
+            symbolized_names: Vec::new(),
             symbol_label,
             direct_target: None,
             span_name,

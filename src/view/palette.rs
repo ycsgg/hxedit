@@ -167,7 +167,9 @@ impl Palette {
             disasm_register: Style::default().fg(Color::Rgb(110, 190, 240)),
             disasm_immediate: Style::default().fg(Color::Rgb(244, 194, 96)),
             disasm_punctuation: Style::default().fg(Color::Rgb(132, 132, 132)),
-            disasm_symbol: Style::default().fg(Color::Rgb(144, 214, 149)),
+            disasm_symbol: Style::default()
+                .fg(Color::Rgb(255, 142, 214))
+                .add_modifier(Modifier::BOLD),
             disasm_virtual: Style::default().fg(Color::Rgb(128, 128, 128)),
         }
     }
@@ -245,7 +247,9 @@ impl Palette {
             disasm_register: Style::default().fg(Color::Indexed(117)),
             disasm_immediate: Style::default().fg(Color::Indexed(222)),
             disasm_punctuation: Style::default().fg(Color::Indexed(245)),
-            disasm_symbol: Style::default().fg(Color::Indexed(114)),
+            disasm_symbol: Style::default()
+                .fg(Color::Indexed(213))
+                .add_modifier(Modifier::BOLD),
             disasm_virtual: Style::default().fg(Color::Indexed(244)),
         }
     }
@@ -321,7 +325,9 @@ impl Palette {
             disasm_register: Style::default().fg(Color::Cyan),
             disasm_immediate: Style::default().fg(Color::Yellow),
             disasm_punctuation: Style::default().fg(Color::DarkGray),
-            disasm_symbol: Style::default().fg(Color::Green),
+            disasm_symbol: Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
             disasm_virtual: Style::default().fg(Color::DarkGray),
         }
     }
@@ -372,7 +378,9 @@ impl Palette {
             disasm_register: base.add_modifier(Modifier::UNDERLINED),
             disasm_immediate: base.add_modifier(Modifier::BOLD),
             disasm_punctuation: base,
-            disasm_symbol: base.add_modifier(Modifier::BOLD),
+            disasm_symbol: base
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
             disasm_virtual: base,
         }
     }
@@ -381,7 +389,7 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::{ColorLevel, Palette};
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
 
     #[test]
     fn no_color_flag_overrides_detection() {
@@ -433,6 +441,8 @@ mod tests {
         let palette = Palette::new(ColorLevel::Basic);
         assert!(matches!(palette.gutter.fg, Some(Color::DarkGray)));
         assert!(matches!(palette.cursor.bg, Some(Color::Blue)));
+        assert!(matches!(palette.disasm_symbol.fg, Some(Color::Magenta)));
+        assert!(palette.disasm_symbol.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -442,5 +452,9 @@ mod tests {
         assert!(palette.gutter.bg.is_none());
         assert!(palette.printable.fg.is_none());
         assert!(palette.printable.bg.is_none());
+        assert!(palette
+            .disasm_symbol
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
     }
 }

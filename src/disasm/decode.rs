@@ -3,8 +3,7 @@ use crate::disasm::backend::DisassemblerBackend;
 use crate::disasm::text::{
     parse_immediate_token, tokenize_instruction_text, InstructionTextTokenKind,
 };
-use crate::disasm::types::DirectBranchTarget;
-use crate::disasm::types::DisasmRow;
+use crate::disasm::types::{DirectBranchTarget, DisasmRow, DisasmRowKind};
 use crate::error::HxResult;
 use crate::executable::{CodeSpan, ExecutableInfo};
 
@@ -117,17 +116,19 @@ fn decode_instruction_row(
                 span.name.clone(),
             )
         } else {
-            let text = symbolize_instruction_text(&decoded.text, info);
+            let (text, symbolized_names) = symbolize_instruction_text(&decoded.text, info);
             let direct_target = resolve_direct_target(decoded.direct_target, info);
-            DisasmRow::instruction(
+            DisasmRow {
                 offset,
                 virtual_address,
-                decoded.bytes,
+                bytes: decoded.bytes,
                 text,
+                symbolized_names,
                 symbol_label,
                 direct_target,
-                span.name.clone(),
-            )
+                span_name: span.name.clone(),
+                kind: DisasmRowKind::Instruction,
+            }
         }
     } else {
         DisasmRow::invalid(
@@ -175,8 +176,9 @@ fn decode_data_row(
     ))
 }
 
-fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> String {
+fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> (String, Vec<String>) {
     let mut out = String::with_capacity(text.len());
+    let mut symbolized_names = Vec::new();
     for token in tokenize_instruction_text(text) {
         if token.kind != InstructionTextTokenKind::Atom {
             out.push_str(token.text);
@@ -185,6 +187,9 @@ fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> String {
 
         if let Some(address) = parse_immediate_token(token.text) {
             if let Some(name) = info.display_name_at_virtual(address) {
+                if !symbolized_names.iter().any(|existing| existing == name) {
+                    symbolized_names.push(name.to_owned());
+                }
                 out.push_str(name);
             } else {
                 out.push_str(token.text);
@@ -193,7 +198,7 @@ fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> String {
             out.push_str(token.text);
         }
     }
-    out
+    (out, symbolized_names)
 }
 
 #[cfg(test)]
@@ -592,6 +597,7 @@ mod tests {
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 3).unwrap();
 
         assert_eq!(rows[1].text, "call entry");
+        assert_eq!(rows[1].symbolized_names, vec!["entry".to_owned()]);
         let target = rows[1].direct_target.as_ref().expect("direct target");
         assert_eq!(target.kind, DirectBranchKind::Call);
         assert_eq!(target.virtual_address, 0x401000);
@@ -616,6 +622,7 @@ mod tests {
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert_eq!(rows[0].text, "bl entry");
+        assert_eq!(rows[0].symbolized_names, vec!["entry".to_owned()]);
         let target = rows[0].direct_target.as_ref().expect("direct target");
         assert_eq!(target.kind, DirectBranchKind::Call);
         assert_eq!(target.virtual_address, 0x401000);
@@ -640,6 +647,7 @@ mod tests {
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert_eq!(rows[0].text, "tbnz w0, #0, target");
+        assert_eq!(rows[0].symbolized_names, vec!["target".to_owned()]);
         let target = rows[0].direct_target.as_ref().expect("direct target");
         assert_eq!(target.kind, DirectBranchKind::Jump);
         assert_eq!(target.virtual_address, 0x401004);
@@ -656,6 +664,7 @@ mod tests {
         assert!(info.symbol_at_virtual(0x401030).is_none());
         assert_eq!(info.display_name_at_virtual(0x401030), Some("puts"));
         assert_eq!(rows[0].text, "call puts");
+        assert_eq!(rows[0].symbolized_names, vec!["puts".to_owned()]);
         let target = rows[0].direct_target.as_ref().expect("direct target");
         assert_eq!(target.kind, DirectBranchKind::Call);
         assert_eq!(target.virtual_address, 0x401030);
