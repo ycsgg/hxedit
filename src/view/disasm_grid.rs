@@ -127,6 +127,40 @@ fn append_row_suffix(
             palette,
         ));
     }
+    append_direct_target_suffix(spans, row, active_row, palette);
+}
+
+fn append_direct_target_suffix(
+    spans: &mut Vec<Span<'static>>,
+    row: &DisasmRow,
+    active_row: bool,
+    palette: &Palette,
+) {
+    let Some(target) = row.direct_target.as_ref() else {
+        return;
+    };
+    let Some(name) = target.display_name.as_deref() else {
+        return;
+    };
+
+    spans.push(styled_punctuation(" ", active_row, palette));
+    spans.push(styled_punctuation("→", active_row, palette));
+    spans.push(styled_punctuation(" ", active_row, palette));
+    if row.text.contains(name) {
+        spans.push(styled_operand(
+            format!("@0x{:x}", target.virtual_address),
+            palette.disasm_virtual,
+            active_row,
+            palette,
+        ));
+    } else {
+        spans.push(styled_operand(
+            format!("<{name}>"),
+            palette.disasm_symbol,
+            active_row,
+            palette,
+        ));
+    }
 }
 
 fn tokenize_operands(text: &str, active_row: bool, palette: &Palette) -> Vec<Span<'static>> {
@@ -222,6 +256,11 @@ mod tests {
             bytes: vec![0x48, 0x8b, 0x45, 0xf8],
             text: "mov rax, [rbp - 0x8]".to_owned(),
             symbol_label: Some("entry".to_owned()),
+            direct_target: Some(crate::disasm::DirectBranchTarget {
+                kind: crate::disasm::DirectBranchKind::Call,
+                virtual_address: 0x401234,
+                display_name: Some("target".to_owned()),
+            }),
             span_name: Some(".text".to_owned()),
             kind: DisasmRowKind::Instruction,
         }]
@@ -269,6 +308,42 @@ mod tests {
             .spans
             .iter()
             .any(|span| span.content.contains("@0x401000")));
+        assert!(line.spans.iter().any(|span| span.content.contains("→")));
+        assert!(line
+            .spans
+            .iter()
+            .any(|span| span.content.contains("<target>")));
         assert!(line.spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn instruction_text_uses_target_address_when_operand_is_already_symbolized() {
+        let palette = Palette::new(ColorLevel::Basic);
+        let rows = vec![DisasmRow {
+            offset: 0x100,
+            virtual_address: Some(0x401000),
+            bytes: vec![0xe8, 0xfb, 0x0f, 0x00, 0x00],
+            text: "call entry".to_owned(),
+            symbol_label: None,
+            direct_target: Some(crate::disasm::DirectBranchTarget {
+                kind: crate::disasm::DirectBranchKind::Call,
+                virtual_address: 0x402000,
+                display_name: Some("entry".to_owned()),
+            }),
+            span_name: Some(".text".to_owned()),
+            kind: DisasmRowKind::Instruction,
+        }];
+
+        let lines = build_text(&rows, 0x100, &palette);
+        let line = &lines[0];
+        assert!(line.spans.iter().any(|span| span.content.contains("→")));
+        assert!(line
+            .spans
+            .iter()
+            .any(|span| span.content.contains("@0x402000")));
+        assert!(!line
+            .spans
+            .iter()
+            .any(|span| span.content.contains("<entry>")));
     }
 }

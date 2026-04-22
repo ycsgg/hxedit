@@ -6,7 +6,7 @@ pub trait DisassemblerBackend {
     fn max_instruction_bytes(&self) -> usize;
     fn decode_one(
         &self,
-        offset: u64,
+        address: u64,
         bytes: &[u8],
     ) -> crate::error::HxResult<Option<DecodedInstruction>>;
 }

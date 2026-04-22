@@ -1,7 +1,8 @@
 use capstone::prelude::*;
+use capstone::{arch::DetailsArchInsn, InsnGroupType};
 
 use crate::disasm::backend::{BackendKind, DisassemblerBackend};
-use crate::disasm::types::DecodedInstruction;
+use crate::disasm::types::{DecodedInstruction, DirectBranchKind, DirectBranchTarget};
 use crate::error::{HxError, HxResult};
 use crate::executable::{Endian, ExecutableArch, ExecutableInfo};
 
@@ -87,23 +88,68 @@ impl DisassemblerBackend for CapstoneBackend {
         self.max_instruction_bytes
     }
 
-    fn decode_one(&self, offset: u64, bytes: &[u8]) -> HxResult<Option<DecodedInstruction>> {
+    fn decode_one(&self, address: u64, bytes: &[u8]) -> HxResult<Option<DecodedInstruction>> {
         if bytes.is_empty() {
             return Ok(None);
         }
         let instructions = self
             .engine
-            .disasm_count(bytes, offset, 1)
+            .disasm_count(bytes, address, 1)
             .map_err(capstone_error)?;
         let Some(insn) = instructions.as_ref().first() else {
             return Ok(None);
         };
         let text = format_instruction_text(insn);
+        let direct_target = self.extract_direct_branch_target(insn);
         Ok(Some(DecodedInstruction {
             bytes: insn.bytes().to_vec(),
             text,
+            direct_target,
         }))
     }
+}
+
+impl CapstoneBackend {
+    fn extract_direct_branch_target(
+        &self,
+        insn: &capstone::Insn<'_>,
+    ) -> Option<DirectBranchTarget> {
+        let detail = self.engine.insn_detail(insn).ok()?;
+        let kind = branch_kind_from_groups(&detail)?;
+        match detail.arch_detail() {
+            capstone::arch::ArchDetail::X86Detail(detail) => {
+                extract_x86_direct_target(&detail, kind)
+            }
+            _ => None,
+        }
+    }
+}
+
+fn branch_kind_from_groups(detail: &capstone::InsnDetail<'_>) -> Option<DirectBranchKind> {
+    detail.groups().iter().find_map(|group| {
+        if group.0 == InsnGroupType::CS_GRP_CALL as u8 {
+            Some(DirectBranchKind::Call)
+        } else if group.0 == InsnGroupType::CS_GRP_JUMP as u8 {
+            Some(DirectBranchKind::Jump)
+        } else {
+            None
+        }
+    })
+}
+
+fn extract_x86_direct_target(
+    detail: &capstone::arch::x86::X86InsnDetail<'_>,
+    kind: DirectBranchKind,
+) -> Option<DirectBranchTarget> {
+    let operand = detail.operands().next()?;
+    let capstone::arch::x86::X86OperandType::Imm(target) = operand.op_type else {
+        return None;
+    };
+    Some(DirectBranchTarget {
+        kind,
+        virtual_address: u64::try_from(target).ok()?,
+        display_name: None,
+    })
 }
 
 fn format_instruction_text(insn: &capstone::Insn<'_>) -> String {

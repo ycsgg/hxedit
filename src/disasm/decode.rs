@@ -3,6 +3,7 @@ use crate::disasm::backend::DisassemblerBackend;
 use crate::disasm::text::{
     parse_immediate_token, tokenize_instruction_text, InstructionTextTokenKind,
 };
+use crate::disasm::types::DirectBranchTarget;
 use crate::disasm::types::DisasmRow;
 use crate::error::HxResult;
 use crate::executable::{CodeSpan, ExecutableInfo};
@@ -95,6 +96,7 @@ fn decode_instruction_row(
     let symbol_label = virtual_address
         .and_then(|address| info.symbol_at_virtual(address))
         .map(|symbol| symbol.display_name.clone());
+    let decode_address = virtual_address.unwrap_or(offset);
     if bytes.is_empty() {
         return Ok(DisasmRow::data(
             offset,
@@ -105,7 +107,7 @@ fn decode_instruction_row(
         ));
     }
 
-    let row = if let Some(decoded) = backend.decode_one(offset, &bytes)? {
+    let row = if let Some(decoded) = backend.decode_one(decode_address, &bytes)? {
         if decoded.bytes.is_empty() {
             DisasmRow::invalid(
                 offset,
@@ -116,12 +118,14 @@ fn decode_instruction_row(
             )
         } else {
             let text = symbolize_instruction_text(&decoded.text, info);
+            let direct_target = resolve_direct_target(decoded.direct_target, info);
             DisasmRow::instruction(
                 offset,
                 virtual_address,
                 decoded.bytes,
                 text,
                 symbol_label,
+                direct_target,
                 span.name.clone(),
             )
         }
@@ -135,6 +139,18 @@ fn decode_instruction_row(
         )
     };
     Ok(row)
+}
+
+fn resolve_direct_target(
+    direct_target: Option<DirectBranchTarget>,
+    info: &ExecutableInfo,
+) -> Option<DirectBranchTarget> {
+    direct_target.map(|mut target| {
+        target.display_name = info
+            .symbol_at_virtual(target.virtual_address)
+            .map(|symbol| symbol.display_name.clone());
+        target
+    })
 }
 
 fn decode_data_row(
@@ -190,8 +206,9 @@ mod tests {
     use crate::cli::Cli;
     use crate::core::document::Document;
     use crate::disasm::backend::{resolve_backend, resolve_backend_kind, BackendKind};
-    use crate::disasm::DisasmRowKind;
+    use crate::disasm::{DirectBranchKind, DisasmRowKind};
     use crate::executable::detect_executable_info;
+    use crate::executable::types::{SymbolInfo, SymbolSource};
 
     fn doc_with_bytes(bytes: &[u8]) -> Document {
         let dir = tempdir().unwrap();
@@ -212,6 +229,7 @@ mod tests {
     }
 
     fn x86_64_elf(code: &[u8]) -> Vec<u8> {
+        let text_virtual = 0x401000u64;
         let mut bytes = vec![0_u8; 0x200];
         bytes[0..4].copy_from_slice(b"\x7fELF");
         bytes[4] = 2;
@@ -229,12 +247,14 @@ mod tests {
         bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
         bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
         bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[ph + 16..ph + 24].copy_from_slice(&text_virtual.to_le_bytes());
         bytes[ph + 32..ph + 40].copy_from_slice(&(code.len() as u64).to_le_bytes());
         bytes[0x100..0x100 + code.len()].copy_from_slice(code);
         bytes
     }
 
     fn aarch64_elf(code: &[u8]) -> Vec<u8> {
+        let text_virtual = 0x401000u64;
         let mut bytes = vec![0_u8; 0x200];
         bytes[0..4].copy_from_slice(b"\x7fELF");
         bytes[4] = 2;
@@ -252,6 +272,7 @@ mod tests {
         bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
         bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
         bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[ph + 16..ph + 24].copy_from_slice(&text_virtual.to_le_bytes());
         bytes[ph + 32..ph + 40].copy_from_slice(&(code.len() as u64).to_le_bytes());
         bytes[0x100..0x100 + code.len()].copy_from_slice(code);
         bytes
@@ -353,5 +374,27 @@ mod tests {
         assert_eq!(rows[0].kind, DisasmRowKind::Data);
         assert_eq!(rows[0].span_name.as_deref(), Some(".rdata"));
         assert_eq!(rows[0].text, ".db 0x41, 0x42, 0x43");
+    }
+
+    #[test]
+    fn decode_region_rows_tracks_x86_direct_call_targets() {
+        let mut doc = doc_with_bytes(&x86_64_elf(&[0x90, 0xE8, 0xFA, 0xFF, 0xFF, 0xFF, 0xC3]));
+        let mut info = detect_executable_info(&mut doc).unwrap();
+        info.symbols_by_va.insert(
+            0x401000,
+            SymbolInfo {
+                display_name: "entry".to_owned(),
+                raw_name: Some("entry".to_owned()),
+                source: SymbolSource::Object,
+            },
+        );
+        let backend = resolve_backend(&info, None).unwrap();
+        let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 3).unwrap();
+
+        assert_eq!(rows[1].text, "call entry");
+        let target = rows[1].direct_target.as_ref().expect("direct target");
+        assert_eq!(target.kind, DirectBranchKind::Call);
+        assert_eq!(target.virtual_address, 0x401000);
+        assert_eq!(target.display_name.as_deref(), Some("entry"));
     }
 }

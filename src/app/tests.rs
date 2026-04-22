@@ -1097,6 +1097,28 @@ fn disassembly_normalizes_platform_symbol_decorations() {
 }
 
 #[test]
+fn disassembly_resolves_x86_direct_call_target_with_virtual_address() {
+    let bytes =
+        build_disassembly_elf64_with_symbol(&[0x90, 0xE8, 0xFA, 0xFF, 0xFF, 0xFF, 0xC3], "entry");
+    let mut app = app_with_bytes(&bytes);
+
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    let state = match &app.main_view {
+        crate::app::MainView::Disassembly(state) => state.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let rows = app
+        .collect_disassembly_rows(&state, state.viewport_top, 3)
+        .unwrap();
+    let target = rows[1].direct_target.as_ref().expect("direct target");
+    assert_eq!(rows[1].text, "call entry");
+    assert_eq!(target.virtual_address, 0x401000);
+    assert_eq!(target.display_name.as_deref(), Some("entry"));
+}
+
+#[test]
 fn disassemble_force_command_opens_raw_bytes_with_explicit_arch() {
     let mut bytes = vec![0_u8; 0x40];
     bytes[0x10..0x12].copy_from_slice(&[0x90, 0xc3]);

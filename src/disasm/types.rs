@@ -2,6 +2,20 @@
 pub struct DecodedInstruction {
     pub bytes: Vec<u8>,
     pub text: String,
+    pub direct_target: Option<DirectBranchTarget>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectBranchKind {
+    Call,
+    Jump,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectBranchTarget {
+    pub kind: DirectBranchKind,
+    pub virtual_address: u64,
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,6 +32,7 @@ pub struct DisasmRow {
     pub bytes: Vec<u8>,
     pub text: String,
     pub symbol_label: Option<String>,
+    pub direct_target: Option<DirectBranchTarget>,
     pub span_name: Option<String>,
     pub kind: DisasmRowKind,
 }
@@ -29,6 +44,7 @@ impl DisasmRow {
         bytes: Vec<u8>,
         text: String,
         symbol_label: Option<String>,
+        direct_target: Option<DirectBranchTarget>,
         span_name: Option<String>,
     ) -> Self {
         Self {
@@ -37,6 +53,7 @@ impl DisasmRow {
             bytes,
             text,
             symbol_label,
+            direct_target,
             span_name,
             kind: DisasmRowKind::Instruction,
         }
@@ -55,6 +72,7 @@ impl DisasmRow {
             text: format_db_bytes(&bytes),
             bytes,
             symbol_label,
+            direct_target: None,
             span_name,
             kind: DisasmRowKind::Data,
         }
@@ -73,6 +91,7 @@ impl DisasmRow {
             bytes: vec![byte],
             text: format_db_bytes(&[byte]),
             symbol_label,
+            direct_target: None,
             span_name,
             kind: DisasmRowKind::Invalid,
         }

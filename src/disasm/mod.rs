@@ -10,4 +10,6 @@ pub use backend::BackendKind;
 pub use cache::DisasmCache;
 pub use decode::decode_region_rows;
 pub use state::DisassemblyState;
-pub use types::{DecodedInstruction, DisasmRow, DisasmRowKind};
+pub use types::{
+    DecodedInstruction, DirectBranchKind, DirectBranchTarget, DisasmRow, DisasmRowKind,
+};
