@@ -7,7 +7,6 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use crate::app::App;
 use crate::commands::hints;
 use crate::core::document::ByteSlot;
-use crate::disasm::backend::resolve_backend;
 use crate::disasm::DisasmRow;
 use crate::mode::Mode;
 use crate::profile::{FrameStats, RenderMainStats};
@@ -318,17 +317,16 @@ impl App {
         start: u64,
         row_count: usize,
     ) -> crate::error::HxResult<Vec<DisasmRow>> {
-        let backend = resolve_backend(&state.info, Some(state.backend))?;
-        let cache = self.disasm_cache.get_or_insert_with(|| {
-            crate::disasm::DisasmCache::new(&state.info, self.document.len())
-        });
-        cache.collect_rows(
-            &mut self.document,
-            &state.info,
-            backend.as_ref(),
-            start,
-            row_count,
-        )
+        self.ensure_disassembly_backend(state)?;
+        let doc_len = self.document.len();
+        let cache = self
+            .disasm_cache
+            .get_or_insert_with(|| crate::disasm::DisasmCache::new(&state.info, doc_len));
+        let backend = self
+            .disasm_backend
+            .as_deref()
+            .expect("disassembly backend should be initialized");
+        cache.collect_rows(&mut self.document, &state.info, backend, start, row_count)
     }
 
     fn main_lines_from_disassembly_rows(

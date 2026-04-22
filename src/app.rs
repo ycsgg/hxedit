@@ -77,6 +77,7 @@ pub struct App {
     last_paste: Option<PasteState>,
     profiler: Option<Profiler>,
     disasm_cache: Option<DisasmCache>,
+    disasm_backend: Option<Box<dyn crate::disasm::backend::DisassemblerBackend>>,
     // ── Inspector state ──
     /// Whether the inspector panel is shown.
     show_inspector: bool,
@@ -350,6 +351,7 @@ impl App {
                 })
             }),
             disasm_cache: None,
+            disasm_backend: None,
             document,
             cursor,
             config,
@@ -368,12 +370,35 @@ impl App {
         Ok(app)
     }
 
-    pub(crate) fn reset_disassembly_cache(&mut self) {
+    pub(crate) fn reset_disassembly_runtime(&mut self) -> crate::error::HxResult<()> {
         if let MainView::Disassembly(state) = &self.main_view {
+            self.disasm_backend = Some(crate::disasm::backend::resolve_backend(
+                &state.info,
+                Some(state.backend),
+            )?);
             self.disasm_cache = Some(DisasmCache::new(&state.info, self.document.len()));
         } else {
-            self.disasm_cache = None;
+            self.clear_disassembly_runtime();
         }
+        Ok(())
+    }
+
+    pub(crate) fn clear_disassembly_runtime(&mut self) {
+        self.disasm_backend = None;
+        self.disasm_cache = None;
+    }
+
+    pub(crate) fn ensure_disassembly_backend(
+        &mut self,
+        state: &crate::disasm::DisassemblyState,
+    ) -> crate::error::HxResult<()> {
+        if self.disasm_backend.is_none() {
+            self.disasm_backend = Some(crate::disasm::backend::resolve_backend(
+                &state.info,
+                Some(state.backend),
+            )?);
+        }
+        Ok(())
     }
 
     pub(crate) fn invalidate_disassembly_cache(&mut self) {
@@ -384,7 +409,7 @@ impl App {
                 self.disasm_cache = Some(DisasmCache::new(&state.info, self.document.len()));
             }
         } else {
-            self.disasm_cache = None;
+            self.clear_disassembly_runtime();
         }
     }
 

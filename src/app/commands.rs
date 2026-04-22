@@ -583,7 +583,7 @@ impl App {
 
     fn execute_disassemble_off_command(&mut self) {
         self.main_view = crate::app::MainView::Hex;
-        self.reset_disassembly_cache();
+        self.clear_disassembly_runtime();
         self.set_info_status("disassembly off");
     }
 
@@ -599,7 +599,7 @@ impl App {
             backend,
             self.cursor,
         ));
-        self.reset_disassembly_cache();
+        self.reset_disassembly_runtime()?;
         self.focus_disassembly_row_at_offset(self.cursor)?;
         let metadata_suffix = match (info.symbol_count(), info.import_count()) {
             (0, 0) => String::new(),

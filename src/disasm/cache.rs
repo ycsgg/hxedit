@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::document::Document;
 use crate::disasm::backend::DisassemblerBackend;
 use crate::disasm::decode::decode_region_rows;
+use crate::disasm::regions::{data_row_start, region_containing_or_after, visible_regions};
 use crate::disasm::DisasmRow;
 use crate::error::HxResult;
-use crate::executable::{CodeSpan, ExecutableInfo};
+use crate::executable::ExecutableInfo;
 
-const DATA_ROW_BYTES: u64 = 8;
 const PREFETCH_ROWS: usize = 32;
 const CHECKPOINT_STRIDE: usize = 32;
 
@@ -190,82 +190,6 @@ impl DisasmCache {
             .saturating_sub(1);
         (offset <= row_end).then_some(row)
     }
-}
-
-fn region_containing_or_after(
-    info: &ExecutableInfo,
-    doc_len: u64,
-    offset: u64,
-) -> Option<CodeSpan> {
-    visible_regions(info, doc_len)
-        .into_iter()
-        .find(|region| region.contains(offset) || region.start >= offset)
-}
-
-fn visible_regions(info: &ExecutableInfo, doc_len: u64) -> Vec<CodeSpan> {
-    if doc_len == 0 {
-        return Vec::new();
-    }
-
-    let mut spans = info.code_spans.clone();
-    spans.sort_by_key(|span| (span.start, span.end_inclusive - span.start));
-
-    let mut regions = Vec::new();
-    let mut cursor = 0_u64;
-    let file_end = doc_len.saturating_sub(1);
-
-    for span in spans {
-        if span.start > file_end {
-            continue;
-        }
-        if span.start > cursor {
-            regions.push(CodeSpan {
-                start: cursor,
-                end_inclusive: span.start - 1,
-                virtual_start: None,
-                virtual_end_inclusive: None,
-                name: Some("<raw>".to_owned()),
-                executable: false,
-            });
-        }
-
-        let start = span.start.max(cursor);
-        let end = span.end_inclusive.min(file_end);
-        if start <= end {
-            let virtual_start = span.virtual_address_for_offset(start);
-            let virtual_end_inclusive = span.virtual_address_for_offset(end);
-            regions.push(CodeSpan {
-                start,
-                end_inclusive: end,
-                virtual_start,
-                virtual_end_inclusive,
-                name: span.name.clone(),
-                executable: span.executable,
-            });
-            cursor = end.saturating_add(1);
-        }
-
-        if cursor > file_end {
-            break;
-        }
-    }
-
-    if cursor <= file_end {
-        regions.push(CodeSpan {
-            start: cursor,
-            end_inclusive: file_end,
-            virtual_start: None,
-            virtual_end_inclusive: None,
-            name: Some("<raw>".to_owned()),
-            executable: false,
-        });
-    }
-
-    regions
-}
-
-fn data_row_start(region_start: u64, offset: u64) -> u64 {
-    region_start + ((offset.saturating_sub(region_start)) / DATA_ROW_BYTES) * DATA_ROW_BYTES
 }
 
 #[cfg(test)]

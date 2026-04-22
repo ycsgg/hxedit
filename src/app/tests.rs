@@ -1015,6 +1015,8 @@ fn disassemble_command_switches_main_view() {
     ));
     assert_eq!(app.cursor, 0x100);
     assert!(app.status_message.contains("disassembly:"));
+    assert!(app.disasm_backend.is_some());
+    assert!(app.disasm_cache.is_some());
 }
 
 #[test]
@@ -1105,6 +1107,8 @@ fn disassemble_off_returns_to_hex_view() {
         .unwrap();
     app.execute_command(Command::DisassembleOff).unwrap();
     assert!(matches!(app.main_view, crate::app::MainView::Hex));
+    assert!(app.disasm_backend.is_none());
+    assert!(app.disasm_cache.is_none());
 }
 
 #[test]

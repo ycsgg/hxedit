@@ -1,7 +1,9 @@
 pub mod backend;
 pub mod cache;
 pub mod decode;
+pub mod regions;
 pub mod state;
+pub mod text;
 pub mod types;
 
 pub use backend::BackendKind;

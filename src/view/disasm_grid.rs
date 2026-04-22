@@ -1,5 +1,8 @@
 use ratatui::text::{Line, Span};
 
+use crate::disasm::text::{
+    looks_like_immediate, looks_like_register, tokenize_instruction_text, InstructionTextTokenKind,
+};
 use crate::disasm::{DisasmRow, DisasmRowKind};
 use crate::view::palette::Palette;
 
@@ -128,44 +131,33 @@ fn append_row_suffix(
 
 fn tokenize_operands(text: &str, active_row: bool, palette: &Palette) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
-    let chars = text.chars().collect::<Vec<_>>();
-    let mut idx = 0usize;
-    while idx < chars.len() {
-        let ch = chars[idx];
-        if ch.is_whitespace() {
-            let mut end = idx + 1;
-            while end < chars.len() && chars[end].is_whitespace() {
-                end += 1;
-            }
-            spans.push(styled_operand(
-                chars[idx..end].iter().collect::<String>(),
+    for token in tokenize_instruction_text(text) {
+        match token.kind {
+            InstructionTextTokenKind::Whitespace => spans.push(styled_operand(
+                token.text.to_owned(),
                 palette.disasm_operand,
                 active_row,
                 palette,
-            ));
-            idx = end;
-            continue;
+            )),
+            InstructionTextTokenKind::Punctuation => {
+                spans.push(styled_punctuation(token.text, active_row, palette));
+            }
+            InstructionTextTokenKind::Atom => {
+                let base = if looks_like_register(token.text) {
+                    palette.disasm_register
+                } else if looks_like_immediate(token.text) {
+                    palette.disasm_immediate
+                } else {
+                    palette.disasm_operand
+                };
+                spans.push(styled_operand(
+                    token.text.to_owned(),
+                    base,
+                    active_row,
+                    palette,
+                ));
+            }
         }
-        if is_punctuation(ch) {
-            spans.push(styled_punctuation(&ch.to_string(), active_row, palette));
-            idx += 1;
-            continue;
-        }
-
-        let mut end = idx + 1;
-        while end < chars.len() && !chars[end].is_whitespace() && !is_punctuation(chars[end]) {
-            end += 1;
-        }
-        let token = chars[idx..end].iter().collect::<String>();
-        let base = if looks_like_register(&token) {
-            palette.disasm_register
-        } else if looks_like_immediate(&token) {
-            palette.disasm_immediate
-        } else {
-            palette.disasm_operand
-        };
-        spans.push(styled_operand(token, base, active_row, palette));
-        idx = end;
     }
     spans
 }
@@ -190,83 +182,6 @@ fn styled_punctuation(text: &str, active_row: bool, palette: &Palette) -> Span<'
         palette.disasm_punctuation,
         active_row,
         palette,
-    )
-}
-
-fn looks_like_register(token: &str) -> bool {
-    let token = token.trim_matches(|ch: char| ch == '%' || ch == '#');
-    let lower = token.to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "al" | "ah"
-            | "ax"
-            | "eax"
-            | "rax"
-            | "bl"
-            | "bh"
-            | "bx"
-            | "ebx"
-            | "rbx"
-            | "cl"
-            | "ch"
-            | "cx"
-            | "ecx"
-            | "rcx"
-            | "dl"
-            | "dh"
-            | "dx"
-            | "edx"
-            | "rdx"
-            | "si"
-            | "esi"
-            | "rsi"
-            | "di"
-            | "edi"
-            | "rdi"
-            | "bp"
-            | "ebp"
-            | "rbp"
-            | "sp"
-            | "esp"
-            | "rsp"
-            | "ip"
-            | "eip"
-            | "rip"
-            | "pc"
-            | "lr"
-            | "fp"
-            | "xzr"
-            | "wzr"
-            | "nzcv"
-            | "cpsr"
-            | "spsr"
-    ) || lower.starts_with('r') && lower[1..].chars().all(|ch| ch.is_ascii_digit())
-        || lower.starts_with('x') && lower[1..].chars().all(|ch| ch.is_ascii_digit())
-        || lower.starts_with('w') && lower[1..].chars().all(|ch| ch.is_ascii_digit())
-        || lower.starts_with("v") && lower[1..].chars().all(|ch| ch.is_ascii_digit())
-        || lower.starts_with("q") && lower[1..].chars().all(|ch| ch.is_ascii_digit())
-        || lower.starts_with("d") && lower[1..].chars().all(|ch| ch.is_ascii_digit())
-        || lower.starts_with("s") && lower[1..].chars().all(|ch| ch.is_ascii_digit())
-        || lower.starts_with("zmm")
-        || lower.starts_with("ymm")
-        || lower.starts_with("xmm")
-}
-
-fn looks_like_immediate(token: &str) -> bool {
-    let trimmed = token.trim_matches(|ch: char| ch == '#' || ch == '$');
-    let trimmed = trimmed.strip_prefix('-').unwrap_or(trimmed);
-    trimmed.starts_with("0x")
-        || trimmed.chars().all(|ch| ch.is_ascii_digit())
-        || trimmed.ends_with('h')
-            && trimmed[..trimmed.len().saturating_sub(1)]
-                .chars()
-                .all(|ch| ch.is_ascii_hexdigit())
-}
-
-fn is_punctuation(ch: char) -> bool {
-    matches!(
-        ch,
-        ',' | '[' | ']' | '(' | ')' | '{' | '}' | '+' | '-' | '*' | ':' | '!' | '='
     )
 }
 

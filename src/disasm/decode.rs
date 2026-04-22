@@ -1,5 +1,8 @@
 use crate::core::document::Document;
 use crate::disasm::backend::DisassemblerBackend;
+use crate::disasm::text::{
+    parse_immediate_token, tokenize_instruction_text, InstructionTextTokenKind,
+};
 use crate::disasm::types::DisasmRow;
 use crate::error::HxResult;
 use crate::executable::{CodeSpan, ExecutableInfo};
@@ -157,56 +160,24 @@ fn decode_data_row(
 }
 
 fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> String {
-    let chars = text.chars().collect::<Vec<_>>();
     let mut out = String::with_capacity(text.len());
-    let mut idx = 0usize;
-    while idx < chars.len() {
-        let ch = chars[idx];
-        if ch.is_whitespace() || is_punctuation(ch) {
-            out.push(ch);
-            idx += 1;
+    for token in tokenize_instruction_text(text) {
+        if token.kind != InstructionTextTokenKind::Atom {
+            out.push_str(token.text);
             continue;
         }
 
-        let mut end = idx + 1;
-        while end < chars.len() && !chars[end].is_whitespace() && !is_punctuation(chars[end]) {
-            end += 1;
-        }
-        let token = chars[idx..end].iter().collect::<String>();
-        if let Some(address) = parse_symbol_address_token(&token) {
+        if let Some(address) = parse_immediate_token(token.text) {
             if let Some(symbol) = info.symbol_at_virtual(address) {
                 out.push_str(&symbol.display_name);
             } else {
-                out.push_str(&token);
+                out.push_str(token.text);
             }
         } else {
-            out.push_str(&token);
+            out.push_str(token.text);
         }
-        idx = end;
     }
     out
-}
-
-fn parse_symbol_address_token(token: &str) -> Option<u64> {
-    let trimmed = token.trim();
-    let trimmed = trimmed.strip_prefix('#').unwrap_or(trimmed);
-    let trimmed = trimmed.strip_prefix('$').unwrap_or(trimmed);
-    let trimmed = trimmed.strip_prefix('-').unwrap_or(trimmed);
-    if let Some(hex) = trimmed.strip_prefix("0x") {
-        return u64::from_str_radix(hex, 16).ok();
-    }
-    trimmed
-        .chars()
-        .all(|ch| ch.is_ascii_digit())
-        .then(|| trimmed.parse().ok())
-        .flatten()
-}
-
-fn is_punctuation(ch: char) -> bool {
-    matches!(
-        ch,
-        ',' | '[' | ']' | '(' | ')' | '{' | '}' | '+' | '-' | '*' | ':' | '!' | '='
-    )
 }
 
 #[cfg(test)]
