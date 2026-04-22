@@ -145,6 +145,7 @@ pub struct ExecutableInfo {
     pub entry_virtual_address: Option<u64>,
     pub code_spans: Vec<CodeSpan>,
     pub symbols_by_va: BTreeMap<u64, SymbolInfo>,
+    pub target_names_by_va: Box<BTreeMap<u64, String>>,
     pub symbols_by_name: HashMap<String, u64>,
     pub imports: Vec<ImportInfo>,
 }
@@ -180,6 +181,16 @@ impl ExecutableInfo {
 
     pub fn symbol_at_virtual(&self, address: u64) -> Option<&SymbolInfo> {
         self.symbols_by_va.get(&address)
+    }
+
+    pub fn target_name_at_virtual(&self, address: u64) -> Option<&str> {
+        self.target_names_by_va.get(&address).map(String::as_str)
+    }
+
+    pub fn display_name_at_virtual(&self, address: u64) -> Option<&str> {
+        self.symbol_at_virtual(address)
+            .map(|symbol| symbol.display_name.as_str())
+            .or_else(|| self.target_name_at_virtual(address))
     }
 
     pub fn symbol_at_offset(&self, offset: u64) -> Option<&SymbolInfo> {

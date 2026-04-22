@@ -42,6 +42,7 @@ use crate::view::{layout, palette::Palette};
 use navigation::align_offset;
 
 /// Owns the editor runtime: document state, viewport state, and the TUI loop.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MainView {
     Hex,

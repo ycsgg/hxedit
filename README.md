@@ -180,6 +180,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 - disassembly viewport 现在带有 row cache/checkpoints；重复滚动、搜索定位与重绘不再每次从当前 span 起点重新解码
 - disassembly rows 现在会显示基于 `object` baseline symbols 的 `<symbol> @virtual_address` 行尾标签；当操作数字面量精确命中已知 symbol address 时，也会做最小 symbol 名替换
 - 对 `x86` / `x86_64` / `aarch64` 的 direct call/jump，当前会额外保留结构化 target metadata；当目标命中已知 symbol 时，行尾会追加轻量 `→` target hint，避免只靠原始立即数阅读
+- ELF 下的 direct call target 现在还会补最小 PLT/import 名映射：即使目标地址本身没有 exact symbol，只要能从动态重定位顺序推出对应 PLT slot，也会显示成导入名（例如 `puts`）
 - symbol display name 现在会额外清理常见平台修饰，例如 ELF 的 `@@GLIBC_*` / `@plt`、Mach-O/C 的前导 `_`、以及 PE import / stdcall 装饰，降低行尾标签和操作数替换噪音
 - 进入 `:dis` 时状态栏会附带当前已收集的 symbol / import 计数（若存在）
 - 当前 dis 主视图仍保持更宽的 instruction text 区域和较窄的 bytes 列，便于 review 指令文本可读性

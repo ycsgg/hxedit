@@ -1,8 +1,13 @@
 use object::read::{ReadCache, ReadCacheOps, ReadRef};
-use object::{Object, ObjectSymbol, SymbolKind};
+use object::{
+    Object, ObjectSection, ObjectSymbol, ObjectSymbolTable, RelocationFlags, RelocationTarget,
+    SymbolKind,
+};
 
 use crate::core::document::Document;
-use crate::executable::types::{ExecutableInfo, ImportInfo, SymbolInfo, SymbolSource};
+use crate::executable::types::{
+    ExecutableArch, ExecutableInfo, ExecutableKind, ImportInfo, SymbolInfo, SymbolSource,
+};
 
 use super::util::demangle_symbol;
 
@@ -20,6 +25,7 @@ pub(super) fn enrich(doc: &mut Document, info: &mut ExecutableInfo) {
 
     collect_symbols(&file, info);
     collect_imports(&file, info);
+    collect_target_names(&file, info);
 }
 
 fn collect_symbols<'data, R>(file: &object::File<'data, R>, info: &mut ExecutableInfo)
@@ -117,6 +123,126 @@ fn insert_named_symbol(
         raw_name: Some(raw_name.to_owned()),
         source,
     });
+}
+
+fn collect_target_names<'data, R>(file: &object::File<'data, R>, info: &mut ExecutableInfo)
+where
+    R: ReadRef<'data>,
+{
+    if info.kind == ExecutableKind::Elf {
+        collect_elf_plt_target_names(file, info);
+    }
+}
+
+fn collect_elf_plt_target_names<'data, R>(file: &object::File<'data, R>, info: &mut ExecutableInfo)
+where
+    R: ReadRef<'data>,
+{
+    let Some(layout) = elf_plt_layout(file, info.arch) else {
+        return;
+    };
+    let Some(dynamic_symbols) = file.dynamic_symbol_table() else {
+        return;
+    };
+
+    let mut slot_index = 0_u64;
+    for (_, relocation) in file.dynamic_relocations().into_iter().flatten() {
+        let RelocationFlags::Elf { r_type } = relocation.flags() else {
+            continue;
+        };
+        if !is_elf_plt_relocation(info.arch, r_type) {
+            continue;
+        }
+        let RelocationTarget::Symbol(symbol_index) = relocation.target() else {
+            continue;
+        };
+        let Ok(symbol) = dynamic_symbols.symbol_by_index(symbol_index) else {
+            continue;
+        };
+        let Ok(raw_name) = symbol.name() else {
+            continue;
+        };
+        let Some(address) = layout.entry_address(slot_index) else {
+            break;
+        };
+        insert_target_name(info, address, raw_name);
+        slot_index = slot_index.saturating_add(1);
+    }
+}
+
+fn insert_target_name(info: &mut ExecutableInfo, address: u64, raw_name: &str) {
+    let raw_name = raw_name.trim();
+    if raw_name.is_empty() {
+        return;
+    }
+    let display_name = demangle_symbol(raw_name);
+    if display_name.is_empty() || info.symbols_by_va.contains_key(&address) {
+        return;
+    }
+    info.target_names_by_va
+        .entry(address)
+        .or_insert(display_name);
+}
+
+fn is_elf_plt_relocation(arch: ExecutableArch, r_type: u32) -> bool {
+    matches!(
+        (arch, r_type),
+        (ExecutableArch::X86, 7) | (ExecutableArch::X86_64, 7) | (ExecutableArch::AArch64, 1026)
+    )
+}
+
+fn elf_plt_layout<'data, R>(
+    file: &object::File<'data, R>,
+    arch: ExecutableArch,
+) -> Option<ElfPltLayout>
+where
+    R: ReadRef<'data>,
+{
+    let (header_size, entry_size) = match arch {
+        ExecutableArch::X86 | ExecutableArch::X86_64 => (16, 16),
+        ExecutableArch::AArch64 => (32, 16),
+        _ => return None,
+    };
+
+    if matches!(arch, ExecutableArch::X86 | ExecutableArch::X86_64) {
+        if let Some(section) = file.section_by_name(".plt.sec") {
+            let layout = ElfPltLayout::new(section.address(), 0, section.size(), entry_size);
+            if layout.entry_count > 0 {
+                return Some(layout);
+            }
+        }
+    }
+
+    let section = file.section_by_name(".plt")?;
+    let layout = ElfPltLayout::new(section.address(), header_size, section.size(), entry_size);
+    (layout.entry_count > 0).then_some(layout)
+}
+
+struct ElfPltLayout {
+    start: u64,
+    header_size: u64,
+    entry_size: u64,
+    entry_count: u64,
+}
+
+impl ElfPltLayout {
+    fn new(start: u64, header_size: u64, section_size: u64, entry_size: u64) -> Self {
+        let body_size = section_size.saturating_sub(header_size);
+        Self {
+            start,
+            header_size,
+            entry_size,
+            entry_count: body_size / entry_size,
+        }
+    }
+
+    fn entry_address(&self, slot_index: u64) -> Option<u64> {
+        (slot_index < self.entry_count).then_some(
+            self.start
+                .saturating_add(self.header_size)
+                .saturating_add(slot_index.saturating_mul(self.entry_size)),
+        )
+    }
 }
 
 struct DocumentReadCache<'a> {

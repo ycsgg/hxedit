@@ -114,6 +114,7 @@ mod tests {
             entry_virtual_address: None,
             code_spans: spans,
             symbols_by_va: Default::default(),
+            target_names_by_va: Default::default(),
             symbols_by_name: Default::default(),
             imports: Vec::new(),
         }

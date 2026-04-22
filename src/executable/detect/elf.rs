@@ -121,6 +121,7 @@ pub(super) fn detect(doc: &mut Document) -> Option<ExecutableInfo> {
         entry_virtual_address,
         code_spans,
         symbols_by_va: Default::default(),
+        target_names_by_va: Default::default(),
         symbols_by_name: Default::default(),
         imports: Vec::new(),
     })
