@@ -111,6 +111,152 @@ fn build_disassembly_elf64(code: &[u8]) -> Vec<u8> {
     bytes
 }
 
+fn build_disassembly_elf64_with_symbol(code: &[u8], symbol_name: &str) -> Vec<u8> {
+    let text_offset = 0x100usize;
+    let text_addr = 0x401000u64;
+    let strtab_offset = 0x120usize;
+    let mut strtab = vec![0_u8];
+    let symbol_name_offset = strtab.len() as u32;
+    strtab.extend_from_slice(symbol_name.as_bytes());
+    strtab.push(0);
+
+    let symtab_offset = 0x140usize;
+    let shstr_offset = 0x180usize;
+    let mut shstr = vec![0_u8];
+    let text_name = shstr.len() as u32;
+    shstr.extend_from_slice(b".text\0");
+    let strtab_name = shstr.len() as u32;
+    shstr.extend_from_slice(b".strtab\0");
+    let symtab_name = shstr.len() as u32;
+    shstr.extend_from_slice(b".symtab\0");
+    let shstr_name = shstr.len() as u32;
+    shstr.extend_from_slice(b".shstrtab\0");
+
+    let shoff = 0x200usize;
+    let mut bytes = vec![0_u8; shoff + 5 * 64];
+    bytes[0..4].copy_from_slice(b"\x7fELF");
+    bytes[4] = 2;
+    bytes[5] = 1;
+    bytes[6] = 1;
+    bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+    bytes[18..20].copy_from_slice(&0x3eu16.to_le_bytes());
+    bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
+    bytes[40..48].copy_from_slice(&(shoff as u64).to_le_bytes());
+    bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+    bytes[58..60].copy_from_slice(&64u16.to_le_bytes());
+    bytes[60..62].copy_from_slice(&5u16.to_le_bytes());
+    bytes[62..64].copy_from_slice(&4u16.to_le_bytes());
+
+    bytes[text_offset..text_offset + code.len()].copy_from_slice(code);
+    bytes[strtab_offset..strtab_offset + strtab.len()].copy_from_slice(&strtab);
+    bytes[shstr_offset..shstr_offset + shstr.len()].copy_from_slice(&shstr);
+
+    let mut symtab = vec![0_u8; 48];
+    let base = 24usize;
+    symtab[base..base + 4].copy_from_slice(&symbol_name_offset.to_le_bytes());
+    symtab[base + 4] = 0x12;
+    symtab[base + 6..base + 8].copy_from_slice(&1u16.to_le_bytes());
+    symtab[base + 8..base + 16].copy_from_slice(&text_addr.to_le_bytes());
+    symtab[base + 16..base + 24].copy_from_slice(&(code.len() as u64).to_le_bytes());
+    bytes[symtab_offset..symtab_offset + symtab.len()].copy_from_slice(&symtab);
+
+    struct ShdrSpec {
+        index: usize,
+        name: u32,
+        sh_type: u32,
+        flags: u64,
+        addr: u64,
+        offset: u64,
+        size: u64,
+        link: u32,
+        info: u32,
+        addralign: u64,
+        entsize: u64,
+    }
+
+    fn write_shdr(bytes: &mut [u8], spec: ShdrSpec) {
+        let base = spec.index * 64;
+        bytes[base..base + 4].copy_from_slice(&spec.name.to_le_bytes());
+        bytes[base + 4..base + 8].copy_from_slice(&spec.sh_type.to_le_bytes());
+        bytes[base + 8..base + 16].copy_from_slice(&spec.flags.to_le_bytes());
+        bytes[base + 16..base + 24].copy_from_slice(&spec.addr.to_le_bytes());
+        bytes[base + 24..base + 32].copy_from_slice(&spec.offset.to_le_bytes());
+        bytes[base + 32..base + 40].copy_from_slice(&spec.size.to_le_bytes());
+        bytes[base + 40..base + 44].copy_from_slice(&spec.link.to_le_bytes());
+        bytes[base + 44..base + 48].copy_from_slice(&spec.info.to_le_bytes());
+        bytes[base + 48..base + 56].copy_from_slice(&spec.addralign.to_le_bytes());
+        bytes[base + 56..base + 64].copy_from_slice(&spec.entsize.to_le_bytes());
+    }
+
+    write_shdr(
+        &mut bytes[shoff..shoff + 5 * 64],
+        ShdrSpec {
+            index: 1,
+            name: text_name,
+            sh_type: 1,
+            flags: 0x6,
+            addr: text_addr,
+            offset: text_offset as u64,
+            size: code.len() as u64,
+            link: 0,
+            info: 0,
+            addralign: 16,
+            entsize: 0,
+        },
+    );
+    write_shdr(
+        &mut bytes[shoff..shoff + 5 * 64],
+        ShdrSpec {
+            index: 2,
+            name: strtab_name,
+            sh_type: 3,
+            flags: 0,
+            addr: 0,
+            offset: strtab_offset as u64,
+            size: strtab.len() as u64,
+            link: 0,
+            info: 0,
+            addralign: 1,
+            entsize: 0,
+        },
+    );
+    write_shdr(
+        &mut bytes[shoff..shoff + 5 * 64],
+        ShdrSpec {
+            index: 3,
+            name: symtab_name,
+            sh_type: 2,
+            flags: 0,
+            addr: 0,
+            offset: symtab_offset as u64,
+            size: symtab.len() as u64,
+            link: 2,
+            info: 1,
+            addralign: 8,
+            entsize: 24,
+        },
+    );
+    write_shdr(
+        &mut bytes[shoff..shoff + 5 * 64],
+        ShdrSpec {
+            index: 4,
+            name: shstr_name,
+            sh_type: 3,
+            flags: 0,
+            addr: 0,
+            offset: shstr_offset as u64,
+            size: shstr.len() as u64,
+            link: 0,
+            info: 0,
+            addralign: 1,
+            entsize: 0,
+        },
+    );
+
+    bytes
+}
+
 fn build_paginated_elf64(section_count: usize) -> Vec<u8> {
     const EHDR_SIZE: usize = 64;
     const PHDR_OFFSET: usize = EHDR_SIZE;
@@ -885,6 +1031,44 @@ fn disassemble_command_aligns_viewport_to_containing_instruction() {
         crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x101),
         crate::app::MainView::Hex => panic!("expected disassembly view"),
     }
+}
+
+#[test]
+fn disassembly_rows_show_symbol_labels_and_virtual_addresses() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0xc3], "entry");
+    let mut app = app_with_bytes(&bytes);
+
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    assert!(app.status_message.contains("[1 syms]"));
+    let state = match &app.main_view {
+        crate::app::MainView::Disassembly(state) => state.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let rows = app
+        .collect_disassembly_rows(&state, state.viewport_top, 2)
+        .unwrap();
+    assert_eq!(rows[0].virtual_address, Some(0x401000));
+    assert_eq!(rows[0].symbol_label.as_deref(), Some("entry"));
+}
+
+#[test]
+fn disassembly_symbolizes_exact_immediate_operands() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0xB8, 0x00, 0x10, 0x40, 0x00, 0xC3], "entry");
+    let mut app = app_with_bytes(&bytes);
+
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    let state = match &app.main_view {
+        crate::app::MainView::Disassembly(state) => state.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let rows = app
+        .collect_disassembly_rows(&state, state.viewport_top, 1)
+        .unwrap();
+    assert!(rows[0].text.contains("entry"));
 }
 
 #[test]

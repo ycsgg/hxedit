@@ -14,8 +14,10 @@ pub enum DisasmRowKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisasmRow {
     pub offset: u64,
+    pub virtual_address: Option<u64>,
     pub bytes: Vec<u8>,
     pub text: String,
+    pub symbol_label: Option<String>,
     pub span_name: Option<String>,
     pub kind: DisasmRowKind,
 }
@@ -23,34 +25,54 @@ pub struct DisasmRow {
 impl DisasmRow {
     pub fn instruction(
         offset: u64,
+        virtual_address: Option<u64>,
         bytes: Vec<u8>,
         text: String,
+        symbol_label: Option<String>,
         span_name: Option<String>,
     ) -> Self {
         Self {
             offset,
+            virtual_address,
             bytes,
             text,
+            symbol_label,
             span_name,
             kind: DisasmRowKind::Instruction,
         }
     }
 
-    pub fn data(offset: u64, bytes: Vec<u8>, span_name: Option<String>) -> Self {
+    pub fn data(
+        offset: u64,
+        virtual_address: Option<u64>,
+        bytes: Vec<u8>,
+        symbol_label: Option<String>,
+        span_name: Option<String>,
+    ) -> Self {
         Self {
             offset,
+            virtual_address,
             text: format_db_bytes(&bytes),
             bytes,
+            symbol_label,
             span_name,
             kind: DisasmRowKind::Data,
         }
     }
 
-    pub fn invalid(offset: u64, byte: u8, span_name: Option<String>) -> Self {
+    pub fn invalid(
+        offset: u64,
+        virtual_address: Option<u64>,
+        byte: u8,
+        symbol_label: Option<String>,
+        span_name: Option<String>,
+    ) -> Self {
         Self {
             offset,
+            virtual_address,
             bytes: vec![byte],
             text: format_db_bytes(&[byte]),
+            symbol_label,
             span_name,
             kind: DisasmRowKind::Invalid,
         }

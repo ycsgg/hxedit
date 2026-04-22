@@ -222,6 +222,8 @@ fn visible_regions(info: &ExecutableInfo, doc_len: u64) -> Vec<CodeSpan> {
             regions.push(CodeSpan {
                 start: cursor,
                 end_inclusive: span.start - 1,
+                virtual_start: None,
+                virtual_end_inclusive: None,
                 name: Some("<raw>".to_owned()),
                 executable: false,
             });
@@ -230,9 +232,13 @@ fn visible_regions(info: &ExecutableInfo, doc_len: u64) -> Vec<CodeSpan> {
         let start = span.start.max(cursor);
         let end = span.end_inclusive.min(file_end);
         if start <= end {
+            let virtual_start = span.virtual_address_for_offset(start);
+            let virtual_end_inclusive = span.virtual_address_for_offset(end);
             regions.push(CodeSpan {
                 start,
                 end_inclusive: end,
+                virtual_start,
+                virtual_end_inclusive,
                 name: span.name.clone(),
                 executable: span.executable,
             });
@@ -248,6 +254,8 @@ fn visible_regions(info: &ExecutableInfo, doc_len: u64) -> Vec<CodeSpan> {
         regions.push(CodeSpan {
             start: cursor,
             end_inclusive: file_end,
+            virtual_start: None,
+            virtual_end_inclusive: None,
             name: Some("<raw>".to_owned()),
             executable: false,
         });

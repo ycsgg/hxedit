@@ -601,13 +601,20 @@ impl App {
         ));
         self.reset_disassembly_cache();
         self.focus_disassembly_row_at_offset(self.cursor)?;
+        let metadata_suffix = match (info.symbol_count(), info.import_count()) {
+            (0, 0) => String::new(),
+            (symbols, 0) => format!(" [{symbols} syms]"),
+            (0, imports) => format!(" [{imports} imports]"),
+            (symbols, imports) => format!(" [{symbols} syms, {imports} imports]"),
+        };
         self.set_info_status(format!(
-            "disassembly: {} {} ({}, {}) @ 0x{:x}",
+            "disassembly: {} {} ({}, {}) @ 0x{:x}{}",
             info.kind.label(),
             info.arch.label(),
             info.bitness.label(),
             backend.label(),
-            self.cursor
+            self.cursor,
+            metadata_suffix
         ));
         Ok(())
     }

@@ -63,7 +63,9 @@ pub fn build_text(rows: &[DisasmRow], cursor: u64, palette: &Palette) -> Vec<Lin
                 } else {
                     palette.disasm_data
                 };
-                Line::from(vec![Span::styled(row.text.clone(), style)])
+                let mut spans = vec![Span::styled(row.text.clone(), style)];
+                append_row_suffix(&mut spans, row, row_contains_cursor(row, cursor), palette);
+                Line::from(spans)
             }
             DisasmRowKind::Invalid => {
                 let style = if row_contains_cursor(row, cursor) {
@@ -71,7 +73,9 @@ pub fn build_text(rows: &[DisasmRow], cursor: u64, palette: &Palette) -> Vec<Lin
                 } else {
                     palette.warning
                 };
-                Line::from(vec![Span::styled(row.text.clone(), style)])
+                let mut spans = vec![Span::styled(row.text.clone(), style)];
+                append_row_suffix(&mut spans, row, row_contains_cursor(row, cursor), palette);
+                Line::from(spans)
             }
         })
         .collect()
@@ -92,7 +96,34 @@ fn build_instruction_text(row: &DisasmRow, cursor: u64, palette: &Palette) -> Li
         spans.push(styled_punctuation(" ", active_row, palette));
         spans.extend(tokenize_operands(operands, active_row, palette));
     }
+    append_row_suffix(&mut spans, row, active_row, palette);
     Line::from(spans)
+}
+
+fn append_row_suffix(
+    spans: &mut Vec<Span<'static>>,
+    row: &DisasmRow,
+    active_row: bool,
+    palette: &Palette,
+) {
+    if let Some(symbol) = &row.symbol_label {
+        spans.push(styled_punctuation(" ", active_row, palette));
+        spans.push(styled_operand(
+            format!("<{symbol}>"),
+            palette.disasm_symbol,
+            active_row,
+            palette,
+        ));
+    }
+    if let Some(address) = row.virtual_address {
+        spans.push(styled_punctuation(" ", active_row, palette));
+        spans.push(styled_operand(
+            format!("@0x{address:x}"),
+            palette.disasm_virtual,
+            active_row,
+            palette,
+        ));
+    }
 }
 
 fn tokenize_operands(text: &str, active_row: bool, palette: &Palette) -> Vec<Span<'static>> {
@@ -272,8 +303,10 @@ mod tests {
     fn sample_rows() -> Vec<DisasmRow> {
         vec![DisasmRow {
             offset: 0x100,
+            virtual_address: Some(0x401000),
             bytes: vec![0x48, 0x8b, 0x45, 0xf8],
             text: "mov rax, [rbp - 0x8]".to_owned(),
+            symbol_label: Some("entry".to_owned()),
             span_name: Some(".text".to_owned()),
             kind: DisasmRowKind::Instruction,
         }]
@@ -313,6 +346,14 @@ mod tests {
             .spans
             .iter()
             .any(|span| span.style.fg == palette.disasm_punctuation.fg));
+        assert!(line
+            .spans
+            .iter()
+            .any(|span| span.style.fg == palette.disasm_symbol.fg));
+        assert!(line
+            .spans
+            .iter()
+            .any(|span| span.content.contains("@0x401000")));
         assert!(line.spans[0].style.add_modifier.contains(Modifier::BOLD));
     }
 }

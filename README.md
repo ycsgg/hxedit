@@ -178,11 +178,13 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 - `j` / `k`、PageUp / PageDown、以及主视图滚轮滚动在 `:dis` 下已改为按 instruction row 前后移动，不再沿用 hex row 步长
 - 鼠标点击 / 拖拽在 `:dis` 下已按 disassembly rows 命中，不再复用 hex grid 的 offset 换算
 - disassembly viewport 现在带有 row cache/checkpoints；重复滚动、搜索定位与重绘不再每次从当前 span 起点重新解码
+- disassembly rows 现在会显示基于 `object` baseline symbols 的 `<symbol> @virtual_address` 行尾标签；当操作数字面量精确命中已知 symbol address 时，也会做最小 symbol 名替换
+- 进入 `:dis` 时状态栏会附带当前已收集的 symbol / import 计数（若存在）
 - 当前 dis 主视图仍保持更宽的 instruction text 区域和较窄的 bytes 列，便于 review 指令文本可读性
 - `hxedit` 的目标仍是 byte-level editor + executable browsing，不会把 `:dis` 扩成重度 binary analysis 工具；CFG、function graph、decompiler、自动函数恢复都不在近期目标内
 - 后续会优先补“方便查看”的轻量能力，例如 direct call/jump target 提示、symbol/import 名字映射、以及 PLT / GOT 一类可浏览元数据，而不是引入完整分析框架
 - Disassembly view remains overwrite-only for layout-changing edits such as insert/delete/paste-insert
-- symbol/import labeling、以及更细粒度的 patch-triggered cache invalidation 仍在后续阶段
+- 更深入的 import thunk / PLT / GOT / symbol target 解析，以及更细粒度的 patch-triggered cache invalidation 仍在后续阶段
 
 ## Status Bar
 

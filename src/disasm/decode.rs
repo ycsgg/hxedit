@@ -26,9 +26,9 @@ pub fn decode_region_rows(
         };
 
         let row = if span.executable {
-            decode_instruction_row(doc, backend, offset, &span)?
+            decode_instruction_row(doc, info, backend, offset, &span)?
         } else {
-            decode_data_row(doc, offset, &span)?
+            decode_data_row(doc, info, offset, &span)?
         };
 
         offset = offset.saturating_add(row.len() as u64);
@@ -70,6 +70,8 @@ fn current_span(info: &ExecutableInfo, doc: &Document, offset: u64) -> Option<Co
                         .saturating_add(DATA_ROW_BYTES as u64)
                         .saturating_sub(1),
                 ),
+                virtual_start: None,
+                virtual_end_inclusive: None,
                 name: Some("<raw>".to_owned()),
                 executable: false,
             })
@@ -78,6 +80,7 @@ fn current_span(info: &ExecutableInfo, doc: &Document, offset: u64) -> Option<Co
 
 fn decode_instruction_row(
     doc: &mut Document,
+    info: &ExecutableInfo,
     backend: &dyn DisassemblerBackend,
     offset: u64,
     span: &CodeSpan,
@@ -85,27 +88,125 @@ fn decode_instruction_row(
     let remaining = (span.end_inclusive - offset + 1) as usize;
     let read_len = backend.max_instruction_bytes().min(remaining);
     let bytes = doc.read_logical_range(offset, read_len)?;
+    let virtual_address = span.virtual_address_for_offset(offset);
+    let symbol_label = virtual_address
+        .and_then(|address| info.symbol_at_virtual(address))
+        .map(|symbol| symbol.display_name.clone());
     if bytes.is_empty() {
-        return Ok(DisasmRow::data(offset, Vec::new(), span.name.clone()));
+        return Ok(DisasmRow::data(
+            offset,
+            virtual_address,
+            Vec::new(),
+            symbol_label,
+            span.name.clone(),
+        ));
     }
 
     let row = if let Some(decoded) = backend.decode_one(offset, &bytes)? {
         if decoded.bytes.is_empty() {
-            DisasmRow::invalid(offset, bytes[0], span.name.clone())
+            DisasmRow::invalid(
+                offset,
+                virtual_address,
+                bytes[0],
+                symbol_label,
+                span.name.clone(),
+            )
         } else {
-            DisasmRow::instruction(offset, decoded.bytes, decoded.text, span.name.clone())
+            let text = symbolize_instruction_text(&decoded.text, info);
+            DisasmRow::instruction(
+                offset,
+                virtual_address,
+                decoded.bytes,
+                text,
+                symbol_label,
+                span.name.clone(),
+            )
         }
     } else {
-        DisasmRow::invalid(offset, bytes[0], span.name.clone())
+        DisasmRow::invalid(
+            offset,
+            virtual_address,
+            bytes[0],
+            symbol_label,
+            span.name.clone(),
+        )
     };
     Ok(row)
 }
 
-fn decode_data_row(doc: &mut Document, offset: u64, span: &CodeSpan) -> HxResult<DisasmRow> {
+fn decode_data_row(
+    doc: &mut Document,
+    info: &ExecutableInfo,
+    offset: u64,
+    span: &CodeSpan,
+) -> HxResult<DisasmRow> {
     let remaining = (span.end_inclusive - offset + 1) as usize;
     let read_len = DATA_ROW_BYTES.min(remaining);
     let bytes = doc.read_logical_range(offset, read_len)?;
-    Ok(DisasmRow::data(offset, bytes, span.name.clone()))
+    let virtual_address = span.virtual_address_for_offset(offset);
+    let symbol_label = virtual_address
+        .and_then(|address| info.symbol_at_virtual(address))
+        .map(|symbol| symbol.display_name.clone());
+    Ok(DisasmRow::data(
+        offset,
+        virtual_address,
+        bytes,
+        symbol_label,
+        span.name.clone(),
+    ))
+}
+
+fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(text.len());
+    let mut idx = 0usize;
+    while idx < chars.len() {
+        let ch = chars[idx];
+        if ch.is_whitespace() || is_punctuation(ch) {
+            out.push(ch);
+            idx += 1;
+            continue;
+        }
+
+        let mut end = idx + 1;
+        while end < chars.len() && !chars[end].is_whitespace() && !is_punctuation(chars[end]) {
+            end += 1;
+        }
+        let token = chars[idx..end].iter().collect::<String>();
+        if let Some(address) = parse_symbol_address_token(&token) {
+            if let Some(symbol) = info.symbol_at_virtual(address) {
+                out.push_str(&symbol.display_name);
+            } else {
+                out.push_str(&token);
+            }
+        } else {
+            out.push_str(&token);
+        }
+        idx = end;
+    }
+    out
+}
+
+fn parse_symbol_address_token(token: &str) -> Option<u64> {
+    let trimmed = token.trim();
+    let trimmed = trimmed.strip_prefix('#').unwrap_or(trimmed);
+    let trimmed = trimmed.strip_prefix('$').unwrap_or(trimmed);
+    let trimmed = trimmed.strip_prefix('-').unwrap_or(trimmed);
+    if let Some(hex) = trimmed.strip_prefix("0x") {
+        return u64::from_str_radix(hex, 16).ok();
+    }
+    trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_digit())
+        .then(|| trimmed.parse().ok())
+        .flatten()
+}
+
+fn is_punctuation(ch: char) -> bool {
+    matches!(
+        ch,
+        ',' | '[' | ']' | '(' | ')' | '{' | '}' | '+' | '-' | '*' | ':' | '!' | '='
+    )
 }
 
 #[cfg(test)]

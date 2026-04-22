@@ -205,22 +205,28 @@ mod tests {
         vec![
             DisasmRow {
                 offset: 0x100,
+                virtual_address: Some(0x401000),
                 bytes: vec![0x55],
                 text: "push rbp".to_owned(),
+                symbol_label: None,
                 span_name: Some(".text".to_owned()),
                 kind: DisasmRowKind::Instruction,
             },
             DisasmRow {
                 offset: 0x101,
+                virtual_address: Some(0x401001),
                 bytes: vec![0x48, 0x89, 0xe5],
                 text: "mov rbp, rsp".to_owned(),
+                symbol_label: None,
                 span_name: Some(".text".to_owned()),
                 kind: DisasmRowKind::Instruction,
             },
             DisasmRow {
                 offset: 0x200,
+                virtual_address: None,
                 bytes: vec![0x41, 0x42, 0x43],
                 text: ".db 0x41, 0x42, 0x43".to_owned(),
+                symbol_label: None,
                 span_name: Some(".rodata".to_owned()),
                 kind: DisasmRowKind::Data,
             },

@@ -77,6 +77,8 @@ pub struct Palette {
     pub disasm_register: Style,
     pub disasm_immediate: Style,
     pub disasm_punctuation: Style,
+    pub disasm_symbol: Style,
+    pub disasm_virtual: Style,
 }
 
 impl Palette {
@@ -165,6 +167,8 @@ impl Palette {
             disasm_register: Style::default().fg(Color::Rgb(110, 190, 240)),
             disasm_immediate: Style::default().fg(Color::Rgb(244, 194, 96)),
             disasm_punctuation: Style::default().fg(Color::Rgb(132, 132, 132)),
+            disasm_symbol: Style::default().fg(Color::Rgb(144, 214, 149)),
+            disasm_virtual: Style::default().fg(Color::Rgb(128, 128, 128)),
         }
     }
 
@@ -241,6 +245,8 @@ impl Palette {
             disasm_register: Style::default().fg(Color::Indexed(117)),
             disasm_immediate: Style::default().fg(Color::Indexed(222)),
             disasm_punctuation: Style::default().fg(Color::Indexed(245)),
+            disasm_symbol: Style::default().fg(Color::Indexed(114)),
+            disasm_virtual: Style::default().fg(Color::Indexed(244)),
         }
     }
 
@@ -315,6 +321,8 @@ impl Palette {
             disasm_register: Style::default().fg(Color::Cyan),
             disasm_immediate: Style::default().fg(Color::Yellow),
             disasm_punctuation: Style::default().fg(Color::DarkGray),
+            disasm_symbol: Style::default().fg(Color::Green),
+            disasm_virtual: Style::default().fg(Color::DarkGray),
         }
     }
 
@@ -364,6 +372,8 @@ impl Palette {
             disasm_register: base.add_modifier(Modifier::UNDERLINED),
             disasm_immediate: base.add_modifier(Modifier::BOLD),
             disasm_punctuation: base,
+            disasm_symbol: base.add_modifier(Modifier::BOLD),
+            disasm_virtual: base,
         }
     }
 }
