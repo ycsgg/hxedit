@@ -1,9 +1,77 @@
 use crate::executable::types::{CodeSpan, Endian};
 
 pub(super) fn demangle_symbol(name: &str) -> String {
-    rustc_demangle::try_demangle(name)
-        .map(|display| display.to_string())
-        .unwrap_or_else(|_| name.to_owned())
+    let name = name.trim();
+    if name.is_empty() {
+        return String::new();
+    }
+
+    if let Ok(display) = rustc_demangle::try_demangle(name) {
+        return display.to_string();
+    }
+    if let Some(stripped) = name.strip_prefix('_') {
+        if let Ok(display) = rustc_demangle::try_demangle(stripped) {
+            return display.to_string();
+        }
+    }
+    normalize_symbol_name(name).to_owned()
+}
+
+fn normalize_symbol_name(name: &str) -> &str {
+    let mut name = strip_import_prefix(name);
+    name = strip_single_leading_underscore(name);
+    name = strip_elf_suffix(name);
+    name = strip_stdcall_suffix(name);
+    name
+}
+
+fn strip_import_prefix(name: &str) -> &str {
+    name.strip_prefix("__imp_").unwrap_or(name)
+}
+
+fn strip_single_leading_underscore(name: &str) -> &str {
+    let Some(stripped) = name.strip_prefix('_') else {
+        return name;
+    };
+    if stripped.starts_with('_') {
+        return name;
+    }
+    let Some(first) = stripped.chars().next() else {
+        return name;
+    };
+    if first.is_ascii_alphanumeric() {
+        stripped
+    } else {
+        name
+    }
+}
+
+fn strip_elf_suffix(name: &str) -> &str {
+    if let Some(stripped) = name.strip_suffix("@plt") {
+        return stripped;
+    }
+    if let Some((base, _)) = name.split_once("@@") {
+        if !base.is_empty() {
+            return base;
+        }
+    }
+    if let Some((base, suffix)) = name.rsplit_once('@') {
+        if !base.is_empty() && !suffix.is_empty() && !suffix.chars().all(|ch| ch.is_ascii_digit()) {
+            return base;
+        }
+    }
+    name
+}
+
+fn strip_stdcall_suffix(name: &str) -> &str {
+    let Some((base, suffix)) = name.rsplit_once('@') else {
+        return name;
+    };
+    if !base.is_empty() && !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        base
+    } else {
+        name
+    }
 }
 
 pub(super) fn read_u16(buf: &[u8], off: usize, endian: Endian) -> Option<u16> {
@@ -45,4 +113,18 @@ pub(super) fn push_span(spans: &mut Vec<CodeSpan>, span: CodeSpan) {
     }
     spans.push(span);
     spans.sort_by_key(|entry| (entry.start, entry.end_inclusive));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::demangle_symbol;
+
+    #[test]
+    fn normalizes_common_platform_symbol_decorations() {
+        assert_eq!(demangle_symbol("_main"), "main");
+        assert_eq!(demangle_symbol("puts@@GLIBC_2.2.5"), "puts");
+        assert_eq!(demangle_symbol("puts@plt"), "puts");
+        assert_eq!(demangle_symbol("__imp__CreateFileW@28"), "CreateFileW");
+        assert_eq!(demangle_symbol("_MessageBoxA@16"), "MessageBoxA");
+    }
 }

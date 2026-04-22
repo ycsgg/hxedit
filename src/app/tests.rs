@@ -1074,6 +1074,29 @@ fn disassembly_symbolizes_exact_immediate_operands() {
 }
 
 #[test]
+fn disassembly_normalizes_platform_symbol_decorations() {
+    let bytes = build_disassembly_elf64_with_symbol(
+        &[0xB8, 0x00, 0x10, 0x40, 0x00, 0xC3],
+        "_entry@@GLIBC_2.2.5",
+    );
+    let mut app = app_with_bytes(&bytes);
+
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    let state = match &app.main_view {
+        crate::app::MainView::Disassembly(state) => state.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let rows = app
+        .collect_disassembly_rows(&state, state.viewport_top, 1)
+        .unwrap();
+    assert_eq!(rows[0].symbol_label.as_deref(), Some("entry"));
+    assert!(rows[0].text.contains("entry"));
+    assert!(!rows[0].text.contains("GLIBC"));
+}
+
+#[test]
 fn disassemble_force_command_opens_raw_bytes_with_explicit_arch() {
     let mut bytes = vec![0_u8; 0x40];
     bytes[0x10..0x12].copy_from_slice(&[0x90, 0xc3]);

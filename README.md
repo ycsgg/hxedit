@@ -179,6 +179,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 - 鼠标点击 / 拖拽在 `:dis` 下已按 disassembly rows 命中，不再复用 hex grid 的 offset 换算
 - disassembly viewport 现在带有 row cache/checkpoints；重复滚动、搜索定位与重绘不再每次从当前 span 起点重新解码
 - disassembly rows 现在会显示基于 `object` baseline symbols 的 `<symbol> @virtual_address` 行尾标签；当操作数字面量精确命中已知 symbol address 时，也会做最小 symbol 名替换
+- symbol display name 现在会额外清理常见平台修饰，例如 ELF 的 `@@GLIBC_*` / `@plt`、Mach-O/C 的前导 `_`、以及 PE import / stdcall 装饰，降低行尾标签和操作数替换噪音
 - 进入 `:dis` 时状态栏会附带当前已收集的 symbol / import 计数（若存在）
 - 当前 dis 主视图仍保持更宽的 instruction text 区域和较窄的 bytes 列，便于 review 指令文本可读性
 - `hxedit` 的目标仍是 byte-level editor + executable browsing，不会把 `:dis` 扩成重度 binary analysis 工具；CFG、function graph、decompiler、自动函数恢复都不在近期目标内
