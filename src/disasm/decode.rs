@@ -397,4 +397,52 @@ mod tests {
         assert_eq!(target.virtual_address, 0x401000);
         assert_eq!(target.display_name.as_deref(), Some("entry"));
     }
+
+    #[test]
+    fn decode_region_rows_tracks_aarch64_direct_call_targets() {
+        let mut doc = doc_with_bytes(&aarch64_elf(&[
+            0x00, 0x00, 0x00, 0x94, 0xc0, 0x03, 0x5f, 0xd6,
+        ]));
+        let mut info = detect_executable_info(&mut doc).unwrap();
+        info.symbols_by_va.insert(
+            0x401000,
+            SymbolInfo {
+                display_name: "entry".to_owned(),
+                raw_name: Some("entry".to_owned()),
+                source: SymbolSource::Object,
+            },
+        );
+        let backend = resolve_backend(&info, None).unwrap();
+        let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
+
+        assert_eq!(rows[0].text, "bl entry");
+        let target = rows[0].direct_target.as_ref().expect("direct target");
+        assert_eq!(target.kind, DirectBranchKind::Call);
+        assert_eq!(target.virtual_address, 0x401000);
+        assert_eq!(target.display_name.as_deref(), Some("entry"));
+    }
+
+    #[test]
+    fn decode_region_rows_tracks_aarch64_multi_immediate_jump_targets() {
+        let mut doc = doc_with_bytes(&aarch64_elf(&[
+            0x20, 0x00, 0x00, 0x37, 0xc0, 0x03, 0x5f, 0xd6,
+        ]));
+        let mut info = detect_executable_info(&mut doc).unwrap();
+        info.symbols_by_va.insert(
+            0x401004,
+            SymbolInfo {
+                display_name: "target".to_owned(),
+                raw_name: Some("target".to_owned()),
+                source: SymbolSource::Object,
+            },
+        );
+        let backend = resolve_backend(&info, None).unwrap();
+        let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
+
+        assert_eq!(rows[0].text, "tbnz w0, #0, target");
+        let target = rows[0].direct_target.as_ref().expect("direct target");
+        assert_eq!(target.kind, DirectBranchKind::Jump);
+        assert_eq!(target.virtual_address, 0x401004);
+        assert_eq!(target.display_name.as_deref(), Some("target"));
+    }
 }

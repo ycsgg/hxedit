@@ -120,7 +120,9 @@ impl CapstoneBackend {
             capstone::arch::ArchDetail::X86Detail(detail) => {
                 extract_x86_direct_target(&detail, kind)
             }
-            _ => None,
+            capstone::arch::ArchDetail::Arm64Detail(detail) => {
+                extract_arm64_direct_target(&detail, kind)
+            }
         }
     }
 }
@@ -148,6 +150,23 @@ fn extract_x86_direct_target(
     Some(DirectBranchTarget {
         kind,
         virtual_address: u64::try_from(target).ok()?,
+        display_name: None,
+    })
+}
+
+fn extract_arm64_direct_target(
+    detail: &capstone::arch::arm64::Arm64InsnDetail<'_>,
+    kind: DirectBranchKind,
+) -> Option<DirectBranchTarget> {
+    let target = detail
+        .operands()
+        .filter_map(|operand| match operand.op_type {
+            capstone::arch::arm64::Arm64OperandType::Imm(target) => u64::try_from(target).ok(),
+            _ => None,
+        });
+    Some(DirectBranchTarget {
+        kind,
+        virtual_address: target.last()?,
         display_name: None,
     })
 }
