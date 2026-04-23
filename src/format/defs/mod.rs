@@ -5,4 +5,5 @@ pub mod gzip;
 pub mod jpeg;
 pub mod png;
 pub mod tar;
+pub mod wav;
 pub mod zip;

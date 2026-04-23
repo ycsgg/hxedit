@@ -20,7 +20,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 - **Visual / inspector selection** — operate on a byte range from visual mode or the selected inspector field
 - **Undo / Redo** — full multi-step undo and redo with `Ctrl+Z` / `Ctrl+Y` or `:undo` / `:redo`
 - **Search** — search by ASCII text or hex bytes, forward and backward, with automatic wrap-around and visible-hit highlighting in the hex grid
-- **Format inspector** — built-in parsing for ELF, PNG, ZIP, GZIP, GIF, BMP, TAR, and JPEG structures with field-level editing
+- **Format inspector** — built-in parsing for ELF, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG structures with field-level editing
 - **Hash computation** — compute MD5, SHA1, SHA256, SHA512, or CRC32 of a selection or the entire file
 - **Clipboard integration** — copy selections as hex, binary, numeric, or base64 text; paste from clipboard as hex or base64
 - **Batch transforms** — fill repeated patterns, replace matching byte/text sequences, and export selections as raw bytes or C/Python literals
@@ -160,7 +160,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 | `:insp` | Toggle inspector panel |
 | `:insp more` | Reveal the next batch of paginated entries beyond the current cap |
 | `:format` | Reset to auto-detected format |
-| `:format elf\|png\|zip\|gzip\|gif\|bmp\|tar\|jpeg` | Force a specific format |
+| `:format elf\|png\|zip\|gzip\|gif\|bmp\|wav\|tar\|jpeg` | Force a specific format |
 
 ## Status Bar
 
@@ -180,12 +180,13 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 
 ## Inspector Notes
 
-- Supports ELF, PNG, ZIP, GZIP, GIF, BMP, TAR, and JPEG formats
+- Supports ELF, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG formats
 - Works best on a wide terminal; shows a warning if the terminal is too narrow
 - ELF currently covers headers, program/section tables, dynamic tags, notes/GNU properties, symbols, relocations, hash tables, and version metadata
 - GZIP currently covers fixed/optional header fields, compressed payload range, and trailer metadata
 - GIF currently covers the logical screen descriptor, global/local color tables, image blocks, extensions, and trailer
 - BMP currently covers the bitmap file header, DIB header variants, optional bit masks / palette ranges, and pixel data
+- WAV currently covers the RIFF/WAVE header, paginated top-level chunks, `fmt ` metadata, data ranges, and padding bytes
 - TAR currently covers USTAR entry headers, paginated entry lists, and file data ranges
 - JPEG currently covers segment markers, APP/SOF/SOS metadata, entropy-coded scan data ranges, and EOI
 - JPEG currently covers segment markers, APP/SOF/SOS metadata, entropy-coded scan data ranges, and EOI

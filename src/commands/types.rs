@@ -108,7 +108,7 @@ pub enum Command {
     },
     Inspector,
     /// `:insp more` — raise the per-format entry cap by one batch and
-    /// re-parse so pagination-aware formats (ELF / PNG / ZIP / GIF) reveal more
+    /// re-parse so pagination-aware formats (ELF / PNG / ZIP / GIF / WAV) reveal more
     /// entries.
     InspectorMore,
     Format {
