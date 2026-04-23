@@ -192,6 +192,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 - TAR currently covers USTAR entry headers, paginated entry lists, and file data ranges
 - JPEG currently covers segment markers, APP/SOF/SOS metadata, entropy-coded scan data ranges, and EOI
 - Nested sections (e.g. ELF Program Headers / Section Header Table children) are collapsed by default; use `Space` / `Enter` on a header to expand
+- Deeply nested field names / long values now use hanging-wrap continuation, so wrapped text keeps its indent / value column instead of jumping back to the far left
 - The currently selected inspector field highlights its byte range in the hex grid
 - Editable fields can be modified, but PNG/ZIP/GZIP/TAR/JPEG edits show warnings since structure consistency is not automatically repaired
 - Read-only fields report that they are view-only
