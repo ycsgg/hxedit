@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-23
+
+### Added
+
+- **New format inspectors:**
+  - BMP (Bitmap) with header, info header, color table, and pixel data
+  - GIF with header, global/local color tables, graphic control extensions, and image data blocks
+  - JPEG with segment markers, quantization tables, Huffman tables, and scan data
+  - GZIP with header fields, optional filename/comment, and trailer checksum
+  - TAR with entry headers, file data ranges, and pagination support
+  - WAV with RIFF header, format chunk, and data chunk
+  - PE/COFF (Windows executables) with DOS stub, PE header, section headers, and optional header
+  - Mach-O (macOS/iOS executables) with header, load commands, symbol tables, and section data
+- **Enhanced ELF inspector:**
+  - Split into modular structure (header, layout, payloads, structures, symbols, versions)
+  - Section headers with name resolution and pagination
+  - Dynamic segments and program interpreter
+  - Symbol tables (`.symtab`, `.dynsym`) with string table resolution
+  - Relocation entries (`.rela.*`, `.rel.*`)
+  - GNU property notes and GNU hash table
+  - Version definitions (`Verdef`) and requirements (`Verneed`)
+  - Comprehensive test coverage for all ELF features
+- Inspector jump now centers the target row in hex view for better context
+- Nested struct wrapping improved for better readability in inspector panel
+
+### Fixed
+
+- TAR format detection relaxed to handle files with stale checksums
+
 ## [0.1.0] - 2026-04-18
 
 Initial release.
@@ -32,5 +61,6 @@ Initial release.
 - CI on Ubuntu and Windows (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --all-targets`)
 - Release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, published with `SHA256SUMS.txt`
 
-[Unreleased]: https://github.com/ycsgg/hxedit/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ycsgg/hxedit/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ycsgg/hxedit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ycsgg/hxedit/releases/tag/v0.1.0
