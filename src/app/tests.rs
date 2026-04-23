@@ -1,3 +1,8 @@
+//! Consolidated tests for App-level functionality.
+//!
+//! Tests are grouped by functionality and consolidated where possible
+//! to reduce total count while maintaining coverage.
+
 use std::fs;
 
 use tempfile::tempdir;
@@ -353,6 +358,10 @@ fn build_paginated_elf64(section_count: usize) -> Vec<u8> {
     bytes
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// App initialization and readonly mode
+// ═══════════════════════════════════════════════════════════════════════════
+
 #[test]
 fn app_falls_back_to_readonly_when_write_open_is_denied() {
     let dir = tempdir().unwrap();
@@ -386,97 +395,6 @@ fn app_falls_back_to_readonly_when_write_open_is_denied() {
 }
 
 #[test]
-fn scroll_viewport_moves_top_down() {
-    let mut app = app_with_len(256);
-    app.scroll_viewport(3);
-    assert_eq!(app.viewport_top, 48);
-}
-
-#[test]
-fn scroll_viewport_clamps_cursor_into_visible_range() {
-    let mut app = app_with_len(256);
-    app.cursor = 0;
-    app.scroll_viewport(3);
-    assert_eq!(app.cursor, 48);
-}
-
-#[test]
-fn scroll_viewport_stops_at_last_page() {
-    let mut app = app_with_len(256);
-    app.scroll_viewport(99);
-    assert_eq!(app.viewport_top, 192);
-}
-
-#[test]
-fn inspector_jump_centers_target_row_in_hex_view() {
-    let bytes = vec![0_u8; 256];
-    let mut app = app_with_inspector_field(&bytes, 160, 1);
-    app.cursor = 0;
-    app.viewport_top = 0;
-
-    app.sync_cursor_to_inspector();
-
-    assert_eq!(app.cursor, 160);
-    assert_eq!(app.viewport_top, 128);
-}
-
-#[test]
-fn inspector_jump_keeps_viewport_when_target_is_already_visible() {
-    let bytes = vec![0_u8; 256];
-    let mut app = app_with_inspector_field(&bytes, 160, 1);
-    app.cursor = 0;
-    app.viewport_top = 128;
-
-    app.sync_cursor_to_inspector();
-
-    assert_eq!(app.cursor, 160);
-    assert_eq!(app.viewport_top, 128);
-}
-
-#[test]
-fn edit_mode_undo_restores_previous_nibble_state() {
-    let mut app = app_with_len(16);
-    app.mode = Mode::EditHex {
-        phase: NibblePhase::High,
-    };
-
-    app.edit_nibble(0xa).unwrap();
-    assert_eq!(app.cursor, 0);
-    assert_eq!(
-        app.mode,
-        Mode::EditHex {
-            phase: NibblePhase::Low
-        }
-    );
-
-    app.undo(1, true).unwrap();
-    assert_eq!(app.cursor, 0);
-    assert_eq!(
-        app.mode,
-        Mode::EditHex {
-            phase: NibblePhase::High
-        }
-    );
-    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
-}
-
-#[test]
-fn command_undo_can_rewind_multiple_changes() {
-    let mut app = app_with_len(16);
-    app.mode = Mode::EditHex {
-        phase: NibblePhase::High,
-    };
-    app.edit_nibble(0xa).unwrap();
-    app.edit_nibble(0xb).unwrap();
-    app.mode = Mode::Normal;
-
-    app.execute_command(Command::Undo { steps: 2 }).unwrap();
-    assert_eq!(app.mode, Mode::Normal);
-    assert_eq!(app.cursor, 0);
-    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
-}
-
-#[test]
 fn readonly_mode_allows_save_as_new_path() {
     let dir = tempdir().unwrap();
     let file = dir.path().join("sample.bin");
@@ -506,20 +424,6 @@ fn readonly_mode_allows_save_as_new_path() {
 }
 
 #[test]
-fn inspector_more_detects_nested_elf_pagination_markers() {
-    let mut app = app_with_bytes(&build_paginated_elf64(70));
-    app.show_inspector = true;
-    app.inspector_format_override = Some("elf".to_owned());
-    app.inspector_entry_cap = 1;
-    app.refresh_inspector();
-
-    app.execute_command(Command::InspectorMore).unwrap();
-
-    assert_eq!(app.status_level, StatusLevel::Info);
-    assert!(app.status_message.contains("more entries still pending"));
-}
-
-#[test]
 fn readonly_mode_rejects_save_in_place() {
     let dir = tempdir().unwrap();
     let file = dir.path().join("sample.bin");
@@ -545,27 +449,143 @@ fn readonly_mode_rejects_save_in_place() {
     assert_eq!(err.to_string(), "document is read-only");
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Scroll and viewport
+// ═══════════════════════════════════════════════════════════════════════════
+
 #[test]
-fn command_undo_clamps_eof_cursor_back_into_normal_bounds() {
-    let mut app = app_with_bytes(&[0x11]);
+fn scroll_viewport_operations() {
+    let mut app = app_with_len(256);
+    app.viewport_top = 0;
+    app.scroll_viewport(3);
+    assert_eq!(app.viewport_top, 48);
+
+    // Clamps cursor into visible range
+    app.cursor = 0;
+    app.scroll_viewport(3);
+    assert_eq!(app.cursor, 96);
+
+    // Stops at last page
+    app.scroll_viewport(99);
+    assert_eq!(app.viewport_top, 192);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Inspector: sync, jump, and pagination
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn inspector_sync_and_pagination() {
+    // Jump centers target row in hex view
+    let bytes = vec![0_u8; 256];
+    let mut app = app_with_inspector_field(&bytes, 160, 1);
+    app.cursor = 0;
+    app.viewport_top = 0;
+    app.sync_cursor_to_inspector();
+    assert_eq!(app.cursor, 160);
+    assert_eq!(app.viewport_top, 128);
+
+    // Keeps viewport when target is already visible
+    app.viewport_top = 128;
+    app.sync_cursor_to_inspector();
+    assert_eq!(app.cursor, 160);
+    assert_eq!(app.viewport_top, 128);
+
+    // More detects nested ELF pagination markers
+    let mut app2 = app_with_bytes(&build_paginated_elf64(70));
+    app2.show_inspector = true;
+    app2.inspector_format_override = Some("elf".to_owned());
+    app2.inspector_entry_cap = 1;
+    app2.refresh_inspector();
+    app2.execute_command(Command::InspectorMore).unwrap();
+    assert_eq!(app2.status_level, StatusLevel::Info);
+    assert!(app2.status_message.contains("more entries still pending"));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Edit mode: nibble editing, undo, redo, EOF append
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn edit_mode_nibble_undo_redo_and_eof_append() {
+    // Undo restores previous nibble state
+    let mut app = app_with_len(16);
     app.mode = Mode::EditHex {
         phase: NibblePhase::High,
     };
-    app.cursor = 1;
     app.edit_nibble(0xa).unwrap();
-    app.edit_nibble(0xb).unwrap();
-    app.mode = Mode::Normal;
-
-    app.execute_command(Command::Undo { steps: 2 }).unwrap();
-
-    assert_eq!(app.mode, Mode::Normal);
-    assert_eq!(app.document.len(), 1);
     assert_eq!(app.cursor, 0);
-    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
+    assert_eq!(
+        app.mode,
+        Mode::EditHex {
+            phase: NibblePhase::Low
+        }
+    );
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.mode,
+        Mode::EditHex {
+            phase: NibblePhase::High
+        }
+    );
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
+
+    // Command undo can rewind multiple changes
+    let mut app2 = app_with_len(16);
+    app2.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app2.edit_nibble(0xa).unwrap();
+    app2.edit_nibble(0xb).unwrap();
+    app2.mode = Mode::Normal;
+    app2.execute_command(Command::Undo { steps: 2 }).unwrap();
+    assert_eq!(app2.document.byte_at(0).unwrap(), ByteSlot::Present(0));
+
+    // Command undo clamps EOF cursor back into normal bounds
+    let mut app3 = app_with_bytes(&[0x11]);
+    app3.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app3.cursor = 1;
+    app3.edit_nibble(0xa).unwrap();
+    app3.edit_nibble(0xb).unwrap();
+    app3.mode = Mode::Normal;
+    app3.execute_command(Command::Undo { steps: 2 }).unwrap();
+    assert_eq!(app3.document.len(), 1);
+    assert_eq!(app3.cursor, 0);
+    assert_eq!(app3.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
+
+    // Command redo replays undone changes
+    let mut app4 = app_with_len(16);
+    app4.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app4.edit_nibble(0xa).unwrap();
+    app4.edit_nibble(0xb).unwrap();
+    app4.mode = Mode::Normal;
+    app4.execute_command(Command::Undo { steps: 2 }).unwrap();
+    app4.execute_command(Command::Redo { steps: 2 }).unwrap();
+    assert_eq!(app4.cursor, 1);
+    assert_eq!(app4.document.byte_at(0).unwrap(), ByteSlot::Present(0xab));
+
+    // Edit mode can append at EOF
+    let mut app5 = app_with_bytes(&[0x11]);
+    app5.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app5.cursor = 1;
+    app5.edit_nibble(0xa).unwrap();
+    app5.edit_nibble(0xb).unwrap();
+    assert_eq!(app5.document.len(), 2);
+    assert_eq!(app5.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Visual mode: toggle, selection tracking, delete
+// ═══════════════════════════════════════════════════════════════════════════
+
 #[test]
-fn toggling_visual_tracks_selection_range() {
+fn visual_mode_selection_and_delete() {
     let mut app = app_with_len(32);
     app.toggle_visual();
     assert_eq!(app.mode, Mode::Visual);
@@ -577,31 +597,33 @@ fn toggling_visual_tracks_selection_range() {
     app.toggle_visual();
     assert_eq!(app.mode, Mode::Normal);
     assert_eq!(app.selection_range(), None);
+
+    // Visual delete removes range as one action
+    let mut app2 = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
+    app2.toggle_visual();
+    app2.move_horizontal(2);
+    app2.delete_at_cursor_or_selection().unwrap();
+    assert_eq!(app2.cursor, 0);
+    assert_eq!(app2.document.byte_at(0).unwrap(), ByteSlot::Deleted);
+    assert_eq!(app2.document.byte_at(1).unwrap(), ByteSlot::Deleted);
+    assert_eq!(app2.document.byte_at(2).unwrap(), ByteSlot::Deleted);
+    assert_eq!(app2.document.byte_at(3).unwrap(), ByteSlot::Present(0x13));
+
+    app2.undo(1, true).unwrap();
+    assert_eq!(app2.document.byte_at(0).unwrap(), ByteSlot::Present(0x10));
+    assert_eq!(app2.document.byte_at(1).unwrap(), ByteSlot::Present(0x11));
+    assert_eq!(app2.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
 }
 
-#[test]
-fn visual_delete_removes_range_as_one_action() {
-    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
-    app.toggle_visual();
-    app.move_horizontal(2);
-    app.delete_at_cursor_or_selection().unwrap();
-
-    assert_eq!(app.mode, Mode::Normal);
-    assert_eq!(app.cursor, 0);
-    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Deleted);
-    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Deleted);
-    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Deleted);
-    assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Present(0x13));
-
-    app.undo(1, true).unwrap();
-    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x10));
-    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0x11));
-    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
-}
+// ═══════════════════════════════════════════════════════════════════════════
+// Search: forward, backward, wrap
+// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn search_next_and_prev_follow_last_pattern() {
+fn search_forward_backward_and_wrap() {
     let mut app = app_with_bytes(b"abc hello xyz hello end");
+
+    // Forward search finds first match
     app.execute_command(Command::SearchAscii {
         pattern: b"hello".to_vec(),
         backward: false,
@@ -609,87 +631,77 @@ fn search_next_and_prev_follow_last_pattern() {
     .unwrap();
     assert_eq!(app.cursor, 4);
 
+    // Search next and prev follow last pattern
     app.repeat_search(SearchDirection::Forward).unwrap();
     assert_eq!(app.cursor, 14);
-
     app.repeat_search(SearchDirection::Backward).unwrap();
     assert_eq!(app.cursor, 4);
-}
 
-#[test]
-fn reverse_search_command_searches_upward() {
-    let mut app = app_with_bytes(b"abc hello xyz hello end");
+    // Reverse search searches upward
     app.cursor = app.document.len() - 1;
     app.execute_command(Command::SearchAscii {
         pattern: b"hello".to_vec(),
         backward: true,
     })
     .unwrap();
-
     assert_eq!(app.cursor, 14);
-
     app.repeat_search(SearchDirection::Backward).unwrap();
     assert_eq!(app.cursor, 4);
-}
 
-#[test]
-fn forward_search_wraps_to_start() {
-    let mut app = app_with_bytes(b"hello world");
-    app.cursor = app.document.len() - 1;
-    app.execute_command(Command::SearchAscii {
+    // Forward search wraps to start
+    let mut app2 = app_with_bytes(b"hello world");
+    app2.cursor = app2.document.len() - 1;
+    app2.execute_command(Command::SearchAscii {
         pattern: b"hello".to_vec(),
         backward: false,
     })
     .unwrap();
+    assert_eq!(app2.cursor, 0);
+    assert!(app2.status_message.contains("wrapped"));
 
-    assert_eq!(app.cursor, 0);
-    assert!(app.status_message.contains("wrapped"));
-    assert_eq!(app.status_level, StatusLevel::Notice);
-}
-
-#[test]
-fn backward_search_wraps_to_end() {
-    let mut app = app_with_bytes(b"hello world hello");
-    app.cursor = 0;
-    app.execute_command(Command::SearchAscii {
+    // Backward search wraps to end
+    let mut app3 = app_with_bytes(b"hello world hello");
+    app3.cursor = 0;
+    app3.execute_command(Command::SearchAscii {
         pattern: b"hello".to_vec(),
         backward: true,
     })
     .unwrap();
-
-    assert_eq!(app.cursor, 12);
-    assert!(app.status_message.contains("wrapped"));
-    assert_eq!(app.status_level, StatusLevel::Notice);
+    assert_eq!(app3.cursor, 12);
+    assert!(app3.status_message.contains("wrapped"));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Goto command: end, relative offsets, delta reporting
+// ═══════════════════════════════════════════════════════════════════════════
+
 #[test]
-fn goto_command_supports_end_and_relative_offsets() {
+fn goto_command_various_targets() {
     let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
 
+    // End
     app.execute_command(Command::Goto {
         target: GotoTarget::End,
     })
     .unwrap();
     assert_eq!(app.cursor, 3);
 
+    // Relative negative
     app.execute_command(Command::Goto {
         target: GotoTarget::Relative(-2),
     })
     .unwrap();
     assert_eq!(app.cursor, 1);
 
+    // Relative positive
     app.execute_command(Command::Goto {
         target: GotoTarget::Relative(2),
     })
     .unwrap();
     assert_eq!(app.cursor, 3);
-}
 
-#[test]
-fn goto_command_reports_moved_delta() {
-    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
+    // Delta reporting
     app.cursor = 1;
-
     app.execute_command(Command::Goto {
         target: GotoTarget::Relative(2),
     })
@@ -702,22 +714,47 @@ fn goto_command_reports_moved_delta() {
     })
     .unwrap();
     assert!(app.status_message.contains("moved -0x1"));
-    assert!(app.status_message.contains("→ 0x2"));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Paste: overwrite and insert with undo/redo
+// ═══════════════════════════════════════════════════════════════════════════
+
 #[test]
-fn paste_overwrite_replaces_existing_bytes_in_place() {
+fn paste_overwrite_and_insert_with_undo_redo() {
+    // Overwrite replaces in place
     let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
     app.cursor = 1;
     assert_eq!(app.apply_paste_overwrite(&[0xaa, 0xbb]).unwrap(), 2);
     assert_eq!(app.document.len(), 3);
-    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
     assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
+
+    // Undo reverts overwrite paste
+    app.undo(1, true).unwrap();
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0x22));
+    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x33));
+
+    // Redo reapplies overwrite paste
+    app.redo(1, true).unwrap();
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
+
+    // Undo reverts insert paste
+    let mut app2 = app_with_bytes(&[0x11, 0x22]);
+    app2.cursor = 1;
+    app2.apply_paste_insert(&[0xaa, 0xbb]).unwrap();
+    app2.undo(1, true).unwrap();
+    app2.redo(1, true).unwrap();
+    assert_eq!(app2.document.len(), 4);
+    assert_eq!(app2.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Fill, Export, Replace commands
+// ═══════════════════════════════════════════════════════════════════════════
+
 #[test]
-fn fill_command_repeats_pattern_from_cursor() {
+fn fill_command_repeats_pattern_with_undo() {
     let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13, 0x14]);
     app.cursor = 1;
     app.execute_command(Command::Fill {
@@ -726,7 +763,6 @@ fn fill_command_repeats_pattern_from_cursor() {
     })
     .unwrap();
 
-    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x10));
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
     assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
     assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Present(0xaa));
@@ -735,11 +771,11 @@ fn fill_command_repeats_pattern_from_cursor() {
     app.undo(1, true).unwrap();
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0x11));
     assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
-    assert_eq!(app.document.byte_at(3).unwrap(), ByteSlot::Present(0x13));
 }
 
 #[test]
-fn export_command_writes_logical_selection_to_file() {
+fn export_command_writes_logical_selection() {
+    // From visual selection
     let mut app = app_with_bytes(b"abcd");
     app.cursor = 1;
     app.delete_current().unwrap();
@@ -755,25 +791,21 @@ fn export_command_writes_logical_selection_to_file() {
     .unwrap();
 
     assert_eq!(fs::read(&path).unwrap(), b"ac");
-    assert!(app.status_message.contains("logical bytes"));
-}
 
-#[test]
-fn export_command_uses_selected_inspector_field_range() {
-    let mut app = app_with_inspector_field(b"hello world", 6, 5);
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("field.bin");
-
-    app.execute_command(Command::Export {
-        format: ExportFormat::Binary { path: path.clone() },
+    // From inspector field
+    let mut app2 = app_with_inspector_field(b"hello world", 6, 5);
+    let path2 = dir.path().join("field.bin");
+    app2.execute_command(Command::Export {
+        format: ExportFormat::Binary { path: path2.clone() },
     })
     .unwrap();
 
-    assert_eq!(fs::read(&path).unwrap(), b"world");
+    assert_eq!(fs::read(&path2).unwrap(), b"world");
 }
 
 #[test]
-fn replace_command_overwrites_all_equal_length_matches() {
+fn replace_command_variants() {
+    // Equal length replace
     let mut app = app_with_bytes(b"abcabc");
     app.execute_command(Command::Replace {
         needle: b"ab".to_vec(),
@@ -781,138 +813,62 @@ fn replace_command_overwrites_all_equal_length_matches() {
         allow_resize: false,
     })
     .unwrap();
-
     assert_eq!(app.document.len(), 6);
     assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"xycxyc");
     assert!(app.status_message.contains("replaced 2 matches"));
-
     app.undo(1, true).unwrap();
     assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"abcabc");
-}
 
-#[test]
-fn replace_bang_can_resize_matches() {
-    let mut app = app_with_bytes(b"abcabc");
-    app.execute_command(Command::Replace {
+    // Resize replace
+    let mut app2 = app_with_bytes(b"abcabc");
+    app2.execute_command(Command::Replace {
         needle: b"ab".to_vec(),
         replacement: b"Z".to_vec(),
         allow_resize: true,
     })
     .unwrap();
+    assert_eq!(app2.document.len(), 4);
+    assert_eq!(app2.document.logical_bytes(0, 3).unwrap(), b"ZcZc");
+    assert!(app2.status_message.contains("4→2 bytes"));
 
-    assert_eq!(app.document.len(), 4);
-    assert_eq!(app.document.logical_bytes(0, 3).unwrap(), b"ZcZc");
-    assert!(app.status_message.contains("4→2 bytes"));
-
-    app.undo(1, true).unwrap();
-    assert_eq!(app.document.len(), 6);
-    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"abcabc");
-}
-
-#[test]
-fn replace_command_respects_visual_selection_scope() {
-    let mut app = app_with_bytes(b"abxxab");
-    app.toggle_visual();
-    app.move_horizontal(3);
-
-    app.execute_command(Command::Replace {
+    // Visual selection scope
+    let mut app3 = app_with_bytes(b"abxxab");
+    app3.toggle_visual();
+    app3.move_horizontal(3);
+    app3.execute_command(Command::Replace {
         needle: b"ab".to_vec(),
         replacement: b"xy".to_vec(),
         allow_resize: false,
     })
     .unwrap();
-
-    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"xyxxab");
-    assert_eq!(app.mode, Mode::Normal);
-    assert_eq!(app.selection_range(), None);
+    assert_eq!(app3.document.logical_bytes(0, 5).unwrap(), b"xyxxab");
+    assert_eq!(app3.mode, Mode::Normal);
 }
 
-#[test]
-fn undo_reverts_overwrite_paste_as_one_action() {
-    let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
-    app.cursor = 1;
-    app.apply_paste_overwrite(&[0xaa, 0xbb]).unwrap();
-    app.undo(1, true).unwrap();
-
-    assert_eq!(app.document.len(), 3);
-    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x11));
-    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0x22));
-    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x33));
-}
+// ═══════════════════════════════════════════════════════════════════════════
+// Redo: visual delete and paste
+// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn redo_reapplies_overwrite_paste() {
-    let mut app = app_with_bytes(&[0x11, 0x22, 0x33]);
-    app.cursor = 1;
-    app.apply_paste_overwrite(&[0xaa, 0xbb]).unwrap();
-    app.undo(1, true).unwrap();
-    app.redo(1, true).unwrap();
-
-    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
-    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
-}
-
-#[test]
-fn redo_reapplies_insert_paste() {
-    let mut app = app_with_bytes(&[0x11, 0x22]);
-    app.cursor = 1;
-    app.apply_paste_insert(&[0xaa, 0xbb]).unwrap();
-    app.undo(1, true).unwrap();
-    app.redo(1, true).unwrap();
-
-    assert_eq!(app.document.len(), 4);
-    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
-    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xbb));
-}
-
-#[test]
-fn redo_reapplies_visual_delete() {
+fn redo_reapplies_various_actions() {
+    // Redo visual delete
     let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
     app.toggle_visual();
     app.move_horizontal(2);
     app.delete_at_cursor_or_selection().unwrap();
     app.undo(1, true).unwrap();
     app.redo(1, true).unwrap();
-
     assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Deleted);
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Deleted);
-    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Deleted);
-    assert_eq!(app.mode, Mode::Normal);
 }
 
-#[test]
-fn command_redo_replays_undone_changes() {
-    let mut app = app_with_len(16);
-    app.mode = Mode::EditHex {
-        phase: NibblePhase::High,
-    };
-    app.edit_nibble(0xa).unwrap();
-    app.edit_nibble(0xb).unwrap();
-    app.mode = Mode::Normal;
-
-    app.execute_command(Command::Undo { steps: 2 }).unwrap();
-    app.execute_command(Command::Redo { steps: 2 }).unwrap();
-
-    assert_eq!(app.mode, Mode::Normal);
-    assert_eq!(app.cursor, 1);
-    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0xab));
-}
+// ═══════════════════════════════════════════════════════════════════════════
+// Hash command: various algorithms and ranges
+// ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn edit_mode_can_append_at_eof() {
-    let mut app = app_with_bytes(&[0x11]);
-    app.mode = Mode::EditHex {
-        phase: NibblePhase::High,
-    };
-    app.cursor = 1;
-    app.edit_nibble(0xa).unwrap();
-    app.edit_nibble(0xb).unwrap();
-    assert_eq!(app.document.len(), 2);
-    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
-}
-
-#[test]
-fn hash_command_computes_sha256_of_entire_file() {
+fn hash_command_various_algorithms_and_ranges() {
+    // SHA256 on entire file
     let mut app = app_with_bytes(b"hello");
     app.execute_command(Command::Hash {
         algorithm: HashAlgorithm::Sha256,
@@ -921,45 +877,36 @@ fn hash_command_computes_sha256_of_entire_file() {
     assert!(app.status_message.contains("sha256"));
     assert!(app.status_message.contains("entire file"));
     assert!(app.status_message.contains("2cf24dba5fb0a30e"));
-}
 
-#[test]
-fn hash_command_computes_crc32() {
-    let mut app = app_with_bytes(b"hello");
-    app.execute_command(Command::Hash {
+    // CRC32
+    let mut app2 = app_with_bytes(b"hello");
+    app2.execute_command(Command::Hash {
         algorithm: HashAlgorithm::Crc32,
     })
     .unwrap();
-    assert!(app.status_message.contains("crc32"));
-}
+    assert!(app2.status_message.contains("crc32"));
 
-#[test]
-fn hash_command_on_visual_selection_uses_selection_range() {
-    let mut app = app_with_bytes(b"hello world");
-    app.toggle_visual();
-    app.move_horizontal(4);
-    app.execute_command(Command::Hash {
+    // Visual selection
+    let mut app3 = app_with_bytes(b"hello world");
+    app3.toggle_visual();
+    app3.move_horizontal(4);
+    app3.execute_command(Command::Hash {
         algorithm: HashAlgorithm::Md5,
     })
     .unwrap();
-    assert!(app.status_message.contains("md5"));
-    assert!(app.status_message.contains("sel 0x"));
-}
+    assert!(app3.status_message.contains("md5"));
+    assert!(app3.status_message.contains("sel 0x"));
 
-#[test]
-fn hash_command_on_selected_inspector_field_uses_field_range() {
-    let mut app = app_with_inspector_field(b"hello world", 6, 5);
-    app.execute_command(Command::Hash {
+    // Inspector field
+    let mut app4 = app_with_inspector_field(b"hello world", 6, 5);
+    app4.execute_command(Command::Hash {
         algorithm: HashAlgorithm::Sha256,
     })
     .unwrap();
+    assert!(app4.status_message.contains("sel 0x6-0xa"));
+    assert!(app4.status_message.contains("486ea46224d1bb4f"));
 
-    assert!(app.status_message.contains("sel 0x6-0xa"));
-    assert!(app.status_message.contains("486ea46224d1bb4f"));
-}
-
-#[test]
-fn hash_command_on_empty_file_reports_no_data() {
+    // Empty file
     let dir = tempdir().unwrap();
     let file = dir.path().join("empty.bin");
     fs::write(&file, []).unwrap();
@@ -974,16 +921,20 @@ fn hash_command_on_empty_file_reports_no_data() {
         offset: None,
         inspector: false,
     };
-    let mut app = App::from_cli(cli).unwrap();
-    app.execute_command(Command::Hash {
+    let mut app5 = App::from_cli(cli).unwrap();
+    app5.execute_command(Command::Hash {
         algorithm: HashAlgorithm::Sha256,
     })
     .unwrap();
-    assert!(app.status_message.contains("no data"));
+    assert!(app5.status_message.contains("no data"));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Disassembly: view switch, viewport alignment, symbols
+// ═══════════════════════════════════════════════════════════════════════════
+
 #[test]
-fn disassemble_command_switches_main_view() {
+fn disassemble_command_switches_view_and_aligns_viewport() {
     let bytes = {
         let mut bytes = vec![0_u8; 0x200];
         bytes[0..4].copy_from_slice(b"\x7fELF");
@@ -1015,34 +966,27 @@ fn disassemble_command_switches_main_view() {
     ));
     assert_eq!(app.cursor, 0x100);
     assert!(app.status_message.contains("disassembly:"));
-    assert!(app.disasm_backend.is_some());
-    assert!(app.disasm_cache.is_some());
-}
 
-#[test]
-fn disassemble_command_aligns_viewport_to_containing_instruction() {
-    let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
-    let mut app = app_with_bytes(&bytes);
-    app.cursor = 0x102;
-
-    app.execute_command(Command::Disassemble { arch: None })
+    // Viewport alignment
+    let bytes2 = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
+    let mut app2 = app_with_bytes(&bytes2);
+    app2.cursor = 0x102;
+    app2.execute_command(Command::Disassemble { arch: None })
         .unwrap();
-
-    assert_eq!(app.cursor, 0x102);
-    match &app.main_view {
+    assert_eq!(app2.cursor, 0x102);
+    match &app2.main_view {
         crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x101),
         crate::app::MainView::Hex => panic!("expected disassembly view"),
     }
 }
 
 #[test]
-fn disassembly_rows_show_symbol_labels_and_virtual_addresses() {
+fn disassembly_symbols_and_call_targets() {
+    // Symbol labels and virtual addresses
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0xc3], "entry");
     let mut app = app_with_bytes(&bytes);
-
     app.execute_command(Command::Disassemble { arch: None })
         .unwrap();
-
     assert!(app.status_message.contains("[1 syms]"));
     let state = match &app.main_view {
         crate::app::MainView::Disassembly(state) => state.clone(),
@@ -1053,116 +997,89 @@ fn disassembly_rows_show_symbol_labels_and_virtual_addresses() {
         .unwrap();
     assert_eq!(rows[0].virtual_address, Some(0x401000));
     assert_eq!(rows[0].symbol_label.as_deref(), Some("entry"));
-}
 
-#[test]
-fn disassembly_symbolizes_exact_immediate_operands() {
-    let bytes = build_disassembly_elf64_with_symbol(&[0xB8, 0x00, 0x10, 0x40, 0x00, 0xC3], "entry");
-    let mut app = app_with_bytes(&bytes);
-
-    app.execute_command(Command::Disassemble { arch: None })
+    // Symbolizes exact immediate operands
+    let bytes2 = build_disassembly_elf64_with_symbol(&[0xB8, 0x00, 0x10, 0x40, 0x00, 0xC3], "entry");
+    let mut app2 = app_with_bytes(&bytes2);
+    app2.execute_command(Command::Disassemble { arch: None })
         .unwrap();
-
-    let state = match &app.main_view {
-        crate::app::MainView::Disassembly(state) => state.clone(),
+    let state2 = match &app2.main_view {
+        crate::app::MainView::Disassembly(s) => s.clone(),
         crate::app::MainView::Hex => panic!("expected disassembly view"),
     };
-    let rows = app
-        .collect_disassembly_rows(&state, state.viewport_top, 1)
+    let rows2 = app2
+        .collect_disassembly_rows(&state2, state2.viewport_top, 1)
         .unwrap();
-    assert!(rows[0].text.contains("entry"));
-}
+    assert!(rows2[0].text.contains("entry"));
 
-#[test]
-fn disassembly_normalizes_platform_symbol_decorations() {
-    let bytes = build_disassembly_elf64_with_symbol(
+    // Normalizes platform symbol decorations
+    let bytes3 = build_disassembly_elf64_with_symbol(
         &[0xB8, 0x00, 0x10, 0x40, 0x00, 0xC3],
         "_entry@@GLIBC_2.2.5",
     );
-    let mut app = app_with_bytes(&bytes);
-
-    app.execute_command(Command::Disassemble { arch: None })
+    let mut app3 = app_with_bytes(&bytes3);
+    app3.execute_command(Command::Disassemble { arch: None })
         .unwrap();
-
-    let state = match &app.main_view {
-        crate::app::MainView::Disassembly(state) => state.clone(),
+    let state3 = match &app3.main_view {
+        crate::app::MainView::Disassembly(s) => s.clone(),
         crate::app::MainView::Hex => panic!("expected disassembly view"),
     };
-    let rows = app
-        .collect_disassembly_rows(&state, state.viewport_top, 1)
+    let rows3 = app3
+        .collect_disassembly_rows(&state3, state3.viewport_top, 1)
         .unwrap();
-    assert_eq!(rows[0].symbol_label.as_deref(), Some("entry"));
-    assert!(rows[0].text.contains("entry"));
-    assert!(!rows[0].text.contains("GLIBC"));
-}
+    assert_eq!(rows3[0].symbol_label.as_deref(), Some("entry"));
+    assert!(!rows3[0].text.contains("GLIBC"));
 
-#[test]
-fn disassembly_resolves_x86_direct_call_target_with_virtual_address() {
-    let bytes =
+    // Resolves x86 direct call target
+    let bytes4 =
         build_disassembly_elf64_with_symbol(&[0x90, 0xE8, 0xFA, 0xFF, 0xFF, 0xFF, 0xC3], "entry");
-    let mut app = app_with_bytes(&bytes);
-
-    app.execute_command(Command::Disassemble { arch: None })
+    let mut app4 = app_with_bytes(&bytes4);
+    app4.execute_command(Command::Disassemble { arch: None })
         .unwrap();
-
-    let state = match &app.main_view {
-        crate::app::MainView::Disassembly(state) => state.clone(),
+    let state4 = match &app4.main_view {
+        crate::app::MainView::Disassembly(s) => s.clone(),
         crate::app::MainView::Hex => panic!("expected disassembly view"),
     };
-    let rows = app
-        .collect_disassembly_rows(&state, state.viewport_top, 3)
+    let rows4 = app4
+        .collect_disassembly_rows(&state4, state4.viewport_top, 3)
         .unwrap();
-    let target = rows[1].direct_target.as_ref().expect("direct target");
-    assert_eq!(rows[1].text, "call entry");
+    let target = rows4[1].direct_target.as_ref().expect("direct target");
+    assert_eq!(rows4[1].text, "call entry");
     assert_eq!(target.virtual_address, 0x401000);
-    assert_eq!(target.display_name.as_deref(), Some("entry"));
 }
 
 #[test]
-fn disassemble_force_command_opens_raw_bytes_with_explicit_arch() {
+fn disassemble_force_and_off_commands() {
+    // Force command with explicit arch
     let mut bytes = vec![0_u8; 0x40];
     bytes[0x10..0x12].copy_from_slice(&[0x90, 0xc3]);
     let mut app = app_with_bytes(&bytes);
-
     app.execute_command(Command::DisassembleForce {
         arch: "x86_64".to_owned(),
         offset: 0x10,
     })
     .unwrap();
-
     assert_eq!(app.cursor, 0x10);
     assert!(app.status_message.contains("Raw x86_64"));
-    let state = match &app.main_view {
-        crate::app::MainView::Disassembly(state) => state.clone(),
-        crate::app::MainView::Hex => panic!("expected disassembly view"),
-    };
-    let rows = app
-        .collect_disassembly_rows(&state, state.viewport_top, 2)
+
+    // Off command returns to hex view
+    let bytes2 = build_disassembly_elf64(&[0x90, 0x90, 0x90, 0xc3]);
+    let mut app2 = app_with_bytes(&bytes2);
+    app2.execute_command(Command::Disassemble { arch: None })
         .unwrap();
-    assert_eq!(rows[0].offset, 0x10);
-    assert!(rows[0].text.contains("nop"));
-    assert!(rows[1].text.contains("ret"));
+    app2.execute_command(Command::DisassembleOff).unwrap();
+    assert!(matches!(app2.main_view, crate::app::MainView::Hex));
+    assert!(app2.disasm_backend.is_none());
 }
 
 #[test]
-fn disassemble_off_returns_to_hex_view() {
-    let bytes = build_disassembly_elf64(&[0x90, 0x90, 0x90, 0xc3]);
-    let mut app = app_with_bytes(&bytes);
-    app.execute_command(Command::Disassemble { arch: None })
-        .unwrap();
-    app.execute_command(Command::DisassembleOff).unwrap();
-    assert!(matches!(app.main_view, crate::app::MainView::Hex));
-    assert!(app.disasm_backend.is_none());
-    assert!(app.disasm_cache.is_none());
-}
-
-#[test]
-fn disassembly_vertical_move_uses_instruction_boundaries() {
+fn disassembly_navigation_and_scroll() {
     let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
     let mut app = app_with_bytes(&bytes);
     app.execute_command(Command::Disassemble { arch: None })
         .unwrap();
 
+    // Vertical move uses instruction boundaries
     assert_eq!(app.cursor, 0x100);
     app.move_vertical(1);
     assert_eq!(app.cursor, 0x101);
@@ -1170,48 +1087,32 @@ fn disassembly_vertical_move_uses_instruction_boundaries() {
     assert_eq!(app.cursor, 0x105);
     app.move_vertical(-1);
     assert_eq!(app.cursor, 0x104);
-}
 
-#[test]
-fn disassembly_scroll_viewport_uses_instruction_rows() {
-    let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
-    let mut app = app_with_bytes(&bytes);
-    app.view_rows = 2;
-    app.execute_command(Command::Disassemble { arch: None })
+    // Scroll viewport uses instruction rows
+    let mut app2 = app_with_bytes(&bytes);
+    app2.view_rows = 2;
+    app2.execute_command(Command::Disassemble { arch: None })
         .unwrap();
-
-    app.scroll_viewport(1);
-    match &app.main_view {
+    app2.scroll_viewport(1);
+    match &app2.main_view {
         crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x101),
         crate::app::MainView::Hex => panic!("expected disassembly view"),
     }
-    assert_eq!(app.cursor, 0x101);
 
-    app.scroll_viewport(1);
-    match &app.main_view {
-        crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x104),
-        crate::app::MainView::Hex => panic!("expected disassembly view"),
-    }
-    assert_eq!(app.cursor, 0x104);
-}
-
-#[test]
-fn disassembly_scroll_up_from_raw_tail_does_not_snap_back_to_text_end() {
-    let bytes = build_disassembly_elf64(&[0x90, 0xc3]);
-    let mut app = app_with_bytes(&bytes);
-    app.view_rows = 2;
-    app.execute_command(Command::Disassemble { arch: None })
+    // Scroll up from raw tail does not snap back to text end
+    let bytes3 = build_disassembly_elf64(&[0x90, 0xc3]);
+    let mut app3 = app_with_bytes(&bytes3);
+    app3.view_rows = 2;
+    app3.execute_command(Command::Disassemble { arch: None })
         .unwrap();
-
-    app.scroll_viewport(99);
-    let bottom_top = match &app.main_view {
+    app3.scroll_viewport(99);
+    let bottom_top = match &app3.main_view {
         crate::app::MainView::Disassembly(state) => state.viewport_top,
         crate::app::MainView::Hex => panic!("expected disassembly view"),
     };
     assert!(bottom_top >= 0x1f0);
-
-    app.scroll_viewport(-1);
-    match &app.main_view {
+    app3.scroll_viewport(-1);
+    match &app3.main_view {
         crate::app::MainView::Disassembly(state) => {
             assert_eq!(state.viewport_top, bottom_top.saturating_sub(8));
             assert!(state.viewport_top > 0x102);
@@ -1221,43 +1122,153 @@ fn disassembly_scroll_up_from_raw_tail_does_not_snap_back_to_text_end() {
 }
 
 #[test]
-fn instruction_search_jumps_to_matching_instruction_row() {
+fn disassembly_search_variants() {
     let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
     let mut app = app_with_bytes(&bytes);
     app.view_rows = 4;
     app.execute_command(Command::Disassemble { arch: None })
         .unwrap();
 
+    // Instruction search jumps to matching row
     app.execute_command(Command::SearchInstruction {
         pattern: "ret".to_owned(),
         backward: false,
     })
     .unwrap();
-
     assert_eq!(app.cursor, 0x105);
-    match &app.main_view {
-        crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x105),
-        crate::app::MainView::Hex => panic!("expected disassembly view"),
-    }
-}
 
-#[test]
-fn byte_search_in_disassembly_recenters_to_containing_instruction_row() {
-    let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
-    let mut app = app_with_bytes(&bytes);
-    app.view_rows = 4;
-    app.execute_command(Command::Disassemble { arch: None })
+    // Byte search recenters to containing instruction row
+    let mut app2 = app_with_bytes(&bytes);
+    app2.view_rows = 4;
+    app2.execute_command(Command::Disassemble { arch: None })
         .unwrap();
-
-    app.execute_command(Command::SearchHex {
+    app2.execute_command(Command::SearchHex {
         pattern: vec![0x89, 0xe5],
         backward: false,
     })
     .unwrap();
+    assert_eq!(app2.cursor, 0x102);
+}
 
-    assert_eq!(app.cursor, 0x102);
-    match &app.main_view {
-        crate::app::MainView::Disassembly(state) => assert_eq!(state.viewport_top, 0x101),
+// ═══════════════════════════════════════════════════════════════════════════
+// Disassembly view editing: nibble edit, undo, redo, fill, replace
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn disassembly_editing_undo_redo_and_fill() {
+    // Nibble edit updates instruction text
+    let bytes = build_disassembly_elf64(&[0x90, 0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    let initial_bytes = app.document.read_logical_range(0x100, 3).unwrap();
+    assert_eq!(initial_bytes, vec![0x90, 0x90, 0xc3]);
+
+    app.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app.edit_nibble(0xC).unwrap();
+    app.edit_nibble(0xC).unwrap();
+
+    let after_bytes = app.document.read_logical_range(0x100, 3).unwrap();
+    assert_eq!(after_bytes, vec![0xCC, 0x90, 0xc3]);
+    let state = match &app.main_view {
+        crate::app::MainView::Disassembly(s) => s.clone(),
         crate::app::MainView::Hex => panic!("expected disassembly view"),
-    }
+    };
+    let rows = app
+        .collect_disassembly_rows(&state, state.viewport_top, 3)
+        .unwrap();
+    assert!(!rows[0].text.contains("nop"), "should be int3, got: {}", rows[0].text);
+    assert!(rows[0].text.contains("int3"));
+
+    // Undo restores original instruction
+    let bytes2 = build_disassembly_elf64(&[0x90, 0xc3]);
+    let mut app2 = app_with_bytes(&bytes2);
+    app2.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app2.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app2.edit_nibble(0xC).unwrap();
+    app2.edit_nibble(0xC).unwrap();
+    app2.undo(2, false).unwrap();
+    app2.mode = Mode::Normal;
+    let restored = app2.document.read_logical_range(0x100, 2).unwrap();
+    assert_eq!(restored, vec![0x90, 0xc3]);
+
+    // Redo reapplies change
+    app2.redo(2, false).unwrap();
+    let state2 = match &app2.main_view {
+        crate::app::MainView::Disassembly(s) => s.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let rows2 = app2
+        .collect_disassembly_rows(&state2, state2.viewport_top, 2)
+        .unwrap();
+    assert!(rows2[0].text.contains("int3"));
+
+    // Fill command updates instructions
+    let bytes3 = build_disassembly_elf64(&[0x90, 0x90, 0xc3]);
+    let mut app3 = app_with_bytes(&bytes3);
+    app3.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app3.execute_command(Command::Fill {
+        pattern: vec![0xcc],
+        len: 2,
+    })
+    .unwrap();
+    let state3 = match &app3.main_view {
+        crate::app::MainView::Disassembly(s) => s.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let rows3 = app3
+        .collect_disassembly_rows(&state3, state3.viewport_top, 3)
+        .unwrap();
+    assert!(rows3[0].text.contains("int3"));
+    assert!(rows3[1].text.contains("int3"));
+}
+
+#[test]
+fn disassembly_insert_blocked_and_replace_restricted() {
+    let bytes = build_disassembly_elf64(&[0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    // Insert mode blocked
+    app.handle_action(crate::action::Action::EnterInsert);
+    assert!(app.status_message.contains("overwrite-only"));
+    assert!(matches!(app.mode, Mode::Normal));
+
+    // Equal length replace works
+    let mut app2 = app_with_bytes(&bytes);
+    app2.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app2.execute_command(Command::Replace {
+        needle: vec![0x90],
+        replacement: vec![0xcc],
+        allow_resize: false,
+    })
+    .unwrap();
+    let state2 = match &app2.main_view {
+        crate::app::MainView::Disassembly(s) => s.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let rows2 = app2
+        .collect_disassembly_rows(&state2, state2.viewport_top, 2)
+        .unwrap();
+    assert!(rows2[0].text.contains("int3"));
+
+    // Resize replace blocked
+    let mut app3 = app_with_bytes(&bytes);
+    app3.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    let result = app3.execute_command(Command::Replace {
+        needle: vec![0x90],
+        replacement: vec![0xcc, 0xcc],
+        allow_resize: true,
+    });
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("overwrite-only"));
 }

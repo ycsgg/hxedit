@@ -41,7 +41,8 @@ supports-color = "3"
 thiserror = "2.0"
 capstone = { version = "0.14", default-features = false, features = ["std"], optional = true }
 object = "0.39"
-rustc-demangle = "0.1"
+symbolic-common = "12.18"
+symbolic-demangle = "12.18"
 
 [dev-dependencies]
 pretty_assertions = "1.4"

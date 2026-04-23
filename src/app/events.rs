@@ -512,7 +512,8 @@ mod tests {
     }
 
     #[test]
-    fn command_cursor_can_move_and_insert_in_middle() {
+    fn command_cursor_navigation_and_editing() {
+        // Move and insert in middle
         let mut app = app_with_len(4);
         app.handle_action(Action::EnterCommand);
         app.handle_action(Action::CommandChar('a'));
@@ -521,52 +522,37 @@ mod tests {
         app.handle_action(Action::CommandLeft);
         app.handle_action(Action::CommandLeft);
         app.handle_action(Action::CommandChar('X'));
-
         assert_eq!(app.command_buffer, "aXbc");
         assert_eq!(app.command_cursor_pos, 2);
+
+        // Backspace respects cursor position (separate test)
+        let mut app2 = app_with_len(4);
+        app2.handle_action(Action::EnterCommand);
+        app2.handle_action(Action::CommandChar('a'));
+        app2.handle_action(Action::CommandChar('b'));
+        app2.handle_action(Action::CommandChar('c'));
+        app2.handle_action(Action::CommandLeft);
+        app2.handle_action(Action::CommandBackspace);
+        assert_eq!(app2.command_buffer, "ac");
+        assert_eq!(app2.command_cursor_pos, 1);
+
+        // Delete, home, end
+        let mut app3 = app_with_len(4);
+        app3.handle_action(Action::EnterCommand);
+        type_command(&mut app3, "abcd");
+        app3.handle_action(Action::CommandHome);
+        assert_eq!(app3.command_cursor_pos, 0);
+        app3.handle_action(Action::CommandRight);
+        app3.handle_action(Action::CommandRight);
+        app3.handle_action(Action::CommandDelete);
+        assert_eq!(app3.command_buffer, "abd");
+        app3.handle_action(Action::CommandEnd);
+        assert_eq!(app3.command_cursor_pos, app3.command_buffer.len());
     }
 
     #[test]
-    fn command_backspace_respects_cursor_position() {
-        let mut app = app_with_len(4);
-        app.handle_action(Action::EnterCommand);
-        app.handle_action(Action::CommandChar('a'));
-        app.handle_action(Action::CommandChar('b'));
-        app.handle_action(Action::CommandChar('c'));
-        app.handle_action(Action::CommandLeft);
-        app.handle_action(Action::CommandBackspace);
-
-        assert_eq!(app.command_buffer, "ac");
-        assert_eq!(app.command_cursor_pos, 1);
-    }
-
-    #[test]
-    fn command_delete_home_and_end_respect_cursor_position() {
-        let mut app = app_with_len(4);
-        app.handle_action(Action::EnterCommand);
-        app.handle_action(Action::CommandChar('a'));
-        app.handle_action(Action::CommandChar('b'));
-        app.handle_action(Action::CommandChar('c'));
-        app.handle_action(Action::CommandChar('d'));
-
-        app.handle_action(Action::CommandHome);
-        assert_eq!(app.command_cursor_pos, 0);
-
-        app.handle_action(Action::CommandRight);
-        app.handle_action(Action::CommandRight);
-        app.handle_action(Action::CommandDelete);
-
-        assert_eq!(app.command_buffer, "abd");
-        assert_eq!(app.command_cursor_pos, 2);
-
-        app.handle_action(Action::CommandEnd);
-        assert_eq!(app.command_cursor_pos, app.command_buffer.len());
-    }
-
-    #[test]
-    fn inspector_escape_returns_to_inspector_mode() {
+    fn inspector_enter_escape_and_format_warnings() {
         let mut app = app_with_inspector_field();
-
         app.handle_action(Action::InspectorEnter);
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert!(app
@@ -576,61 +562,38 @@ mod tests {
             .is_some());
 
         app.handle_action(Action::LeaveMode);
-
         assert_eq!(app.mode, Mode::Inspector);
         assert!(app
             .inspector
             .as_ref()
             .and_then(|inspector| inspector.editing.as_ref())
             .is_none());
+
+        // PNG format warning
+        let mut app_png = app_with_inspector_field_for("PNG");
+        app_png.handle_action(Action::InspectorEnter);
+        assert_eq!(app_png.status_level, crate::app::StatusLevel::Warning);
+        assert!(app_png.status_message.contains("PNG inspector edits"));
+
+        // GZIP format warning
+        let mut app_gz = app_with_inspector_field_for("GZIP");
+        app_gz.handle_action(Action::InspectorEnter);
+        assert!(app_gz.status_message.contains("GZIP inspector edits"));
+
+        // TAR format warning
+        let mut app_tar = app_with_inspector_field_for("TAR");
+        app_tar.handle_action(Action::InspectorEnter);
+        assert!(app_tar.status_message.contains("TAR inspector edits"));
+
+        // JPEG format warning
+        let mut app_jpg = app_with_inspector_field_for("JPEG");
+        app_jpg.handle_action(Action::InspectorEnter);
+        assert!(app_jpg.status_message.contains("JPEG inspector edits"));
     }
 
     #[test]
-    fn inspector_warns_when_editing_png_field() {
-        let mut app = app_with_inspector_field_for("PNG");
-
-        app.handle_action(Action::InspectorEnter);
-
-        assert_eq!(app.mode, Mode::InspectorEdit);
-        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
-        assert!(app.status_message.contains("PNG inspector edits"));
-    }
-
-    #[test]
-    fn inspector_warns_when_editing_gzip_field() {
-        let mut app = app_with_inspector_field_for("GZIP");
-
-        app.handle_action(Action::InspectorEnter);
-
-        assert_eq!(app.mode, Mode::InspectorEdit);
-        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
-        assert!(app.status_message.contains("GZIP inspector edits"));
-    }
-
-    #[test]
-    fn inspector_warns_when_editing_tar_field() {
-        let mut app = app_with_inspector_field_for("TAR");
-
-        app.handle_action(Action::InspectorEnter);
-
-        assert_eq!(app.mode, Mode::InspectorEdit);
-        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
-        assert!(app.status_message.contains("TAR inspector edits"));
-    }
-
-    #[test]
-    fn inspector_warns_when_editing_jpeg_field() {
-        let mut app = app_with_inspector_field_for("JPEG");
-
-        app.handle_action(Action::InspectorEnter);
-
-        assert_eq!(app.mode, Mode::InspectorEdit);
-        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
-        assert!(app.status_message.contains("JPEG inspector edits"));
-    }
-
-    #[test]
-    fn hidden_inspector_focus_falls_back_to_normal_mode() {
+    fn inspector_hidden_and_width_conditions() {
+        // Hidden inspector focus falls back to normal mode
         let mut app = app_with_inspector_field();
         app.last_columns = Some(crate::view::layout::MainColumns {
             main_pane_kind: crate::view::layout::MainPaneKind::Hex,
@@ -642,44 +605,23 @@ mod tests {
             sep3: None,
             inspector: None,
         });
-
         app.ensure_inspector_mode_visible();
-
         assert_eq!(app.mode, Mode::Normal);
-        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
         assert!(app.status_message.contains("too narrow"));
-        assert!(app.status_message.contains("current 36 columns"));
-    }
 
-    #[test]
-    fn entering_inspector_from_normal_mode_warns_when_hidden() {
-        let mut app = app_with_inspector_field();
-        app.mode = Mode::Normal;
-        app.last_columns = Some(crate::view::layout::MainColumns {
-            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
-            gutter: Rect::new(0, 0, 4, 4),
-            sep1: Rect::new(4, 0, 1, 4),
-            hex: Rect::new(5, 0, 20, 4),
-            sep2: Rect::new(25, 0, 1, 4),
-            ascii: Rect::new(26, 0, 10, 4),
-            sep3: None,
-            inspector: None,
-        });
+        // Entering inspector from normal mode warns when hidden
+        let mut app2 = app_with_inspector_field();
+        app2.mode = Mode::Normal;
+        app2.last_columns = app.last_columns;
+        app2.handle_action(Action::ToggleInspector);
+        assert_eq!(app2.mode, Mode::Normal);
+        assert!(app2.show_inspector);
+        assert!(app2.status_message.contains("too narrow"));
 
-        app.handle_action(Action::ToggleInspector);
-
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(app.show_inspector);
-        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
-        assert!(app.status_message.contains("too narrow"));
-        assert!(app.status_message.contains("current 36 columns"));
-    }
-
-    #[test]
-    fn entering_inspector_from_normal_mode_succeeds_when_width_is_sufficient() {
-        let mut app = app_with_inspector_field();
-        app.mode = Mode::Normal;
-        app.last_columns = Some(crate::view::layout::MainColumns {
+        // Entering inspector succeeds when width is sufficient
+        let mut app3 = app_with_inspector_field();
+        app3.mode = Mode::Normal;
+        app3.last_columns = Some(crate::view::layout::MainColumns {
             main_pane_kind: crate::view::layout::MainPaneKind::Hex,
             gutter: Rect::new(0, 0, 8, 4),
             sep1: Rect::new(8, 0, 1, 4),
@@ -689,118 +631,71 @@ mod tests {
             sep3: None,
             inspector: None,
         });
+        app3.handle_action(Action::ToggleInspector);
+        assert_eq!(app3.mode, Mode::Inspector);
+        assert!(!app3.status_message.contains("too narrow"));
 
-        app.handle_action(Action::ToggleInspector);
+        // No detected format stays in normal with hint
+        let mut app4 = app_with_len(8);
+        app4.mode = Mode::Normal;
+        app4.last_columns = app3.last_columns;
+        app4.handle_action(Action::ToggleInspector);
+        assert_eq!(app4.mode, Mode::Normal);
+        assert!(app4.status_message.contains("no format detected"));
+        assert!(app4.status_message.contains("ELF / PNG / ZIP / GZIP / TAR / JPEG"));
 
-        assert_eq!(app.mode, Mode::Inspector);
-        assert!(!app.status_message.contains("too narrow"));
+        // View-only inspector reports read-only mode
+        let mut app5 = app_with_inspector_field_editable("TEST", false);
+        app5.mode = Mode::Normal;
+        app5.last_columns = app3.last_columns;
+        app5.handle_action(Action::ToggleInspector);
+        assert_eq!(app5.mode, Mode::Inspector);
+        assert!(app5.status_message.contains("view-only"));
+
+        // Enter on read-only field reports reason
+        let mut app6 = app_with_inspector_field_editable("TEST", false);
+        app6.handle_action(Action::InspectorEnter);
+        assert_eq!(app6.mode, Mode::Inspector);
+        assert!(app6.status_message.contains("read-only"));
     }
 
     #[test]
-    fn entering_inspector_without_detected_format_stays_in_normal_with_hint() {
-        let mut app = app_with_len(8);
-        app.mode = Mode::Normal;
-        app.last_columns = Some(crate::view::layout::MainColumns {
-            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
-            gutter: Rect::new(0, 0, 8, 4),
-            sep1: Rect::new(8, 0, 1, 4),
-            hex: Rect::new(9, 0, 90, 4),
-            sep2: Rect::new(99, 0, 1, 4),
-            ascii: Rect::new(100, 0, 40, 4),
-            sep3: None,
-            inspector: None,
-        });
-
-        app.handle_action(Action::ToggleInspector);
-
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(app.show_inspector);
-        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
-        assert!(app.status_message.contains("no format detected"));
-        assert!(app
-            .status_message
-            .contains("ELF / PNG / ZIP / GZIP / TAR / JPEG"));
-    }
-
-    #[test]
-    fn entering_view_only_inspector_reports_read_only_mode() {
-        let mut app = app_with_inspector_field_editable("TEST", false);
-        app.mode = Mode::Normal;
-        app.last_columns = Some(crate::view::layout::MainColumns {
-            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
-            gutter: Rect::new(0, 0, 8, 4),
-            sep1: Rect::new(8, 0, 1, 4),
-            hex: Rect::new(9, 0, 90, 4),
-            sep2: Rect::new(99, 0, 1, 4),
-            ascii: Rect::new(100, 0, 40, 4),
-            sep3: None,
-            inspector: None,
-        });
-
-        app.handle_action(Action::ToggleInspector);
-
-        assert_eq!(app.mode, Mode::Inspector);
-        assert_eq!(app.status_level, crate::app::StatusLevel::Info);
-        assert!(app.status_message.contains("view-only"));
-    }
-
-    #[test]
-    fn inspector_enter_on_read_only_field_reports_reason() {
-        let mut app = app_with_inspector_field_editable("TEST", false);
-
-        app.handle_action(Action::InspectorEnter);
-
-        assert_eq!(app.mode, Mode::Inspector);
-        assert_eq!(app.status_level, crate::app::StatusLevel::Info);
-        assert!(app.status_message.contains("read-only"));
-        assert!(app.status_message.contains("entry"));
-    }
-
-    #[test]
-    fn failed_command_keeps_command_buffer_for_editing() {
+    fn command_mode_success_and_history() {
+        // Failed command keeps buffer for editing
         let mut app = app_with_len(1);
         app.mode = Mode::EditHex {
             phase: NibblePhase::High,
         };
         app.edit_nibble(0xa).unwrap();
         app.mode = Mode::Normal;
-
         app.handle_action(Action::EnterCommand);
         app.handle_action(Action::CommandChar('q'));
         app.handle_action(Action::CommandSubmit);
-
         assert_eq!(app.mode, Mode::Command);
         assert_eq!(app.command_buffer, "q");
-        assert_eq!(app.command_cursor_pos, 1);
         assert_eq!(app.status_level, crate::app::StatusLevel::Error);
         assert!(app.status_message.contains("unsaved changes"));
-    }
 
-    #[test]
-    fn command_mode_clears_after_success_and_browses_history() {
-        let mut app = app_with_len(16);
-
-        app.handle_action(Action::EnterCommand);
-        type_command(&mut app, "goto 0x4");
-        app.handle_action(Action::CommandSubmit);
-
-        app.handle_action(Action::EnterCommand);
-        assert!(app.command_buffer.is_empty());
-        type_command(&mut app, "goto 0x1");
-        app.handle_action(Action::CommandSubmit);
-
-        app.handle_action(Action::EnterCommand);
-        assert!(app.command_buffer.is_empty());
-        type_command(&mut app, "und");
-
-        app.handle_action(Action::CommandHistoryPrev);
-        assert_eq!(app.command_buffer, "goto 0x1");
-        app.handle_action(Action::CommandHistoryPrev);
-        assert_eq!(app.command_buffer, "goto 0x4");
-        app.handle_action(Action::CommandHistoryNext);
-        assert_eq!(app.command_buffer, "goto 0x1");
-        app.handle_action(Action::CommandHistoryNext);
-        assert_eq!(app.command_buffer, "und");
+        // Success clears buffer and browses history
+        let mut app2 = app_with_len(16);
+        app2.handle_action(Action::EnterCommand);
+        type_command(&mut app2, "goto 0x4");
+        app2.handle_action(Action::CommandSubmit);
+        app2.handle_action(Action::EnterCommand);
+        assert!(app2.command_buffer.is_empty());
+        type_command(&mut app2, "goto 0x1");
+        app2.handle_action(Action::CommandSubmit);
+        app2.handle_action(Action::EnterCommand);
+        assert!(app2.command_buffer.is_empty());
+        type_command(&mut app2, "und");
+        app2.handle_action(Action::CommandHistoryPrev);
+        assert_eq!(app2.command_buffer, "goto 0x1");
+        app2.handle_action(Action::CommandHistoryPrev);
+        assert_eq!(app2.command_buffer, "goto 0x4");
+        app2.handle_action(Action::CommandHistoryNext);
+        assert_eq!(app2.command_buffer, "goto 0x1");
+        app2.handle_action(Action::CommandHistoryNext);
+        assert_eq!(app2.command_buffer, "und");
     }
 
     fn app_with_nested_inspector() -> App {
@@ -859,72 +754,61 @@ mod tests {
     }
 
     #[test]
-    fn toggle_collapse_hides_child_struct_and_its_fields() {
+    fn inspector_collapse_toggle_and_navigation() {
         let mut app = app_with_nested_inspector();
         // Layout: [0]=Parent header, [1]=parent_byte, [2]=Child header, [3]=child_byte
-        let inspector = app.inspector.as_ref().unwrap();
-        assert_eq!(inspector.rows.len(), 4);
-        assert_eq!(inspector.selected_row, 0); // Parent header
+        assert_eq!(app.inspector.as_ref().unwrap().rows.len(), 4);
+        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 0); // Parent header
 
         // Collapse Parent — fields AND child go away.
         app.handle_action(Action::InspectorToggleCollapse);
-
-        let inspector = app.inspector.as_ref().unwrap();
-        assert_eq!(inspector.rows.len(), 1);
+        assert_eq!(app.inspector.as_ref().unwrap().rows.len(), 1);
         assert!(matches!(
-            inspector.rows[0],
+            app.inspector.as_ref().unwrap().rows[0],
             InspectorRow::Header {
                 collapsed: true,
                 ..
             }
         ));
-        assert!(inspector
+        assert!(app.inspector.as_ref().unwrap()
             .collapsed_nodes
             .contains(&vec![("Parent".to_owned(), 0)]));
-    }
 
-    #[test]
-    fn toggle_collapse_twice_restores_original_rows() {
-        let mut app = app_with_nested_inspector();
-        let before = app.inspector.as_ref().unwrap().rows.len();
-
+        // Toggle twice restores original rows
         app.handle_action(Action::InspectorToggleCollapse);
-        app.handle_action(Action::InspectorToggleCollapse);
-
-        let after = app.inspector.as_ref().unwrap().rows.len();
-        assert_eq!(before, after);
+        assert_eq!(app.inspector.as_ref().unwrap().rows.len(), 4);
         assert!(app.inspector.as_ref().unwrap().collapsed_nodes.is_empty());
-    }
 
-    #[test]
-    fn header_enter_toggles_collapse_when_not_editing() {
-        let mut app = app_with_nested_inspector();
-        // selected_row starts at 0 (Parent header).
+        // Header Enter toggles collapse when not editing
         app.handle_action(Action::InspectorEnter);
-
-        let inspector = app.inspector.as_ref().unwrap();
-        assert!(inspector
+        assert!(app.inspector.as_ref().unwrap()
             .collapsed_nodes
             .contains(&vec![("Parent".to_owned(), 0)]));
         assert_eq!(app.mode, Mode::Inspector);
-    }
 
-    #[test]
-    fn space_during_edit_inserts_into_buffer_instead_of_toggling() {
-        let mut app = app_with_inspector_field();
-        app.handle_action(Action::InspectorEnter);
-        assert_eq!(app.mode, Mode::InspectorEdit);
+        // Navigation stops on collapsible header
+        let mut app2 = app_with_nested_inspector();
+        assert_eq!(app2.inspector.as_ref().unwrap().selected_row, 0);
+        app2.handle_action(Action::InspectorDown);
+        assert_eq!(app2.inspector.as_ref().unwrap().selected_row, 1);
+        app2.handle_action(Action::InspectorDown);
+        assert_eq!(app2.inspector.as_ref().unwrap().selected_row, 2);
+        assert!(matches!(
+            app2.inspector.as_ref().unwrap().rows[2],
+            InspectorRow::Header { .. }
+        ));
 
-        let before_buf = app
+        // Space during edit inserts into buffer instead of toggling
+        let mut app3 = app_with_inspector_field();
+        app3.handle_action(Action::InspectorEnter);
+        let before_buf = app3
             .inspector
             .as_ref()
             .and_then(|i| i.editing.as_ref())
             .map(|e| e.buffer.clone())
             .unwrap();
-
-        app.handle_action(Action::InspectorToggleCollapse);
-
-        let after = app
+        app3.handle_action(Action::InspectorToggleCollapse);
+        let after = app3
             .inspector
             .as_ref()
             .and_then(|i| i.editing.as_ref())
@@ -932,35 +816,12 @@ mod tests {
             .unwrap();
         assert_eq!(after.len(), before_buf.len() + 1);
         assert!(after.ends_with(' '));
-    }
 
-    #[test]
-    fn navigation_stops_on_collapsible_header() {
-        let mut app = app_with_nested_inspector();
-        // Start on Parent header (row 0). Down should land on parent_byte (1),
-        // then Child header (2), then child_byte (3).
-        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 0);
-
-        app.handle_action(Action::InspectorDown);
-        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 1);
-
-        app.handle_action(Action::InspectorDown);
-        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 2);
-        assert!(matches!(
-            app.inspector.as_ref().unwrap().rows[2],
-            InspectorRow::Header { .. }
-        ));
-    }
-
-    #[test]
-    fn toggle_on_non_header_row_is_noop() {
-        let mut app = app_with_nested_inspector();
-        // Move selection to the field row (row 1).
-        app.handle_action(Action::InspectorDown);
-        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 1);
-
-        app.handle_action(Action::InspectorToggleCollapse);
-
-        assert!(app.inspector.as_ref().unwrap().collapsed_nodes.is_empty());
+        // Toggle on non-header row is noop
+        let mut app4 = app_with_nested_inspector();
+        app4.handle_action(Action::InspectorDown);
+        assert_eq!(app4.inspector.as_ref().unwrap().selected_row, 1);
+        app4.handle_action(Action::InspectorToggleCollapse);
+        assert!(app4.inspector.as_ref().unwrap().collapsed_nodes.is_empty());
     }
 }

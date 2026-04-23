@@ -1,3 +1,6 @@
+use symbolic_common::Name;
+use symbolic_demangle::{Demangle, DemangleOptions};
+
 use crate::executable::types::{CodeSpan, Endian};
 
 pub(super) fn demangle_symbol(name: &str) -> String {
@@ -6,14 +9,24 @@ pub(super) fn demangle_symbol(name: &str) -> String {
         return String::new();
     }
 
-    if let Ok(display) = rustc_demangle::try_demangle(name) {
-        return display.to_string();
+    // symbolic-demangle supports C++ (GCC/MSVC), Rust, Swift, etc.
+    let symbol = Name::from(name);
+    let demangled = symbol.try_demangle(DemangleOptions::name_only());
+
+    // Check if demangling actually changed the name
+    if demangled != name {
+        return demangled.to_string();
     }
+
+    // Try stripping leading underscore for Mach-O / C symbols
     if let Some(stripped) = name.strip_prefix('_') {
-        if let Ok(display) = rustc_demangle::try_demangle(stripped) {
-            return display.to_string();
+        let symbol = Name::from(stripped);
+        let demangled = symbol.try_demangle(DemangleOptions::name_only());
+        if demangled != stripped {
+            return demangled.to_string();
         }
     }
+
     normalize_symbol_name(name).to_owned()
 }
 
@@ -126,5 +139,26 @@ mod tests {
         assert_eq!(demangle_symbol("puts@plt"), "puts");
         assert_eq!(demangle_symbol("__imp__CreateFileW@28"), "CreateFileW");
         assert_eq!(demangle_symbol("_MessageBoxA@16"), "MessageBoxA");
+    }
+
+    #[test]
+    fn demangles_cpp_symbols() {
+        // GCC-style C++ mangling
+        assert_eq!(demangle_symbol("_ZN3foo3barEv"), "foo::bar");
+        assert_eq!(
+            demangle_symbol("_ZNKSt9exceptionD0Ev"),
+            "std::exception::~exception"
+        );
+        // More complex C++ symbol
+        assert!(demangle_symbol("_ZN3std9basic_iosIcSt11char_traitsIcEED2Ev").contains("std"));
+    }
+
+    #[test]
+    fn demangles_rust_symbols() {
+        // Legacy Rust mangling
+        assert!(
+            demangle_symbol("_ZN3std2io4Read11read_to_end17hb85a0f6802e14499E")
+                .contains("read_to_end")
+        );
     }
 }
