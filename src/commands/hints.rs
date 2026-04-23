@@ -64,7 +64,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             }
         }
         "format" => CommandHint {
-            syntax: "format [elf|png|zip|gzip|gif|bmp|wav|tar|jpeg]".to_owned(),
+            syntax: "format [elf|pe|macho|png|zip|gzip|gif|bmp|wav|tar|jpeg]".to_owned(),
             details: "auto-detect format when omitted, or force a built-in inspector".to_owned(),
         },
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"

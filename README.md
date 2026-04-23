@@ -180,16 +180,16 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 
 ## Inspector Notes
 
-- Supports ELF, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG formats
+- Supports ELF, PE/COFF, Mach-O, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG formats
 - Works best on a wide terminal; shows a warning if the terminal is too narrow
 - ELF currently covers headers, program/section tables, dynamic tags, notes/GNU properties, symbols, relocations, hash tables, and version metadata
+- PE/COFF currently covers DOS header, COFF header, optional header (PE32/PE32+), and section table with data ranges
+- Mach-O currently covers Mach header, load commands, segments/sections with data ranges, and Fat (universal) binaries
 - GZIP currently covers fixed/optional header fields, compressed payload range, and trailer metadata
 - GIF currently covers the logical screen descriptor, global/local color tables, image blocks, extensions, and trailer
 - BMP currently covers the bitmap file header, DIB header variants, optional bit masks / palette ranges, and pixel data
 - WAV currently covers the RIFF/WAVE header, paginated top-level chunks, `fmt ` metadata, data ranges, and padding bytes
 - TAR currently covers USTAR entry headers, paginated entry lists, and file data ranges
-- JPEG currently covers segment markers, APP/SOF/SOS metadata, entropy-coded scan data ranges, and EOI
-- JPEG currently covers segment markers, APP/SOF/SOS metadata, entropy-coded scan data ranges, and EOI
 - JPEG currently covers segment markers, APP/SOF/SOS metadata, entropy-coded scan data ranges, and EOI
 - Nested sections (e.g. ELF Program Headers / Section Header Table children) are collapsed by default; use `Space` / `Enter` on a header to expand
 - The currently selected inspector field highlights its byte range in the hex grid
