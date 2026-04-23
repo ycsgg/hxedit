@@ -592,8 +592,84 @@ mod tests {
     }
 
     #[test]
-    fn inspector_hidden_and_width_conditions() {
-        // Hidden inspector focus falls back to normal mode
+    fn inspector_warns_when_editing_png_field() {
+        let mut app = app_with_inspector_field_for("PNG");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("PNG inspector edits"));
+    }
+
+    #[test]
+    fn inspector_warns_when_editing_gzip_field() {
+        let mut app = app_with_inspector_field_for("GZIP");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("GZIP inspector edits"));
+    }
+
+    #[test]
+    fn inspector_warns_when_editing_gif_field() {
+        let mut app = app_with_inspector_field_for("GIF");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("GIF inspector edits"));
+    }
+
+    #[test]
+    fn inspector_warns_when_editing_bmp_field() {
+        let mut app = app_with_inspector_field_for("BMP");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("BMP inspector edits"));
+    }
+
+    #[test]
+    fn inspector_warns_when_editing_wav_field() {
+        let mut app = app_with_inspector_field_for("WAV");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("WAV inspector edits"));
+    }
+
+    #[test]
+    fn inspector_warns_when_editing_tar_field() {
+        let mut app = app_with_inspector_field_for("TAR");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("TAR inspector edits"));
+    }
+
+    #[test]
+    fn inspector_warns_when_editing_jpeg_field() {
+        let mut app = app_with_inspector_field_for("JPEG");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("JPEG inspector edits"));
+    }
+
+    #[test]
+    fn hidden_inspector_focus_falls_back_to_normal_mode() {
         let mut app = app_with_inspector_field();
         app.last_columns = Some(crate::view::layout::MainColumns {
             main_pane_kind: crate::view::layout::MainPaneKind::Hex,
@@ -642,7 +718,9 @@ mod tests {
         app4.handle_action(Action::ToggleInspector);
         assert_eq!(app4.mode, Mode::Normal);
         assert!(app4.status_message.contains("no format detected"));
-        assert!(app4.status_message.contains("ELF / PNG / ZIP / GZIP / TAR / JPEG"));
+        assert!(app4
+            .status_message
+            .contains("ELF / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG"));
 
         // View-only inspector reports read-only mode
         let mut app5 = app_with_inspector_field_editable("TEST", false);
@@ -657,6 +735,66 @@ mod tests {
         app6.handle_action(Action::InspectorEnter);
         assert_eq!(app6.mode, Mode::Inspector);
         assert!(app6.status_message.contains("read-only"));
+    }
+
+    #[test]
+    fn entering_inspector_without_detected_format_stays_in_normal_with_hint() {
+        let mut app = app_with_len(8);
+        app.mode = Mode::Normal;
+        app.last_columns = Some(crate::view::layout::MainColumns {
+            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
+            gutter: Rect::new(0, 0, 8, 4),
+            sep1: Rect::new(8, 0, 1, 4),
+            hex: Rect::new(9, 0, 90, 4),
+            sep2: Rect::new(99, 0, 1, 4),
+            ascii: Rect::new(100, 0, 40, 4),
+            sep3: None,
+            inspector: None,
+        });
+
+        app.handle_action(Action::ToggleInspector);
+
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.show_inspector);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("no format detected"));
+        assert!(app
+            .status_message
+            .contains("ELF / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG"));
+    }
+
+    #[test]
+    fn entering_view_only_inspector_reports_read_only_mode() {
+        let mut app = app_with_inspector_field_editable("TEST", false);
+        app.mode = Mode::Normal;
+        app.last_columns = Some(crate::view::layout::MainColumns {
+            main_pane_kind: crate::view::layout::MainPaneKind::Hex,
+            gutter: Rect::new(0, 0, 8, 4),
+            sep1: Rect::new(8, 0, 1, 4),
+            hex: Rect::new(9, 0, 90, 4),
+            sep2: Rect::new(99, 0, 1, 4),
+            ascii: Rect::new(100, 0, 40, 4),
+            sep3: None,
+            inspector: None,
+        });
+
+        app.handle_action(Action::ToggleInspector);
+
+        assert_eq!(app.mode, Mode::Inspector);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Info);
+        assert!(app.status_message.contains("view-only"));
+    }
+
+    #[test]
+    fn inspector_enter_on_read_only_field_reports_reason() {
+        let mut app = app_with_inspector_field_editable("TEST", false);
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::Inspector);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Info);
+        assert!(app.status_message.contains("read-only"));
+        assert!(app.status_message.contains("entry"));
     }
 
     #[test]
@@ -770,7 +908,10 @@ mod tests {
                 ..
             }
         ));
-        assert!(app.inspector.as_ref().unwrap()
+        assert!(app
+            .inspector
+            .as_ref()
+            .unwrap()
             .collapsed_nodes
             .contains(&vec![("Parent".to_owned(), 0)]));
 
@@ -781,7 +922,10 @@ mod tests {
 
         // Header Enter toggles collapse when not editing
         app.handle_action(Action::InspectorEnter);
-        assert!(app.inspector.as_ref().unwrap()
+        assert!(app
+            .inspector
+            .as_ref()
+            .unwrap()
             .collapsed_nodes
             .contains(&vec![("Parent".to_owned(), 0)]));
         assert_eq!(app.mode, Mode::Inspector);

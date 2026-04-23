@@ -14,7 +14,7 @@ const DEFAULT_COLLAPSED_DEPTH: usize = 1;
 
 impl App {
     fn supported_inspector_formats() -> &'static str {
-        "ELF / PNG / ZIP / GZIP / TAR / JPEG"
+        "ELF / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG"
     }
 
     pub(crate) fn inspector_has_editable_fields(&self) -> bool {
@@ -127,6 +127,13 @@ impl App {
             "PNG" => Some("PNG inspector edits do not repair CRC or chunk consistency"),
             "ZIP" => Some("ZIP inspector edits do not repair header or descriptor consistency"),
             "GZIP" => Some("GZIP inspector edits do not recompute header/trailer consistency"),
+            "GIF" => {
+                Some("GIF inspector edits do not repair palette, frame, or sub-block consistency")
+            }
+            "BMP" => Some("BMP inspector edits do not repair masks, palette, or pixel layout"),
+            "WAV" => {
+                Some("WAV inspector edits do not repair chunk sizes, padding, or codec metadata")
+            }
             "TAR" => Some("TAR inspector edits do not recompute checksums or entry layout"),
             "JPEG" => Some("JPEG inspector edits do not repair segment lengths or entropy coding"),
             _ => None,

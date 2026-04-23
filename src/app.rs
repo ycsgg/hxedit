@@ -84,7 +84,7 @@ pub struct App {
     show_inspector: bool,
     /// Manual format override for the inspector, e.g. `elf`.
     inspector_format_override: Option<String>,
-    /// Per-format entry cap for pagination-aware parsers (ELF / PNG / ZIP).
+    /// Per-format entry cap for pagination-aware parsers (ELF / PNG / ZIP / GIF / WAV).
     /// Starts at `DEFAULT_ENTRY_CAP` and grows by `ENTRY_CAP_BATCH` on each
     /// `:insp more` until all entries are loaded.
     inspector_entry_cap: usize,

@@ -1,6 +1,11 @@
+pub mod bmp;
 pub mod elf;
+pub mod gif;
 pub mod gzip;
 pub mod jpeg;
+pub mod macho;
+pub mod pe;
 pub mod png;
 pub mod tar;
+pub mod wav;
 pub mod zip;

@@ -118,6 +118,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
@@ -129,10 +132,35 @@ jobs:
           cd dist
           sha256sum * > SHA256SUMS.txt
 
+      - name: Extract changelog for current version
+        id: changelog
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+
+          # Extract the changelog section for this version
+          # The pattern looks for "## [VERSION]" and captures until the next "## [" or end of file
+          CHANGELOG=$(awk -v ver="$VERSION" '
+            /^## \[/ { in_section = 0 }
+            $0 ~ "^## \\[" ver "\\]" { in_section = 1; next }
+            in_section && /^## \[/ { exit }
+            in_section { print }
+          ' CHANGELOG.md)
+
+          # Write to file for multiline output
+          echo "$CHANGELOG" > /tmp/release_body.md
+
+          # Prepend header
+          echo "## What's Changed" > /tmp/release_header.md
+          echo "" >> /tmp/release_header.md
+
+          cat /tmp/release_header.md /tmp/release_body.md > /tmp/full_release_notes.md
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: /tmp/full_release_notes.md
           fail_on_unmatched_files: true
           files: |
             dist/*
