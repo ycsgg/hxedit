@@ -614,6 +614,17 @@ mod tests {
     }
 
     #[test]
+    fn inspector_warns_when_editing_bmp_field() {
+        let mut app = app_with_inspector_field_for("BMP");
+
+        app.handle_action(Action::InspectorEnter);
+
+        assert_eq!(app.mode, Mode::InspectorEdit);
+        assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+        assert!(app.status_message.contains("BMP inspector edits"));
+    }
+
+    #[test]
     fn inspector_warns_when_editing_tar_field() {
         let mut app = app_with_inspector_field_for("TAR");
 
@@ -721,7 +732,7 @@ mod tests {
         assert!(app.status_message.contains("no format detected"));
         assert!(app
             .status_message
-            .contains("ELF / PNG / ZIP / GZIP / GIF / TAR / JPEG"));
+            .contains("ELF / PNG / ZIP / GZIP / GIF / BMP / TAR / JPEG"));
     }
 
     #[test]

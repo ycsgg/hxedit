@@ -34,6 +34,9 @@ pub fn detect_format_with_cap(doc: &mut Document, entry_cap: usize) -> Option<Fo
     if let Some(def) = defs::gif::detect_with_cap(doc, entry_cap) {
         return Some(def);
     }
+    if let Some(def) = defs::bmp::detect_with_cap(doc, entry_cap) {
+        return Some(def);
+    }
     if let Some(def) = defs::jpeg::detect_with_cap(doc, entry_cap) {
         return Some(def);
     }
@@ -59,6 +62,7 @@ pub fn detect_by_name_with_cap(
         "zip" => defs::zip::detect_with_cap(doc, entry_cap),
         "gzip" | "gz" => defs::gzip::detect_with_cap(doc, entry_cap),
         "gif" => defs::gif::detect_with_cap(doc, entry_cap),
+        "bmp" => defs::bmp::detect_with_cap(doc, entry_cap),
         "jpeg" | "jpg" => defs::jpeg::detect_with_cap(doc, entry_cap),
         "tar" => defs::tar::detect_with_cap(doc, entry_cap),
         _ => None,
