@@ -796,7 +796,9 @@ fn export_command_writes_logical_selection() {
     let mut app2 = app_with_inspector_field(b"hello world", 6, 5);
     let path2 = dir.path().join("field.bin");
     app2.execute_command(Command::Export {
-        format: ExportFormat::Binary { path: path2.clone() },
+        format: ExportFormat::Binary {
+            path: path2.clone(),
+        },
     })
     .unwrap();
 
@@ -999,7 +1001,8 @@ fn disassembly_symbols_and_call_targets() {
     assert_eq!(rows[0].symbol_label.as_deref(), Some("entry"));
 
     // Symbolizes exact immediate operands
-    let bytes2 = build_disassembly_elf64_with_symbol(&[0xB8, 0x00, 0x10, 0x40, 0x00, 0xC3], "entry");
+    let bytes2 =
+        build_disassembly_elf64_with_symbol(&[0xB8, 0x00, 0x10, 0x40, 0x00, 0xC3], "entry");
     let mut app2 = app_with_bytes(&bytes2);
     app2.execute_command(Command::Disassemble { arch: None })
         .unwrap();
@@ -1179,7 +1182,11 @@ fn disassembly_editing_undo_redo_and_fill() {
     let rows = app
         .collect_disassembly_rows(&state, state.viewport_top, 3)
         .unwrap();
-    assert!(!rows[0].text.contains("nop"), "should be int3, got: {}", rows[0].text);
+    assert!(
+        !rows[0].text.contains("nop"),
+        "should be int3, got: {}",
+        rows[0].text
+    );
     assert!(rows[0].text.contains("int3"));
 
     // Undo restores original instruction
