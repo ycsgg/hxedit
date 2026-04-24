@@ -197,6 +197,8 @@ fn parses_basic_commands() {
             backward: true,
         }
     );
+    assert_eq!(parse_command("data").unwrap(), Command::Data);
+    assert_eq!(parse_command("data off").unwrap(), Command::DataOff);
 }
 
 #[test]
@@ -221,6 +223,7 @@ fn rejects_invalid_commands() {
     assert!(parse_command("hash blake2").is_err());
     assert!(parse_command("dis!").is_err());
     assert!(parse_command("dis! x86_64").is_err());
+    assert!(parse_command("data more").is_err());
     assert!(parse_command("unknown").is_err());
 }
 

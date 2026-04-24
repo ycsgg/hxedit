@@ -78,12 +78,13 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 
 ### Side Panel
 
-- `t` / `Tab` — toggle the current side panel; after `:sym`, reopening returns to the symbol page rather than resetting to inspector
+- `t` / `Tab` — toggle the current side panel; after `:sym` or `:data`, reopening restores that page rather than resetting to inspector
 - `j` `k` / `Up` `Down` — move between inspector fields/headers or symbol rows
-- `PageUp` / `PageDown` / mouse wheel — scroll the focused symbol list or main view
+- `PageUp` / `PageDown` / mouse wheel — scroll the focused symbol/data panel or main view
 - `Space` / `Enter` on an inspector header — collapse or expand the section (`▶` collapsed, `▼` expanded)
 - `Enter` on a field — start or submit field edit; `Enter` on a symbol jumps to its file offset
 - Mouse click on a symbol row — select and jump to that symbol's mapped file offset; the bottom detail area shows `symbol / meta / offset / file` and can be mouse-wheel scrolled for very long names
+- Mouse click on a data row — select the bytes that row decodes and sync the hex grid selection
 - `Esc` — leave edit or side-panel focus
 
 ## Commands
@@ -161,6 +162,8 @@ Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (littl
 | `:dis off` | Return from disassembly view to the normal hex/ascii view |
 | `:sym` | Show executable symbols/import targets in the side panel |
 | `:sym off` | Close the symbol page and restore the inspector when available |
+| `:data` | Show cursor-relative primitive data decoding in the side panel |
+| `:data off` | Close the data page |
 
 Hashes the active selection (visual or selected inspector field) if active, otherwise the entire file.
 

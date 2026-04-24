@@ -131,4 +131,6 @@ pub enum Command {
     DisassembleOff,
     Symbols,
     SymbolsOff,
+    Data,
+    DataOff,
 }

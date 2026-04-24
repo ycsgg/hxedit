@@ -53,6 +53,10 @@ impl App {
                     && matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_)))
                 {
                     self.move_symbol_selection(-(self.symbol_list_visible_rows() as i64));
+                } else if self.mode.is_inspector()
+                    && matches!(self.side_panel, Some(crate::app::SidePanel::Data(_)))
+                {
+                    self.scroll_data_panel(-(self.inspector_visible_rows() as i64));
                 } else {
                     self.move_vertical(-(self.view_rows as i64));
                 }
@@ -63,6 +67,10 @@ impl App {
                     && matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_)))
                 {
                     self.move_symbol_selection(self.symbol_list_visible_rows() as i64);
+                } else if self.mode.is_inspector()
+                    && matches!(self.side_panel, Some(crate::app::SidePanel::Data(_)))
+                {
+                    self.scroll_data_panel(self.inspector_visible_rows() as i64);
                 } else {
                     self.move_vertical(self.view_rows as i64);
                 }
@@ -247,6 +255,7 @@ impl App {
             Ok(()) => {
                 self.ensure_cursor_visible();
                 self.sync_inspector_to_cursor();
+                self.refresh_data_panel();
                 if !is_command_edit_action(action) {
                     self.clear_error_if_command_done();
                 }

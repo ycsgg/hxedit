@@ -1,6 +1,7 @@
 pub mod ascii_grid;
 pub mod byte_style;
 pub mod command_line;
+pub mod data_panel;
 pub mod disasm_grid;
 pub mod gutter;
 pub mod hex_grid;

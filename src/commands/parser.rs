@@ -125,6 +125,11 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             Some("off") => Ok(Command::SymbolsOff),
             Some(other) => Err(HxError::UnknownCommand(format!("sym {other}"))),
         },
+        "data" => match rest.map(str::trim) {
+            None | Some("") => Ok(Command::Data),
+            Some("off") => Ok(Command::DataOff),
+            Some(other) => Err(HxError::UnknownCommand(format!("data {other}"))),
+        },
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
 }
@@ -377,6 +382,12 @@ mod tests {
     fn inspector_aliases_parse() {
         assert_eq!(parse_command("insp").unwrap(), Command::Inspector);
         assert_eq!(parse_command("inspector").unwrap(), Command::Inspector);
+    }
+
+    #[test]
+    fn data_command_parses() {
+        assert_eq!(parse_command("data").unwrap(), Command::Data);
+        assert_eq!(parse_command("data off").unwrap(), Command::DataOff);
     }
 
     #[test]

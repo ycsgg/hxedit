@@ -148,6 +148,16 @@ pub fn hint_for(input: &str) -> CommandHint {
                 details: "show executable symbols/import targets in the side panel; `sym off` closes the symbol page and restores inspector when available".to_owned(),
             }
         }
+        "data" => {
+            let syntax = match rest.map(str::trim) {
+                Some("off") => "data off".to_owned(),
+                _ => "data | data off".to_owned(),
+            };
+            CommandHint {
+                syntax,
+                details: "show cursor-relative primitive data decoding in the side panel; click a row to select its decoded bytes".to_owned(),
+            }
+        }
         other => {
             let suggestions = known_commands()
                 .into_iter()
@@ -298,6 +308,7 @@ fn known_commands() -> Vec<&'static str> {
         "disassemble!",
         "sym",
         "symbols",
+        "data",
         "p",
         "paste",
         "p!",
@@ -379,6 +390,13 @@ mod tests {
         let hint = hint_for("sym");
         assert!(hint.syntax.contains("sym off"));
         assert!(hint.details.contains("side panel"));
+    }
+
+    #[test]
+    fn data_hint_mentions_row_selection() {
+        let hint = hint_for("data");
+        assert!(hint.syntax.contains("data off"));
+        assert!(hint.details.contains("select"));
     }
 
     #[test]

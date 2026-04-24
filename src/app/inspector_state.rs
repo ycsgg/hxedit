@@ -158,6 +158,9 @@ impl App {
             if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
                 self.mode = Mode::Inspector;
                 self.ensure_symbol_selection_visible();
+            } else if matches!(self.side_panel, Some(SidePanel::Data(_))) {
+                self.mode = Mode::Inspector;
+                self.refresh_data_panel();
             } else {
                 self.refresh_inspector();
                 self.focus_inspector_or_warn_with_toggle(false);
@@ -166,6 +169,9 @@ impl App {
             if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
                 self.mode = Mode::Inspector;
                 self.ensure_symbol_selection_visible();
+            } else if matches!(self.side_panel, Some(SidePanel::Data(_))) {
+                self.mode = Mode::Inspector;
+                self.refresh_data_panel();
             } else {
                 self.focus_inspector_or_warn_with_toggle(true);
             }
@@ -175,7 +181,10 @@ impl App {
             }
             self.mode = Mode::Normal;
             self.show_inspector = false;
-            if !matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
+            if !matches!(
+                self.side_panel,
+                Some(SidePanel::Symbol(_) | SidePanel::Data(_))
+            ) {
                 self.side_panel = None;
                 self.inspector_error = None;
             }

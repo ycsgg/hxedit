@@ -618,6 +618,46 @@ fn visual_mode_selection_and_delete() {
     assert_eq!(app2.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
 }
 
+#[test]
+fn data_panel_syncs_cursor_and_mouse_selection() {
+    let mut app = app_with_bytes(b"A\xce\xbb\x34\x12\x00\x00\x00");
+    app.execute_command(Command::Data).unwrap();
+    assert!(matches!(
+        app.side_panel,
+        Some(crate::app::SidePanel::Data(_))
+    ));
+    assert_eq!(app.data_state().unwrap().base_offset, 0);
+
+    app.move_horizontal(1);
+    app.handle_action(Action::MoveRight);
+    assert_eq!(app.cursor, 2);
+    assert_eq!(app.data_state().unwrap().base_offset, 2);
+
+    app.last_columns = Some(crate::view::layout::MainColumns {
+        main_pane_kind: crate::view::layout::MainPaneKind::Hex,
+        gutter: ratatui::layout::Rect::new(0, 0, 8, 8),
+        sep1: ratatui::layout::Rect::new(8, 0, 1, 8),
+        hex: ratatui::layout::Rect::new(9, 0, 20, 8),
+        sep2: ratatui::layout::Rect::new(29, 0, 1, 8),
+        ascii: ratatui::layout::Rect::new(30, 0, 20, 8),
+        sep3: Some(ratatui::layout::Rect::new(50, 0, 1, 8)),
+        inspector: Some(ratatui::layout::Rect::new(51, 0, 40, 8)),
+    });
+    app.handle_mouse(crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: 52,
+        row: 5,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    });
+
+    assert_eq!(app.mode, Mode::Visual);
+    assert_eq!(app.selection_range(), Some((2, 3)));
+    assert_eq!(
+        app.data_state().unwrap().selected_label.as_deref(),
+        Some("uint16")
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Search: forward, backward, wrap
 // ═══════════════════════════════════════════════════════════════════════════

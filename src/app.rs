@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 mod clipboard_ops;
 mod command_input;
 mod commands;
+mod data_state;
 mod editing_state;
 mod events;
 mod inspector_state;
@@ -56,6 +57,16 @@ pub(crate) enum MainView {
 pub(crate) enum SidePanel {
     Inspector(InspectorState),
     Symbol(SymbolState),
+    Data(DataState),
+}
+
+/// Data inspector state for cursor-relative primitive decoding.
+#[derive(Debug, Clone)]
+pub(crate) struct DataState {
+    pub base_offset: u64,
+    pub bytes: Vec<u8>,
+    pub scroll_offset: usize,
+    pub selected_label: Option<String>,
 }
 
 /// Symbol panel state.

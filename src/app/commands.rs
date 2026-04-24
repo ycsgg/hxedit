@@ -102,6 +102,14 @@ impl App {
                 self.execute_symbols_off_command();
                 Ok(())
             }
+            Command::Data => {
+                self.open_data_panel();
+                Ok(())
+            }
+            Command::DataOff => {
+                self.close_data_panel();
+                Ok(())
+            }
         }
     }
 

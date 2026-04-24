@@ -12,8 +12,8 @@ use crate::mode::Mode;
 use crate::profile::{FrameStats, RenderMainStats};
 use crate::util::format::offset_width;
 use crate::view::{
-    ascii_grid, command_line, disasm_grid, gutter, hex_grid, inspector as inspector_view, layout,
-    status, symbol_panel,
+    ascii_grid, command_line, data_panel, disasm_grid, gutter, hex_grid,
+    inspector as inspector_view, layout, status, symbol_panel,
 };
 
 struct VisibleRows {
@@ -463,6 +463,9 @@ impl App {
             Some(SidePanel::Symbol(state)) => {
                 self.render_symbol_panel(frame, inspector_area, state);
             }
+            Some(SidePanel::Data(state)) => {
+                self.render_data_panel(frame, inspector_area, state);
+            }
             None => {
                 if let Some(error) = &self.inspector_error {
                     frame.render_widget(
@@ -478,6 +481,22 @@ impl App {
                 }
             }
         }
+    }
+
+    fn render_data_panel(
+        &self,
+        frame: &mut ratatui::Frame<'_>,
+        area: Rect,
+        state: &crate::app::DataState,
+    ) {
+        let lines = data_panel::build_lines(state, area.width, &self.palette);
+        let visible_height = area.height as usize;
+        let visible_start = state.scroll_offset.min(lines.len());
+        let visible_end = (visible_start + visible_height).min(lines.len());
+        frame.render_widget(
+            Paragraph::new(lines[visible_start..visible_end].to_vec()),
+            area,
+        );
     }
 
     fn render_symbol_panel(

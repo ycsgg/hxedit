@@ -31,6 +31,8 @@ impl App {
                         } else {
                             self.scroll_symbol_panel(-3);
                         }
+                    } else if matches!(self.side_panel, Some(SidePanel::Data(_))) {
+                        self.scroll_data_panel(-3);
                     } else {
                         self.scroll_inspector(-3);
                     }
@@ -61,6 +63,8 @@ impl App {
                         } else {
                             self.scroll_symbol_panel(3);
                         }
+                    } else if matches!(self.side_panel, Some(SidePanel::Data(_))) {
+                        self.scroll_data_panel(3);
                     } else {
                         self.scroll_inspector(3);
                     }
@@ -105,6 +109,16 @@ impl App {
                             if let Err(error) = self.navigate_to_selected_symbol() {
                                 self.set_error_status(error.to_string());
                             }
+                            return;
+                        }
+                        if self.show_inspector
+                            && matches!(self.side_panel, Some(SidePanel::Data(_)))
+                        {
+                            let actual_row = self
+                                .data_state()
+                                .map(|state| state.scroll_offset + visible_row + 1)
+                                .unwrap_or(visible_row + 1);
+                            self.select_data_panel_row(actual_row);
                             return;
                         }
                         if self.show_inspector && self.inspector().is_some() {
@@ -176,6 +190,7 @@ impl App {
                     }
                     self.ensure_cursor_visible();
                     self.sync_inspector_to_cursor();
+                    self.refresh_data_panel();
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
@@ -194,6 +209,7 @@ impl App {
                 self.mode = Mode::Visual;
                 self.ensure_cursor_visible();
                 self.sync_inspector_to_cursor();
+                self.refresh_data_panel();
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 self.mouse_selection_anchor = None;
