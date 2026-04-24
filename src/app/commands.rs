@@ -1,4 +1,7 @@
-use crate::app::{App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState};
+use crate::app::{
+    App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState, SidePanel,
+    SymbolState,
+};
 use crate::commands::parser::parse_command;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::disasm::backend::resolve_backend_kind;
@@ -92,6 +95,11 @@ impl App {
             }
             Command::DisassembleOff => {
                 self.execute_disassemble_off_command();
+                Ok(())
+            }
+            Command::Symbols => self.execute_symbols_command(),
+            Command::SymbolsOff => {
+                self.execute_symbols_off_command();
                 Ok(())
             }
         }
@@ -467,13 +475,13 @@ impl App {
         } else {
             self.mode = Mode::Normal;
             self.show_inspector = false;
-            self.inspector = None;
+            self.side_panel = None;
             self.inspector_error = None;
         }
     }
 
     fn execute_inspector_more_command(&mut self) {
-        if !self.show_inspector || self.inspector.is_none() {
+        if !self.show_inspector || self.inspector().is_none() {
             self.set_warning_status("inspector not active; run `:insp` first");
             return;
         }
@@ -482,8 +490,7 @@ impl App {
         self.inspector_entry_cap = after;
         self.refresh_inspector();
         let more_pending = self
-            .inspector
-            .as_ref()
+            .inspector()
             .map(|state| has_pending_more_marker(&state.structs))
             .unwrap_or(false);
         if more_pending {
@@ -666,6 +673,45 @@ impl App {
             ));
         }
         Ok(())
+    }
+
+    fn execute_symbols_command(&mut self) -> HxResult<()> {
+        // Need ExecutableInfo to display symbols
+        let info = match &self.main_view {
+            crate::app::MainView::Disassembly(state) => state.info.clone(),
+            _ => detect_executable_info(&mut self.document)
+                .ok_or_else(|| HxError::CommandError("no executable format detected".to_owned()))?,
+        };
+
+        if info.symbols_by_va.is_empty() && info.target_names_by_va.is_empty() {
+            return Err(HxError::CommandError("no symbols found".to_owned()));
+        }
+
+        // Create symbol panel state
+        let count = info.symbols_by_va.len() + info.target_names_by_va.len();
+        self.side_panel = Some(SidePanel::Symbol(SymbolState {
+            info,
+            scroll_offset: 0,
+            selected_row: 0,
+            detail_scroll_offset: 0,
+        }));
+        self.show_inspector = true;
+        self.mode = Mode::Inspector;
+        self.set_info_status(format!("symbol view ({count} symbols)"));
+        Ok(())
+    }
+
+    fn execute_symbols_off_command(&mut self) {
+        // Try to restore inspector
+        self.refresh_inspector();
+        if matches!(self.side_panel, Some(SidePanel::Inspector(_))) {
+            self.set_info_status("symbol view off");
+        } else {
+            // No format to display, close panel
+            self.side_panel = None;
+            self.show_inspector = false;
+            self.set_info_status("symbol view off (no format detected)");
+        }
     }
 }
 

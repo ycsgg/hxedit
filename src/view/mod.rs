@@ -8,3 +8,4 @@ pub mod inspector;
 pub mod layout;
 pub mod palette;
 pub mod status;
+pub mod symbol_panel;

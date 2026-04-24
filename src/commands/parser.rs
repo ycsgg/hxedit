@@ -120,6 +120,11 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 offset: parse_offset(offset)?,
             })
         }
+        "sym" | "symbols" => match rest.map(str::trim) {
+            None | Some("") => Ok(Command::Symbols),
+            Some("off") => Ok(Command::SymbolsOff),
+            Some(other) => Err(HxError::UnknownCommand(format!("sym {other}"))),
+        },
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
 }

@@ -76,13 +76,15 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 - `n` / `p` — repeat search forward / backward
 - `:` — enter command mode
 
-### Inspector
+### Side Panel
 
-- `t` / `Tab` — toggle inspector panel
-- `j` `k` / `Up` `Down` — move between fields and headers
-- `Space` / `Enter` on a header — collapse or expand the section (`▶` collapsed, `▼` expanded)
-- `Enter` on a field — start or submit field edit
-- `Esc` — leave edit or inspector
+- `t` / `Tab` — toggle the current side panel; after `:sym`, reopening returns to the symbol page rather than resetting to inspector
+- `j` `k` / `Up` `Down` — move between inspector fields/headers or symbol rows
+- `PageUp` / `PageDown` / mouse wheel — scroll the focused symbol list or main view
+- `Space` / `Enter` on an inspector header — collapse or expand the section (`▶` collapsed, `▼` expanded)
+- `Enter` on a field — start or submit field edit; `Enter` on a symbol jumps to its file offset
+- Mouse click on a symbol row — select and jump to that symbol's mapped file offset; the bottom detail area shows `symbol / meta / offset / file` and can be mouse-wheel scrolled for very long names
+- `Esc` — leave edit or side-panel focus
 
 ## Commands
 
@@ -157,6 +159,8 @@ Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (littl
 | `:dis [arch]` | Enter the current read-only disassembly view for recognized ELF / PE / Mach-O executables |
 | `:dis! <arch> <offset>` | Force raw disassembly from a display offset even without executable-container detect |
 | `:dis off` | Return from disassembly view to the normal hex/ascii view |
+| `:sym` | Show executable symbols/import targets in the side panel |
+| `:sym off` | Close the symbol page and restore the inspector when available |
 
 Hashes the active selection (visual or selected inspector field) if active, otherwise the entire file.
 
@@ -178,6 +182,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 - `j` / `k`、PageUp / PageDown、以及主视图滚轮滚动在 `:dis` 下已改为按 instruction row 前后移动，不再沿用 hex row 步长
 - 鼠标点击 / 拖拽在 `:dis` 下已按 disassembly rows 命中，不再复用 hex grid 的 offset 换算
 - disassembly viewport 现在带有 row cache/checkpoints；重复滚动、搜索定位与重绘不再每次从当前 span 起点重新解码
+- `:sym` opens a symbol side panel with a compact `Address / Name` list plus a fixed, scrollable detail area ordered as `symbol`, `meta`, `offset`, `file`; keyboard navigation, PageUp/PageDown, mouse wheel, Enter, and row clicks navigate to mapped file offsets
 - disassembly rows 现在会显示基于 `object` baseline symbols 的 `<symbol> @virtual_address` 行尾标签；当操作数字面量精确命中已知 symbol address 时，也会做最小 symbol 名替换
 - 对 `x86` / `x86_64` / `aarch64` 的 direct call/jump，当前会额外保留结构化 target metadata；当目标命中已知 symbol 时，行尾会追加轻量 `→` target hint，避免只靠原始立即数阅读
 - ELF 下的 direct call target 现在还会补最小 PLT/import 名映射：即使目标地址本身没有 exact symbol，只要能从动态重定位顺序推出对应 PLT slot，也会显示成导入名（例如 `puts`）

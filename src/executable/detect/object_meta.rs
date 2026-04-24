@@ -7,6 +7,7 @@ use object::{
 use crate::core::document::Document;
 use crate::executable::types::{
     ExecutableArch, ExecutableInfo, ExecutableKind, ImportInfo, SymbolInfo, SymbolSource,
+    SymbolType,
 };
 
 use super::util::demangle_symbol;
@@ -45,7 +46,8 @@ where
                 export.address(),
                 &String::from_utf8_lossy(export.name()),
                 SymbolSource::Export,
-                true,
+                0, // Exports don't have size info
+                SymbolType::Unknown,
             );
         }
     }
@@ -67,7 +69,14 @@ where
     let Ok(name) = symbol.name() else {
         return;
     };
-    insert_named_symbol(info, symbol.address(), name, source, false);
+    let symbol_type = match symbol.kind() {
+        SymbolKind::Text => SymbolType::Function,
+        SymbolKind::Data => SymbolType::Object,
+        SymbolKind::Section => SymbolType::Section,
+        _ => SymbolType::Unknown,
+    };
+    let size = symbol.size();
+    insert_named_symbol(info, symbol.address(), name, source, size, symbol_type);
 }
 
 fn collect_imports<'data, R>(file: &object::File<'data, R>, info: &mut ExecutableInfo)
@@ -105,7 +114,8 @@ fn insert_named_symbol(
     address: u64,
     raw_name: &str,
     source: SymbolSource,
-    prefer_existing: bool,
+    size: u64,
+    symbol_type: SymbolType,
 ) {
     let raw_name = raw_name.trim();
     if raw_name.is_empty() {
@@ -115,13 +125,12 @@ fn insert_named_symbol(
     info.symbols_by_name
         .entry(display_name.clone())
         .or_insert(address);
-    if prefer_existing && info.symbols_by_va.contains_key(&address) {
-        return;
-    }
     info.symbols_by_va.entry(address).or_insert(SymbolInfo {
         display_name,
         raw_name: Some(raw_name.to_owned()),
         source,
+        size,
+        symbol_type,
     });
 }
 

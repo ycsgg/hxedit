@@ -13,6 +13,7 @@ mod mouse;
 mod navigation;
 mod render;
 mod search;
+pub(crate) mod symbol_state;
 #[cfg(test)]
 mod tests;
 mod text_cursor;
@@ -33,6 +34,7 @@ use crate::config::Config;
 use crate::core::document::Document;
 use crate::core::piece_table::CellId;
 use crate::disasm::{DisasmCache, DisassemblyState};
+use crate::executable::ExecutableInfo;
 use crate::format::parse::{InspectorRow, NodePath};
 use crate::input::keymap::map_key;
 use crate::mode::Mode;
@@ -47,6 +49,22 @@ use navigation::align_offset;
 pub(crate) enum MainView {
     Hex,
     Disassembly(DisassemblyState),
+}
+
+/// Side panel content: either inspector (format info) or symbol list.
+#[derive(Debug)]
+pub(crate) enum SidePanel {
+    Inspector(InspectorState),
+    Symbol(SymbolState),
+}
+
+/// Symbol panel state.
+#[derive(Debug)]
+pub(crate) struct SymbolState {
+    pub info: ExecutableInfo,
+    pub scroll_offset: usize,
+    pub selected_row: usize,
+    pub detail_scroll_offset: usize,
 }
 
 pub struct App {
@@ -79,8 +97,8 @@ pub struct App {
     profiler: Option<Profiler>,
     disasm_cache: Option<DisasmCache>,
     disasm_backend: Option<Box<dyn crate::disasm::backend::DisassemblerBackend>>,
-    // ── Inspector state ──
-    /// Whether the inspector panel is shown.
+    // ── Side panel state ──
+    /// Whether the side panel (inspector or symbols) is shown.
     show_inspector: bool,
     /// Manual format override for the inspector, e.g. `elf`.
     inspector_format_override: Option<String>,
@@ -88,8 +106,8 @@ pub struct App {
     /// Starts at `DEFAULT_ENTRY_CAP` and grows by `ENTRY_CAP_BATCH` on each
     /// `:insp more` until all entries are loaded.
     inspector_entry_cap: usize,
-    /// Inspector runtime state. Some when show_inspector == true and format detected.
-    inspector: Option<InspectorState>,
+    /// Side panel content: inspector or symbol list.
+    side_panel: Option<SidePanel>,
     /// Distinguishes “no detected format” from “detected but failed to parse”.
     inspector_error: Option<String>,
     /// Last non-fatal render read error already surfaced to stderr.
@@ -359,7 +377,7 @@ impl App {
             show_inspector,
             inspector_format_override: None,
             inspector_entry_cap: crate::format::detect::DEFAULT_ENTRY_CAP,
-            inspector: None,
+            side_panel: None,
             inspector_error: None,
             last_render_error: None,
         };

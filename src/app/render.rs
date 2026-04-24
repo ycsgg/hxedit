@@ -4,7 +4,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::app::App;
+use crate::app::{App, SidePanel};
 use crate::commands::hints;
 use crate::core::document::ByteSlot;
 use crate::disasm::DisasmRow;
@@ -13,7 +13,7 @@ use crate::profile::{FrameStats, RenderMainStats};
 use crate::util::format::offset_width;
 use crate::view::{
     ascii_grid, command_line, disasm_grid, gutter, hex_grid, inspector as inspector_view, layout,
-    status,
+    status, symbol_panel,
 };
 
 struct VisibleRows {
@@ -455,19 +455,56 @@ impl App {
         };
 
         frame.render_widget(separator_widget(columns.gutter.height, &self.palette), sep3);
-        if let Some(insp) = &self.inspector {
-            self.render_visible_inspector(frame, inspector_area, insp);
-        } else if let Some(error) = &self.inspector_error {
-            frame.render_widget(
-                Paragraph::new(error.clone()).wrap(Wrap { trim: false }),
-                inspector_area,
-            );
-        } else {
-            frame.render_widget(
-                Paragraph::new(self.inspector_empty_panel_message()).wrap(Wrap { trim: false }),
-                inspector_area,
-            );
+
+        match &self.side_panel {
+            Some(SidePanel::Inspector(inspector)) => {
+                self.render_visible_inspector(frame, inspector_area, inspector);
+            }
+            Some(SidePanel::Symbol(state)) => {
+                self.render_symbol_panel(frame, inspector_area, state);
+            }
+            None => {
+                if let Some(error) = &self.inspector_error {
+                    frame.render_widget(
+                        Paragraph::new(error.clone()).wrap(Wrap { trim: false }),
+                        inspector_area,
+                    );
+                } else {
+                    frame.render_widget(
+                        Paragraph::new(self.inspector_empty_panel_message())
+                            .wrap(Wrap { trim: false }),
+                        inspector_area,
+                    );
+                }
+            }
         }
+    }
+
+    fn render_symbol_panel(
+        &self,
+        frame: &mut ratatui::Frame<'_>,
+        area: Rect,
+        state: &crate::app::SymbolState,
+    ) {
+        let lines = symbol_panel::build_lines(state, state.selected_row, area.width, &self.palette);
+        let list_height = symbol_panel::list_height(area.height);
+        let visible_start = state.scroll_offset.min(lines.len());
+        let visible_end = (visible_start + list_height.saturating_sub(1)).min(lines.len());
+
+        let mut render_lines = vec![symbol_panel::header_line(area.width, &self.palette)];
+        render_lines.extend(
+            lines[visible_start..visible_end]
+                .iter()
+                .map(|line| line.line.clone()),
+        );
+        render_lines.push(Line::raw(""));
+        let detail_lines = symbol_panel::detail_lines(state, area.width, &self.palette);
+        let detail_height = symbol_panel::detail_height(area.height);
+        let detail_start = state.detail_scroll_offset.min(detail_lines.len());
+        let detail_end = (detail_start + detail_height).min(detail_lines.len());
+        render_lines.extend(detail_lines[detail_start..detail_end].iter().cloned());
+
+        frame.render_widget(Paragraph::new(render_lines), area);
     }
 
     fn render_visible_inspector(

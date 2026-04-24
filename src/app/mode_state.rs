@@ -42,13 +42,13 @@ impl App {
                 self.mode = Mode::Normal;
             }
             Mode::Inspector => {
-                if let Some(inspector) = self.inspector.as_mut() {
+                if let Some(inspector) = self.inspector_mut() {
                     inspector.editing = None;
                 }
                 self.mode = Mode::Normal;
             }
             Mode::InspectorEdit => {
-                if let Some(inspector) = self.inspector.as_mut() {
+                if let Some(inspector) = self.inspector_mut() {
                     inspector.editing = None;
                 }
                 self.mode = Mode::Inspector;
@@ -68,8 +68,7 @@ impl App {
             }
             Mode::InspectorEdit
                 if self
-                    .inspector
-                    .as_ref()
+                    .inspector()
                     .and_then(|inspector| inspector.editing.as_ref())
                     .is_none() =>
             {

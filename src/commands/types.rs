@@ -129,4 +129,6 @@ pub enum Command {
         offset: u64,
     },
     DisassembleOff,
+    Symbols,
+    SymbolsOff,
 }

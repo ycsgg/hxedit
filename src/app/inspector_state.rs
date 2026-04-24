@@ -1,4 +1,4 @@
-use crate::app::{App, InspectorState};
+use crate::app::{App, InspectorState, SidePanel};
 use crate::error::{HxError, HxResult};
 use crate::format;
 use crate::format::parse::{InspectorRow, NodePath, StructValue};
@@ -17,9 +17,22 @@ impl App {
         "ELF / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG"
     }
 
+    pub(crate) fn inspector(&self) -> Option<&InspectorState> {
+        match &self.side_panel {
+            Some(SidePanel::Inspector(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn inspector_mut(&mut self) -> Option<&mut InspectorState> {
+        match &mut self.side_panel {
+            Some(SidePanel::Inspector(state)) => Some(state),
+            _ => None,
+        }
+    }
+
     pub(crate) fn inspector_has_editable_fields(&self) -> bool {
-        self.inspector
-            .as_ref()
+        self.inspector()
             .map(|inspector| {
                 inspector
                     .rows
@@ -71,7 +84,7 @@ impl App {
         if !self.mode.is_inspector() || self.inspector_panel_visible() {
             return;
         }
-        if let Some(inspector) = self.inspector.as_mut() {
+        if let Some(inspector) = self.inspector_mut() {
             inspector.editing = None;
         }
         self.mode = Mode::Normal;
@@ -84,7 +97,7 @@ impl App {
 
     fn focus_inspector_or_warn_with_toggle(&mut self, is_toggle_attempt: bool) -> bool {
         if !self.inspector_panel_visible() {
-            if let Some(inspector) = self.inspector.as_mut() {
+            if let Some(inspector) = self.inspector_mut() {
                 inspector.editing = None;
             }
             self.mode = Mode::Normal;
@@ -96,10 +109,10 @@ impl App {
             self.set_error_status(error.clone());
             return false;
         }
-        if self.inspector.is_none() {
-            // 没有检测到格式
+        if self.inspector().is_none() {
+            // No format detected
             if is_toggle_attempt {
-                // 用户再次按 Tab/`:insp` 尝试切换，关闭 inspector
+                // User pressed Tab/`:insp` again to toggle, close inspector
                 self.mode = Mode::Normal;
                 self.show_inspector = false;
                 self.clear_status();
@@ -113,8 +126,7 @@ impl App {
         self.sync_inspector_to_cursor();
         if !self.inspector_has_editable_fields() {
             let format_name = self
-                .inspector
-                .as_ref()
+                .inspector()
                 .map(|inspector| inspector.format_name.clone())
                 .unwrap_or_else(|| "current".to_owned());
             self.set_info_status(format!("{format_name} inspector is view-only"));
@@ -123,7 +135,7 @@ impl App {
     }
 
     pub(crate) fn inspector_edit_warning(&self) -> Option<&'static str> {
-        match self.inspector.as_ref()?.format_name.as_str() {
+        match self.inspector()?.format_name.as_str() {
             "PNG" => Some("PNG inspector edits do not repair CRC or chunk consistency"),
             "ZIP" => Some("ZIP inspector edits do not repair header or descriptor consistency"),
             "GZIP" => Some("GZIP inspector edits do not recompute header/trailer consistency"),
@@ -143,18 +155,30 @@ impl App {
     pub(crate) fn toggle_inspector_mode(&mut self) {
         if !self.show_inspector {
             self.show_inspector = true;
-            self.refresh_inspector();
-            self.focus_inspector_or_warn_with_toggle(false);
+            if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
+                self.mode = Mode::Inspector;
+                self.ensure_symbol_selection_visible();
+            } else {
+                self.refresh_inspector();
+                self.focus_inspector_or_warn_with_toggle(false);
+            }
         } else if !self.mode.is_inspector() {
-            self.focus_inspector_or_warn_with_toggle(true);
+            if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
+                self.mode = Mode::Inspector;
+                self.ensure_symbol_selection_visible();
+            } else {
+                self.focus_inspector_or_warn_with_toggle(true);
+            }
         } else {
-            if let Some(inspector) = self.inspector.as_mut() {
+            if let Some(inspector) = self.inspector_mut() {
                 inspector.editing = None;
             }
             self.mode = Mode::Normal;
             self.show_inspector = false;
-            self.inspector = None;
-            self.inspector_error = None;
+            if !matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
+                self.side_panel = None;
+                self.inspector_error = None;
+            }
         }
     }
 
@@ -173,7 +197,7 @@ impl App {
         &self,
         width: u16,
     ) -> Vec<inspector_view::RenderedInspectorLine> {
-        let Some(inspector) = self.inspector.as_ref() else {
+        let Some(inspector) = self.inspector() else {
             return Vec::new();
         };
         let editing = inspector
@@ -190,7 +214,7 @@ impl App {
     }
 
     pub(crate) fn inspector_highlight_range(&self) -> Option<(u64, u64)> {
-        let inspector = self.inspector.as_ref()?;
+        let inspector = self.inspector()?;
         match inspector.rows.get(inspector.selected_row)? {
             InspectorRow::Field {
                 abs_offset, size, ..
@@ -206,22 +230,14 @@ impl App {
         }
 
         let previous_scroll = self
-            .inspector
-            .as_ref()
+            .inspector()
             .map(|state| state.scroll_offset)
             .unwrap_or(0);
         let previous_selected_offset = self
-            .inspector
-            .as_ref()
+            .inspector()
             .and_then(|state| field_offset_for_row(&state.rows, state.selected_row));
-        let previous_collapsed = self
-            .inspector
-            .as_ref()
-            .map(|state| state.collapsed_nodes.clone());
-        let previous_format = self
-            .inspector
-            .as_ref()
-            .map(|state| state.format_name.clone());
+        let previous_collapsed = self.inspector().map(|state| state.collapsed_nodes.clone());
+        let previous_format = self.inspector().map(|state| state.format_name.clone());
 
         let detected = if let Some(name) = self.inspector_format_override.as_deref() {
             format::detect::detect_by_name_with_cap(
@@ -245,7 +261,7 @@ impl App {
                         .or_else(|| find_row_covering_offset(&rows, self.cursor))
                         .unwrap_or_else(|| first_selectable_row(&rows));
 
-                    self.inspector = Some(InspectorState {
+                    self.side_panel = Some(SidePanel::Inspector(InspectorState {
                         format_name: def.name,
                         structs,
                         rows,
@@ -253,7 +269,7 @@ impl App {
                         selected_row,
                         editing: None,
                         collapsed_nodes,
-                    });
+                    }));
                     self.inspector_error = None;
                     self.ensure_inspector_selection_visible();
                 }
@@ -262,7 +278,7 @@ impl App {
                     if self.inspector_error.as_deref() != Some(message.as_str()) {
                         eprintln!("{message}");
                     }
-                    self.inspector = None;
+                    self.side_panel = None;
                     self.inspector_error = Some(message.clone());
                     self.set_error_status(message);
                     if matches!(self.mode, Mode::InspectorEdit) {
@@ -271,7 +287,7 @@ impl App {
                 }
             }
         } else {
-            self.inspector = None;
+            self.side_panel = None;
             self.inspector_error = None;
             // When detection previously succeeded and now fails, it's almost
             // always because the user just overwrote part of the magic or
@@ -298,12 +314,12 @@ impl App {
         if self.mode.is_inspector() {
             return;
         }
-        let Some(inspector) = self.inspector.as_mut() else {
-            return;
-        };
-        if let Some(row) = find_row_covering_offset(&inspector.rows, self.cursor) {
-            inspector.selected_row = row;
-            self.ensure_inspector_selection_visible();
+        let cursor = self.cursor;
+        if let Some(inspector) = self.inspector_mut() {
+            if let Some(row) = find_row_covering_offset(&inspector.rows, cursor) {
+                inspector.selected_row = row;
+                self.ensure_inspector_selection_visible();
+            }
         }
     }
 
@@ -314,7 +330,7 @@ impl App {
     /// struct's `base_offset` so the user's eye tracks the block boundary.
     pub(crate) fn sync_cursor_to_inspector(&mut self) {
         self.ensure_inspector_selection_visible();
-        let Some(inspector) = self.inspector.as_ref() else {
+        let Some(inspector) = self.inspector() else {
             return;
         };
         let Some(row) = inspector.rows.get(inspector.selected_row) else {
@@ -341,7 +357,7 @@ impl App {
         let visible_rows = self.inspector_visible_rows();
         let width = self.current_inspector_width();
         let rendered = self.inspector_rendered_lines(width);
-        let Some(inspector) = self.inspector.as_mut() else {
+        let Some(inspector) = self.inspector_mut() else {
             return;
         };
         let first_line = rendered
@@ -365,7 +381,7 @@ impl App {
         let visible_rows = self.inspector_visible_rows();
         let width = self.current_inspector_width();
         let rendered_len = self.inspector_rendered_lines(width).len();
-        let Some(inspector) = self.inspector.as_mut() else {
+        let Some(inspector) = self.inspector_mut() else {
             return;
         };
         let max_scroll = rendered_len.saturating_sub(visible_rows);
@@ -384,7 +400,7 @@ impl App {
     /// Select a row in the inspector, preferring selectable rows (fields and
     /// collapsible headers) over decorative headers.
     pub(crate) fn set_inspector_selected_row(&mut self, target_row: usize) {
-        let Some(inspector) = self.inspector.as_mut() else {
+        let Some(inspector) = self.inspector_mut() else {
             return;
         };
         let Some(row) = nearest_selectable_row(&inspector.rows, target_row) else {
@@ -398,7 +414,7 @@ impl App {
     /// Toggle collapse state of the currently selected collapsible header row.
     /// No-op when the selection is on a field or a non-collapsible header.
     pub(crate) fn toggle_inspector_collapse(&mut self) {
-        let Some(inspector) = self.inspector.as_mut() else {
+        let Some(inspector) = self.inspector_mut() else {
             return;
         };
         let Some(row) = inspector.rows.get(inspector.selected_row) else {
@@ -436,14 +452,13 @@ impl App {
     /// Commit the current inspector edit back into the document.
     pub(crate) fn submit_inspector_edit(&mut self) -> HxResult<()> {
         let (row_index, buffer) = {
-            let inspector = self.inspector.as_mut().ok_or(HxError::OffsetOutOfRange)?;
+            let inspector = self.inspector_mut().ok_or(HxError::OffsetOutOfRange)?;
             let edit = inspector.editing.take().ok_or(HxError::OffsetOutOfRange)?;
             (edit.row_index, edit.buffer)
         };
 
         let row = self
-            .inspector
-            .as_ref()
+            .inspector()
             .and_then(|inspector| inspector.rows.get(row_index))
             .cloned()
             .ok_or(HxError::OffsetOutOfRange)?;
@@ -520,7 +535,7 @@ impl App {
             None
         }
 
-        let inspector = self.inspector.as_ref()?;
+        let inspector = self.inspector()?;
         let mut current = 0;
         walk(&inspector.structs, field_index, &mut current)
     }

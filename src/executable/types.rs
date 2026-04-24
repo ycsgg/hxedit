@@ -122,11 +122,21 @@ pub enum SymbolSource {
     Export,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolType {
+    Unknown,
+    Function,
+    Object,
+    Section,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolInfo {
     pub display_name: String,
     pub raw_name: Option<String>,
     pub source: SymbolSource,
+    pub size: u64,
+    pub symbol_type: SymbolType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

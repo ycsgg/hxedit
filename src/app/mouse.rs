@@ -1,6 +1,7 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 use crate::app::App;
+use crate::app::SidePanel;
 use crate::format::parse::InspectorRow;
 use crate::mode::{Mode, NibblePhase};
 use crate::util::geometry::rect_contains;
@@ -14,7 +15,25 @@ impl App {
                     .and_then(|columns| columns.inspector)
                     .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row));
                 if over_inspector {
-                    self.scroll_inspector(-3);
+                    if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
+                        let visible_row = self
+                            .last_columns
+                            .and_then(|columns| columns.inspector)
+                            .map(|area| mouse_event.row.saturating_sub(area.y) as usize)
+                            .unwrap_or(0);
+                        if visible_row > self.symbol_list_visible_rows() {
+                            let width = self
+                                .last_columns
+                                .and_then(|columns| columns.inspector)
+                                .map(|area| area.width)
+                                .unwrap_or(1);
+                            self.scroll_symbol_detail(-3, width);
+                        } else {
+                            self.scroll_symbol_panel(-3);
+                        }
+                    } else {
+                        self.scroll_inspector(-3);
+                    }
                 } else {
                     self.scroll_viewport(-3);
                     self.sync_inspector_to_cursor();
@@ -26,7 +45,25 @@ impl App {
                     .and_then(|columns| columns.inspector)
                     .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row));
                 if over_inspector {
-                    self.scroll_inspector(3);
+                    if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
+                        let visible_row = self
+                            .last_columns
+                            .and_then(|columns| columns.inspector)
+                            .map(|area| mouse_event.row.saturating_sub(area.y) as usize)
+                            .unwrap_or(0);
+                        if visible_row > self.symbol_list_visible_rows() {
+                            let width = self
+                                .last_columns
+                                .and_then(|columns| columns.inspector)
+                                .map(|area| area.width)
+                                .unwrap_or(1);
+                            self.scroll_symbol_detail(3, width);
+                        } else {
+                            self.scroll_symbol_panel(3);
+                        }
+                    } else {
+                        self.scroll_inspector(3);
+                    }
                 } else {
                     self.scroll_viewport(3);
                     self.sync_inspector_to_cursor();
@@ -54,11 +91,26 @@ impl App {
                         if self.show_inspector {
                             self.mode = Mode::Inspector;
                         }
-                        if self.show_inspector && self.inspector.is_some() {
+                        if self.show_inspector
+                            && matches!(self.side_panel, Some(SidePanel::Symbol(_)))
+                        {
+                            if visible_row >= self.symbol_list_visible_rows() {
+                                return;
+                            }
+                            let actual_row = self
+                                .symbol_state()
+                                .map(|state| state.scroll_offset + visible_row)
+                                .unwrap_or(visible_row);
+                            self.set_symbol_selected_row(actual_row);
+                            if let Err(error) = self.navigate_to_selected_symbol() {
+                                self.set_error_status(error.to_string());
+                            }
+                            return;
+                        }
+                        if self.show_inspector && self.inspector().is_some() {
                             let width = columns.inspector.map(|area| area.width).unwrap_or(32);
                             let actual_visual_row = self
-                                .inspector
-                                .as_ref()
+                                .inspector()
                                 .map(|inspector| inspector.scroll_offset + visible_row)
                                 .unwrap_or(visible_row);
                             if let Some(row_index) = self
@@ -71,8 +123,7 @@ impl App {
                                 // keyboard path is Enter/Space; mouse users get
                                 // the same affordance through the indicator click.
                                 let clicked_collapsible_header = self
-                                    .inspector
-                                    .as_ref()
+                                    .inspector()
                                     .and_then(|inspector| inspector.rows.get(row_index))
                                     .is_some_and(|row| {
                                         matches!(

@@ -213,7 +213,7 @@ mod tests {
     use crate::disasm::backend::{resolve_backend, resolve_backend_kind, BackendKind};
     use crate::disasm::{DirectBranchKind, DisasmRowKind};
     use crate::executable::detect_executable_info;
-    use crate::executable::types::{SymbolInfo, SymbolSource};
+    use crate::executable::types::{SymbolInfo, SymbolSource, SymbolType};
 
     fn doc_with_bytes(bytes: &[u8]) -> Document {
         let dir = tempdir().unwrap();
@@ -591,6 +591,8 @@ mod tests {
                 display_name: "entry".to_owned(),
                 raw_name: Some("entry".to_owned()),
                 source: SymbolSource::Object,
+                size: 0,
+                symbol_type: SymbolType::Function,
             },
         );
         let backend = resolve_backend(&info, None).unwrap();
@@ -616,6 +618,8 @@ mod tests {
                 display_name: "entry".to_owned(),
                 raw_name: Some("entry".to_owned()),
                 source: SymbolSource::Object,
+                size: 0,
+                symbol_type: SymbolType::Function,
             },
         );
         let backend = resolve_backend(&info, None).unwrap();
@@ -641,6 +645,8 @@ mod tests {
                 display_name: "target".to_owned(),
                 raw_name: Some("target".to_owned()),
                 source: SymbolSource::Object,
+                size: 0,
+                symbol_type: SymbolType::Function,
             },
         );
         let backend = resolve_backend(&info, None).unwrap();

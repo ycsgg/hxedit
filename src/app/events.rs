@@ -49,11 +49,23 @@ impl App {
                 true
             }
             Action::PageUp => {
-                self.move_vertical(-(self.view_rows as i64));
+                if self.mode.is_inspector()
+                    && matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_)))
+                {
+                    self.move_symbol_selection(-(self.symbol_list_visible_rows() as i64));
+                } else {
+                    self.move_vertical(-(self.view_rows as i64));
+                }
                 true
             }
             Action::PageDown => {
-                self.move_vertical(self.view_rows as i64);
+                if self.mode.is_inspector()
+                    && matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_)))
+                {
+                    self.move_symbol_selection(self.symbol_list_visible_rows() as i64);
+                } else {
+                    self.move_vertical(self.view_rows as i64);
+                }
                 true
             }
             Action::RowStart => {
@@ -156,23 +168,40 @@ impl App {
     fn handle_inspector_action(&mut self, action: Action) -> HxResult<bool> {
         match action {
             Action::InspectorUp => {
-                self.move_inspector_selection(true);
+                // Check if we're in symbol panel
+                if matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_))) {
+                    self.move_symbol_selection(-1);
+                } else {
+                    self.move_inspector_selection(true);
+                }
                 Ok(true)
             }
             Action::InspectorDown => {
-                self.move_inspector_selection(false);
+                // Check if we're in symbol panel
+                if matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_))) {
+                    self.move_symbol_selection(1);
+                } else {
+                    self.move_inspector_selection(false);
+                }
                 Ok(true)
             }
             Action::InspectorEnter => {
-                self.handle_inspector_enter()?;
+                // Check if we're in symbol panel
+                if matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_))) {
+                    self.navigate_to_selected_symbol()?;
+                } else {
+                    self.handle_inspector_enter()?;
+                }
                 Ok(true)
             }
             Action::InspectorToggleCollapse => {
+                if matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_))) {
+                    return Ok(true);
+                }
                 // While a field is being edited the space key should reach the
                 // edit buffer, not toggle collapse. Redirect to Char(' ').
                 if self
-                    .inspector
-                    .as_ref()
+                    .inspector()
                     .is_some_and(|inspector| inspector.editing.is_some())
                 {
                     self.insert_inspector_char(' ');
@@ -285,7 +314,7 @@ impl App {
     }
 
     fn move_inspector_selection(&mut self, upward: bool) {
-        let Some(inspector) = self.inspector.as_mut() else {
+        let Some(inspector) = self.inspector_mut() else {
             return;
         };
         if inspector.editing.is_some() {
@@ -320,7 +349,7 @@ impl App {
     }
 
     fn handle_inspector_enter(&mut self) -> HxResult<()> {
-        let Some(inspector) = self.inspector.as_mut() else {
+        let Some(inspector) = self.inspector_mut() else {
             return Ok(());
         };
         if inspector.editing.is_some() {
@@ -367,7 +396,7 @@ impl App {
     }
 
     fn insert_inspector_char(&mut self, c: char) {
-        if let Some(inspector) = self.inspector.as_mut() {
+        if let Some(inspector) = self.inspector_mut() {
             if let Some(edit) = inspector.editing.as_mut() {
                 insert_char_at_cursor(&mut edit.buffer, &mut edit.cursor_pos, c);
             } else if c == 't' {
@@ -409,7 +438,7 @@ impl App {
     }
 
     fn inspector_edit_mut(&mut self) -> Option<&mut crate::app::InspectorEdit> {
-        self.inspector.as_mut()?.editing.as_mut()
+        self.inspector_mut()?.editing.as_mut()
     }
 }
 
@@ -488,15 +517,17 @@ mod tests {
         let collapsed_nodes = std::collections::BTreeSet::new();
         let rows = crate::format::parse::flatten(&structs, &collapsed_nodes);
         app.show_inspector = true;
-        app.inspector = Some(crate::app::InspectorState {
-            format_name: format_name.to_owned(),
-            structs,
-            rows,
-            scroll_offset: 0,
-            selected_row: 1,
-            editing: None,
-            collapsed_nodes,
-        });
+        app.side_panel = Some(crate::app::SidePanel::Inspector(
+            crate::app::InspectorState {
+                format_name: format_name.to_owned(),
+                structs,
+                rows,
+                scroll_offset: 0,
+                selected_row: 1,
+                editing: None,
+                collapsed_nodes,
+            },
+        ));
         app.mode = Mode::Inspector;
         app
     }
@@ -556,16 +587,14 @@ mod tests {
         app.handle_action(Action::InspectorEnter);
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert!(app
-            .inspector
-            .as_ref()
+            .inspector()
             .and_then(|inspector| inspector.editing.as_ref())
             .is_some());
 
         app.handle_action(Action::LeaveMode);
         assert_eq!(app.mode, Mode::Inspector);
         assert!(app
-            .inspector
-            .as_ref()
+            .inspector()
             .and_then(|inspector| inspector.editing.as_ref())
             .is_none());
 
@@ -878,15 +907,17 @@ mod tests {
         let collapsed_nodes = std::collections::BTreeSet::new();
         let rows = crate::format::parse::flatten(&structs, &collapsed_nodes);
         app.show_inspector = true;
-        app.inspector = Some(crate::app::InspectorState {
-            format_name: "TEST".to_owned(),
-            structs,
-            rows,
-            scroll_offset: 0,
-            selected_row: 0,
-            editing: None,
-            collapsed_nodes,
-        });
+        app.side_panel = Some(crate::app::SidePanel::Inspector(
+            crate::app::InspectorState {
+                format_name: "TEST".to_owned(),
+                structs,
+                rows,
+                scroll_offset: 0,
+                selected_row: 0,
+                editing: None,
+                collapsed_nodes,
+            },
+        ));
         app.mode = Mode::Inspector;
         app
     }
@@ -895,36 +926,34 @@ mod tests {
     fn inspector_collapse_toggle_and_navigation() {
         let mut app = app_with_nested_inspector();
         // Layout: [0]=Parent header, [1]=parent_byte, [2]=Child header, [3]=child_byte
-        assert_eq!(app.inspector.as_ref().unwrap().rows.len(), 4);
-        assert_eq!(app.inspector.as_ref().unwrap().selected_row, 0); // Parent header
+        assert_eq!(app.inspector().unwrap().rows.len(), 4);
+        assert_eq!(app.inspector().unwrap().selected_row, 0); // Parent header
 
         // Collapse Parent — fields AND child go away.
         app.handle_action(Action::InspectorToggleCollapse);
-        assert_eq!(app.inspector.as_ref().unwrap().rows.len(), 1);
+        assert_eq!(app.inspector().unwrap().rows.len(), 1);
         assert!(matches!(
-            app.inspector.as_ref().unwrap().rows[0],
+            app.inspector().unwrap().rows[0],
             InspectorRow::Header {
                 collapsed: true,
                 ..
             }
         ));
         assert!(app
-            .inspector
-            .as_ref()
+            .inspector()
             .unwrap()
             .collapsed_nodes
             .contains(&vec![("Parent".to_owned(), 0)]));
 
         // Toggle twice restores original rows
         app.handle_action(Action::InspectorToggleCollapse);
-        assert_eq!(app.inspector.as_ref().unwrap().rows.len(), 4);
-        assert!(app.inspector.as_ref().unwrap().collapsed_nodes.is_empty());
+        assert_eq!(app.inspector().unwrap().rows.len(), 4);
+        assert!(app.inspector().unwrap().collapsed_nodes.is_empty());
 
         // Header Enter toggles collapse when not editing
         app.handle_action(Action::InspectorEnter);
         assert!(app
-            .inspector
-            .as_ref()
+            .inspector()
             .unwrap()
             .collapsed_nodes
             .contains(&vec![("Parent".to_owned(), 0)]));
@@ -932,13 +961,13 @@ mod tests {
 
         // Navigation stops on collapsible header
         let mut app2 = app_with_nested_inspector();
-        assert_eq!(app2.inspector.as_ref().unwrap().selected_row, 0);
+        assert_eq!(app2.inspector().unwrap().selected_row, 0);
         app2.handle_action(Action::InspectorDown);
-        assert_eq!(app2.inspector.as_ref().unwrap().selected_row, 1);
+        assert_eq!(app2.inspector().unwrap().selected_row, 1);
         app2.handle_action(Action::InspectorDown);
-        assert_eq!(app2.inspector.as_ref().unwrap().selected_row, 2);
+        assert_eq!(app2.inspector().unwrap().selected_row, 2);
         assert!(matches!(
-            app2.inspector.as_ref().unwrap().rows[2],
+            app2.inspector().unwrap().rows[2],
             InspectorRow::Header { .. }
         ));
 
@@ -946,15 +975,13 @@ mod tests {
         let mut app3 = app_with_inspector_field();
         app3.handle_action(Action::InspectorEnter);
         let before_buf = app3
-            .inspector
-            .as_ref()
+            .inspector()
             .and_then(|i| i.editing.as_ref())
             .map(|e| e.buffer.clone())
             .unwrap();
         app3.handle_action(Action::InspectorToggleCollapse);
         let after = app3
-            .inspector
-            .as_ref()
+            .inspector()
             .and_then(|i| i.editing.as_ref())
             .map(|e| e.buffer.clone())
             .unwrap();
@@ -964,8 +991,8 @@ mod tests {
         // Toggle on non-header row is noop
         let mut app4 = app_with_nested_inspector();
         app4.handle_action(Action::InspectorDown);
-        assert_eq!(app4.inspector.as_ref().unwrap().selected_row, 1);
+        assert_eq!(app4.inspector().unwrap().selected_row, 1);
         app4.handle_action(Action::InspectorToggleCollapse);
-        assert!(app4.inspector.as_ref().unwrap().collapsed_nodes.is_empty());
+        assert!(app4.inspector().unwrap().collapsed_nodes.is_empty());
     }
 }

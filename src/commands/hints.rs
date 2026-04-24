@@ -137,6 +137,17 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: format!("{name} <x86|x86_64|arm|aarch64|riscv64> <offset>"),
             details: "force a raw disassembly view from the given display offset even when the file is not recognized as ELF/PE/Mach-O; assumes little-endian decoding for the chosen arch".to_owned(),
         },
+        "sym" | "symbols" => {
+            let syntax = match rest.map(str::trim) {
+                Some("off") => "sym off".to_owned(),
+                Some(arg) if !arg.is_empty() => format!("{name} {arg}"),
+                _ => "sym | symbols | sym off".to_owned(),
+            };
+            CommandHint {
+                syntax,
+                details: "show executable symbols/import targets in the side panel; `sym off` closes the symbol page and restores inspector when available".to_owned(),
+            }
+        }
         other => {
             let suggestions = known_commands()
                 .into_iter()
@@ -285,6 +296,8 @@ fn known_commands() -> Vec<&'static str> {
         "dis!",
         "disassemble",
         "disassemble!",
+        "sym",
+        "symbols",
         "p",
         "paste",
         "p!",
@@ -359,6 +372,13 @@ mod tests {
     fn inspector_hint_mentions_panel() {
         let hint = hint_for("insp");
         assert!(hint.details.contains("inspector"));
+    }
+
+    #[test]
+    fn symbol_hint_mentions_side_panel() {
+        let hint = hint_for("sym");
+        assert!(hint.syntax.contains("sym off"));
+        assert!(hint.details.contains("side panel"));
     }
 
     #[test]

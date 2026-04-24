@@ -48,6 +48,8 @@ pub enum HxError {
     CopyAlignment(usize),
     #[error("clipboard error: {0}")]
     Clipboard(String),
+    #[error("command error: {0}")]
+    CommandError(String),
     #[error("failed to open {path}: {source}")]
     OpenPath {
         path: PathBuf,

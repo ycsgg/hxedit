@@ -7,6 +7,7 @@ use std::fs;
 
 use tempfile::tempdir;
 
+use crate::action::Action;
 use crate::app::{App, SearchDirection, StatusLevel};
 use crate::cli::Cli;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
@@ -79,15 +80,17 @@ fn app_with_inspector_field(bytes: &[u8], offset: u64, size: usize) -> App {
     let collapsed_nodes = std::collections::BTreeSet::new();
     let rows = crate::format::parse::flatten(&structs, &collapsed_nodes);
     app.show_inspector = true;
-    app.inspector = Some(crate::app::InspectorState {
-        format_name: "TEST".to_owned(),
-        structs,
-        rows,
-        scroll_offset: 0,
-        selected_row: 1,
-        editing: None,
-        collapsed_nodes,
-    });
+    app.side_panel = Some(crate::app::SidePanel::Inspector(
+        crate::app::InspectorState {
+            format_name: "TEST".to_owned(),
+            structs,
+            rows,
+            scroll_offset: 0,
+            selected_row: 1,
+            editing: None,
+            collapsed_nodes,
+        },
+    ));
     app.mode = Mode::Inspector;
     app.cursor = offset;
     app
@@ -1049,6 +1052,88 @@ fn disassembly_symbols_and_call_targets() {
     let target = rows4[1].direct_target.as_ref().expect("direct target");
     assert_eq!(rows4[1].text, "call entry");
     assert_eq!(target.virtual_address, 0x401000);
+}
+
+#[test]
+fn symbol_panel_toggle_restores_symbol_page() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0xc3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.execute_command(Command::Symbols).unwrap();
+
+    assert!(matches!(
+        app.side_panel,
+        Some(crate::app::SidePanel::Symbol(_))
+    ));
+    assert!(app.show_inspector);
+    assert_eq!(app.mode, Mode::Inspector);
+
+    app.handle_action(Action::ToggleInspector);
+    assert!(!app.show_inspector);
+    assert!(matches!(
+        app.side_panel,
+        Some(crate::app::SidePanel::Symbol(_))
+    ));
+    assert_eq!(app.mode, Mode::Normal);
+
+    app.handle_action(Action::ToggleInspector);
+    assert!(app.show_inspector);
+    assert!(matches!(
+        app.side_panel,
+        Some(crate::app::SidePanel::Symbol(_))
+    ));
+    assert_eq!(app.mode, Mode::Inspector);
+}
+
+#[test]
+fn symbol_panel_scrolls_and_mouse_click_navigates() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0x90, 0x90, 0xc3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.execute_command(Command::Symbols).unwrap();
+
+    if let Some(state) = app.symbol_state_mut() {
+        for index in 1..5 {
+            state
+                .info
+                .target_names_by_va
+                .insert(0x401000 + index, format!("target_{index}"));
+        }
+        state.info.target_names_by_va.insert(
+            0x401004,
+            "very_long_symbol_name_that_wraps_across_multiple_detail_rows".to_owned(),
+        );
+    }
+
+    app.view_rows = 8;
+    app.scroll_symbol_panel(2);
+    assert_eq!(app.symbol_state().unwrap().scroll_offset, 2);
+
+    app.last_columns = Some(crate::view::layout::MainColumns {
+        main_pane_kind: crate::view::layout::MainPaneKind::Disassembly,
+        gutter: ratatui::layout::Rect::new(0, 0, 8, 8),
+        sep1: ratatui::layout::Rect::new(8, 0, 1, 8),
+        hex: ratatui::layout::Rect::new(9, 0, 20, 8),
+        sep2: ratatui::layout::Rect::new(29, 0, 1, 8),
+        ascii: ratatui::layout::Rect::new(30, 0, 20, 8),
+        sep3: Some(ratatui::layout::Rect::new(50, 0, 1, 8)),
+        inspector: Some(ratatui::layout::Rect::new(51, 0, 40, 8)),
+    });
+    app.handle_mouse(crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: 52,
+        row: 2,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    });
+
+    assert_eq!(app.symbol_state().unwrap().selected_row, 3);
+    assert_eq!(app.cursor, 0x103);
+
+    app.set_symbol_selected_row(4);
+    app.scroll_symbol_detail(3, 24);
+    assert!(app.symbol_state().unwrap().detail_scroll_offset > 0);
 }
 
 #[test]
