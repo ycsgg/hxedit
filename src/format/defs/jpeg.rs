@@ -5,6 +5,90 @@ use crate::format::types::*;
 const JPEG_SOI: [u8; 2] = [0xff, 0xd8];
 const SCAN_CHUNK: usize = 8 * 1024;
 
+fn field(
+    name: &str,
+    offset: u64,
+    field_type: FieldType,
+    description: &str,
+    editable: bool,
+) -> FieldDef {
+    FieldDef {
+        name: name.into(),
+        offset,
+        field_type,
+        description: description.into(),
+        editable,
+    }
+}
+
+fn bytes_field(name: &str, offset: u64, len: usize, description: &str, editable: bool) -> FieldDef {
+    field(name, offset, FieldType::Bytes(len), description, editable)
+}
+
+fn utf8_field(name: &str, offset: u64, len: usize, description: &str, editable: bool) -> FieldDef {
+    field(name, offset, FieldType::Utf8(len), description, editable)
+}
+
+fn u8_field(name: &str, offset: u64, description: &str, editable: bool) -> FieldDef {
+    field(name, offset, FieldType::U8, description, editable)
+}
+
+fn u16be_field(name: &str, offset: u64, description: &str, editable: bool) -> FieldDef {
+    field(name, offset, FieldType::U16Be, description, editable)
+}
+
+fn enum_u8_field(
+    name: &str,
+    offset: u64,
+    variants: Vec<(u64, String)>,
+    description: &str,
+    editable: bool,
+) -> FieldDef {
+    field(
+        name,
+        offset,
+        FieldType::Enum {
+            inner: Box::new(FieldType::U8),
+            variants,
+        },
+        description,
+        editable,
+    )
+}
+
+fn data_range_field(name: &str, offset: u64, len: u64, description: &str) -> FieldDef {
+    field(name, offset, FieldType::DataRange(len), description, false)
+}
+
+fn marker_fields(include_length: bool) -> Vec<FieldDef> {
+    let mut fields = vec![
+        bytes_field("marker_prefix", 0, 1, "JPEG marker prefix", false),
+        enum_u8_field("marker", 1, marker_variants(), "JPEG marker code", true),
+    ];
+    if include_length {
+        fields.push(u16be_field(
+            "length",
+            2,
+            "Segment length including the length field",
+            true,
+        ));
+    }
+    fields
+}
+
+fn struct_with_fields(
+    name: impl Into<String>,
+    base_offset: u64,
+    fields: Vec<FieldDef>,
+) -> StructDef {
+    StructDef {
+        name: name.into(),
+        base_offset,
+        fields,
+        children: vec![],
+    }
+}
+
 pub fn detect(doc: &mut Document) -> Option<FormatDef> {
     detect_with_cap(doc, super::super::detect::DEFAULT_ENTRY_CAP)
 }
@@ -66,56 +150,26 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
         let data_len = length - 2;
         let segment_end = offset.saturating_add(2 + length);
         let truncated = segment_end > doc.len();
-        let mut fields = vec![
-            FieldDef {
-                name: "marker_prefix".into(),
-                offset: 0,
-                field_type: FieldType::Bytes(1),
-                description: "JPEG marker prefix".into(),
-                editable: false,
-            },
-            FieldDef {
-                name: "marker".into(),
-                offset: 1,
-                field_type: FieldType::Enum {
-                    inner: Box::new(FieldType::U8),
-                    variants: marker_variants(),
-                },
-                description: "JPEG marker code".into(),
-                editable: true,
-            },
-            FieldDef {
-                name: "length".into(),
-                offset: 2,
-                field_type: FieldType::U16Be,
-                description: "Segment length including the length field".into(),
-                editable: true,
-            },
-        ];
+        let mut fields = marker_fields(true);
 
         extend_segment_fields(doc, offset, marker, data_len, &mut fields);
 
         if !truncated && data_len > 0 {
-            fields.push(FieldDef {
-                name: "segment_data".into(),
-                offset: 4,
-                field_type: FieldType::DataRange(data_len),
-                description: "Raw segment payload bytes".into(),
-                editable: false,
-            });
+            fields.push(data_range_field(
+                "segment_data",
+                4,
+                data_len,
+                "Raw segment payload bytes",
+            ));
         }
 
         let segment_name = segment_display_name(doc, offset, marker);
-        structs.push(StructDef {
-            name: if truncated {
-                format!("Marker {}: {} (truncated)", marker_idx, segment_name)
-            } else {
-                format!("Marker {}: {}", marker_idx, segment_name)
-            },
-            base_offset: offset,
-            fields,
-            children: vec![],
-        });
+        let name = if truncated {
+            format!("Marker {}: {} (truncated)", marker_idx, segment_name)
+        } else {
+            format!("Marker {}: {}", marker_idx, segment_name)
+        };
+        structs.push(struct_with_fields(name, offset, fields));
         marker_idx += 1;
 
         if truncated {
@@ -127,18 +181,16 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
             let scan_end = find_scan_end(doc, scan_start);
             let scan_len = scan_end.saturating_sub(scan_start);
             if scan_len > 0 {
-                structs.push(StructDef {
-                    name: format!("Scan Data {}", scan_idx),
-                    base_offset: scan_start,
-                    fields: vec![FieldDef {
-                        name: "scan_data".into(),
-                        offset: 0,
-                        field_type: FieldType::DataRange(scan_len),
-                        description: "Entropy-coded scan data".into(),
-                        editable: false,
-                    }],
-                    children: vec![],
-                });
+                structs.push(struct_with_fields(
+                    format!("Scan Data {}", scan_idx),
+                    scan_start,
+                    vec![data_range_field(
+                        "scan_data",
+                        0,
+                        scan_len,
+                        "Entropy-coded scan data",
+                    )],
+                ));
                 scan_idx += 1;
             }
             offset = scan_end;
@@ -174,30 +226,7 @@ fn peek_marker(doc: &mut Document, offset: u64) -> Option<u8> {
 }
 
 fn standalone_marker_struct(name: &str, offset: u64) -> StructDef {
-    StructDef {
-        name: name.to_string(),
-        base_offset: offset,
-        fields: vec![
-            FieldDef {
-                name: "marker_prefix".into(),
-                offset: 0,
-                field_type: FieldType::Bytes(1),
-                description: "JPEG marker prefix".into(),
-                editable: false,
-            },
-            FieldDef {
-                name: "marker".into(),
-                offset: 1,
-                field_type: FieldType::Enum {
-                    inner: Box::new(FieldType::U8),
-                    variants: marker_variants(),
-                },
-                description: "JPEG marker code".into(),
-                editable: true,
-            },
-        ],
-        children: vec![],
-    }
+    struct_with_fields(name, offset, marker_fields(false))
 }
 
 fn segment_display_name(doc: &mut Document, offset: u64, marker: u8) -> String {
@@ -232,142 +261,70 @@ fn extend_segment_fields(
     match marker {
         0xe0 => {
             if data_len >= 5 {
-                fields.push(FieldDef {
-                    name: "identifier".into(),
-                    offset: 4,
-                    field_type: FieldType::Utf8(5),
-                    description: "APP0 identifier".into(),
-                    editable: true,
-                });
+                fields.push(utf8_field("identifier", 4, 5, "APP0 identifier", true));
             }
             if data_len >= 14 && read_identifier(doc, offset + 4, 5) == "JFIF" {
                 fields.extend([
-                    FieldDef {
-                        name: "version_major".into(),
-                        offset: 9,
-                        field_type: FieldType::U8,
-                        description: "JFIF major version".into(),
-                        editable: true,
-                    },
-                    FieldDef {
-                        name: "version_minor".into(),
-                        offset: 10,
-                        field_type: FieldType::U8,
-                        description: "JFIF minor version".into(),
-                        editable: true,
-                    },
-                    FieldDef {
-                        name: "density_units".into(),
-                        offset: 11,
-                        field_type: FieldType::Enum {
-                            inner: Box::new(FieldType::U8),
-                            variants: vec![
-                                (0, "None".into()),
-                                (1, "Dots per inch".into()),
-                                (2, "Dots per cm".into()),
-                            ],
-                        },
-                        description: "JFIF density units".into(),
-                        editable: true,
-                    },
-                    FieldDef {
-                        name: "x_density".into(),
-                        offset: 12,
-                        field_type: FieldType::U16Be,
-                        description: "JFIF horizontal density".into(),
-                        editable: true,
-                    },
-                    FieldDef {
-                        name: "y_density".into(),
-                        offset: 14,
-                        field_type: FieldType::U16Be,
-                        description: "JFIF vertical density".into(),
-                        editable: true,
-                    },
+                    u8_field("version_major", 9, "JFIF major version", true),
+                    u8_field("version_minor", 10, "JFIF minor version", true),
+                    enum_u8_field(
+                        "density_units",
+                        11,
+                        vec![
+                            (0, "None".into()),
+                            (1, "Dots per inch".into()),
+                            (2, "Dots per cm".into()),
+                        ],
+                        "JFIF density units",
+                        true,
+                    ),
+                    u16be_field("x_density", 12, "JFIF horizontal density", true),
+                    u16be_field("y_density", 14, "JFIF vertical density", true),
                 ]);
             }
         }
         0xe1 => {
             if data_len >= 6 {
-                fields.push(FieldDef {
-                    name: "identifier".into(),
-                    offset: 4,
-                    field_type: FieldType::Utf8(6),
-                    description: "APP1 identifier".into(),
-                    editable: true,
-                });
+                fields.push(utf8_field("identifier", 4, 6, "APP1 identifier", true));
             }
         }
         0xc0..=0xcf if !matches!(marker, 0xc4 | 0xc8 | 0xcc) => {
             if data_len >= 6 {
                 fields.extend([
-                    FieldDef {
-                        name: "precision".into(),
-                        offset: 4,
-                        field_type: FieldType::U8,
-                        description: "Sample precision".into(),
-                        editable: true,
-                    },
-                    FieldDef {
-                        name: "height".into(),
-                        offset: 5,
-                        field_type: FieldType::U16Be,
-                        description: "Image height".into(),
-                        editable: true,
-                    },
-                    FieldDef {
-                        name: "width".into(),
-                        offset: 7,
-                        field_type: FieldType::U16Be,
-                        description: "Image width".into(),
-                        editable: true,
-                    },
-                    FieldDef {
-                        name: "components".into(),
-                        offset: 9,
-                        field_type: FieldType::U8,
-                        description: "Number of image components".into(),
-                        editable: true,
-                    },
+                    u8_field("precision", 4, "Sample precision", true),
+                    u16be_field("height", 5, "Image height", true),
+                    u16be_field("width", 7, "Image width", true),
+                    u8_field("components", 9, "Number of image components", true),
                 ]);
             }
         }
         0xda => {
             if data_len >= 3 {
-                fields.push(FieldDef {
-                    name: "components".into(),
-                    offset: 4,
-                    field_type: FieldType::U8,
-                    description: "Number of scan components".into(),
-                    editable: true,
-                });
+                fields.push(u8_field("components", 4, "Number of scan components", true));
                 if let Some(count) =
                     read_bytes_raw(doc, offset + 4, 1).and_then(|bytes| bytes.first().copied())
                 {
                     let selectors = count as u64 * 2;
                     if data_len >= selectors + 4 {
                         fields.extend([
-                            FieldDef {
-                                name: "spectral_start".into(),
-                                offset: 5 + selectors,
-                                field_type: FieldType::U8,
-                                description: "Spectral selection start".into(),
-                                editable: true,
-                            },
-                            FieldDef {
-                                name: "spectral_end".into(),
-                                offset: 6 + selectors,
-                                field_type: FieldType::U8,
-                                description: "Spectral selection end".into(),
-                                editable: true,
-                            },
-                            FieldDef {
-                                name: "approximation".into(),
-                                offset: 7 + selectors,
-                                field_type: FieldType::U8,
-                                description: "Successive approximation bits".into(),
-                                editable: true,
-                            },
+                            u8_field(
+                                "spectral_start",
+                                5 + selectors,
+                                "Spectral selection start",
+                                true,
+                            ),
+                            u8_field(
+                                "spectral_end",
+                                6 + selectors,
+                                "Spectral selection end",
+                                true,
+                            ),
+                            u8_field(
+                                "approximation",
+                                7 + selectors,
+                                "Successive approximation bits",
+                                true,
+                            ),
                         ]);
                     }
                 }
@@ -375,24 +332,23 @@ fn extend_segment_fields(
         }
         0xdd => {
             if data_len >= 2 {
-                fields.push(FieldDef {
-                    name: "restart_interval".into(),
-                    offset: 4,
-                    field_type: FieldType::U16Be,
-                    description: "Restart interval in MCU blocks".into(),
-                    editable: true,
-                });
+                fields.push(u16be_field(
+                    "restart_interval",
+                    4,
+                    "Restart interval in MCU blocks",
+                    true,
+                ));
             }
         }
         0xfe => {
             if data_len > 0 {
-                fields.push(FieldDef {
-                    name: "comment".into(),
-                    offset: 4,
-                    field_type: FieldType::Utf8(data_len as usize),
-                    description: "Comment text".into(),
-                    editable: true,
-                });
+                fields.push(utf8_field(
+                    "comment",
+                    4,
+                    data_len as usize,
+                    "Comment text",
+                    true,
+                ));
             }
         }
         _ => {}
