@@ -520,11 +520,23 @@ impl ElfParser<'_> {
         table: &SectionHeaderInfo,
         offset: u64,
     ) -> Option<String> {
-        if table.sh_type != SHT_STRTAB || offset >= table.size {
+        if table.sh_type != SHT_STRTAB {
             return None;
         }
-        let abs = table.offset.checked_add(offset)?;
-        let remaining = table.size.saturating_sub(offset);
+        self.read_string_from_table_range(table.offset, table.size, offset)
+    }
+
+    pub(super) fn read_string_from_table_range(
+        &mut self,
+        table_offset: u64,
+        table_size: u64,
+        offset: u64,
+    ) -> Option<String> {
+        if offset >= table_size {
+            return None;
+        }
+        let abs = table_offset.checked_add(offset)?;
+        let remaining = table_size.saturating_sub(offset);
         self.read_c_string(abs, remaining).map(|(text, _)| text)
     }
 

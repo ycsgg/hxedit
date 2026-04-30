@@ -8,6 +8,7 @@ impl ElfParser<'_> {
         headers: &[ProgramHeaderInfo],
         sections: &[SectionHeaderInfo],
     ) -> StructDef {
+        let layout = self.program_header_layout();
         let shown = self.shown_count(headers.len());
         let mut children: Vec<StructDef> = headers
             .iter()
@@ -21,14 +22,7 @@ impl ElfParser<'_> {
                     "… more program headers beyond {} (use `:insp more` to load more)",
                     shown
                 ),
-                phoff.saturating_add(
-                    shown as u64
-                        * if self.is_64 {
-                            ELF64_PHDR_SIZE
-                        } else {
-                            ELF32_PHDR_SIZE
-                        },
-                ),
+                phoff.saturating_add(shown as u64 * layout.entry_size),
             ));
         }
 
@@ -46,6 +40,7 @@ impl ElfParser<'_> {
         total_count: usize,
         sections: &[SectionHeaderInfo],
     ) -> StructDef {
+        let layout = self.section_header_layout();
         let shown = self.shown_count(sections.len());
         let mut children: Vec<StructDef> = sections
             .iter()
@@ -59,14 +54,7 @@ impl ElfParser<'_> {
                     "… more section headers beyond {} (use `:insp more` to load more)",
                     shown
                 ),
-                shoff.saturating_add(
-                    shown as u64
-                        * if self.is_64 {
-                            ELF64_SHDR_SIZE
-                        } else {
-                            ELF32_SHDR_SIZE
-                        },
-                ),
+                shoff.saturating_add(shown as u64 * layout.entry_size),
             ));
         }
 
@@ -83,6 +71,7 @@ impl ElfParser<'_> {
         header: &ProgramHeaderInfo,
         sections: &[SectionHeaderInfo],
     ) -> StructDef {
+        let layout = self.program_header_layout();
         let u32_t = self.u32_t();
         let addr_t = self.word_t();
 
@@ -117,7 +106,7 @@ impl ElfParser<'_> {
                 },
                 FieldDef {
                     name: "p_flags".into(),
-                    offset: if self.is_64 { 4 } else { 24 },
+                    offset: layout.flags_offset,
                     field_type: FieldType::Flags {
                         inner: Box::new(u32_t.clone()),
                         flags: vec![(4, "R".into()), (2, "W".into()), (1, "X".into())],
@@ -127,42 +116,42 @@ impl ElfParser<'_> {
                 },
                 FieldDef {
                     name: "p_offset".into(),
-                    offset: if self.is_64 { 8 } else { 4 },
+                    offset: layout.offset_offset,
                     field_type: addr_t.clone(),
                     description: "File offset of segment".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "p_vaddr".into(),
-                    offset: if self.is_64 { 16 } else { 8 },
+                    offset: layout.vaddr_offset,
                     field_type: addr_t.clone(),
                     description: "Virtual address".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "p_paddr".into(),
-                    offset: if self.is_64 { 24 } else { 12 },
+                    offset: layout.paddr_offset,
                     field_type: addr_t.clone(),
                     description: "Physical address".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "p_filesz".into(),
-                    offset: if self.is_64 { 32 } else { 16 },
+                    offset: layout.filesz_offset,
                     field_type: addr_t.clone(),
                     description: "Size in file".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "p_memsz".into(),
-                    offset: if self.is_64 { 40 } else { 20 },
+                    offset: layout.memsz_offset,
                     field_type: addr_t.clone(),
                     description: "Size in memory".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "p_align".into(),
-                    offset: if self.is_64 { 48 } else { 28 },
+                    offset: layout.align_offset,
                     field_type: addr_t,
                     description: "Alignment".into(),
                     editable: true,
@@ -177,6 +166,7 @@ impl ElfParser<'_> {
         section: &SectionHeaderInfo,
         sections: &[SectionHeaderInfo],
     ) -> StructDef {
+        let layout = self.section_header_layout();
         let u32_t = self.u32_t();
         let word_t = self.word_t();
 
@@ -219,7 +209,7 @@ impl ElfParser<'_> {
                 },
                 FieldDef {
                     name: "sh_flags".into(),
-                    offset: 8,
+                    offset: layout.flags_offset,
                     field_type: FieldType::Flags {
                         inner: Box::new(word_t.clone()),
                         flags: section_flag_variants(),
@@ -229,49 +219,49 @@ impl ElfParser<'_> {
                 },
                 FieldDef {
                     name: "sh_addr".into(),
-                    offset: if self.is_64 { 16 } else { 12 },
+                    offset: layout.addr_offset,
                     field_type: word_t.clone(),
                     description: "Virtual address in memory".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "sh_offset".into(),
-                    offset: if self.is_64 { 24 } else { 16 },
+                    offset: layout.offset_offset,
                     field_type: word_t.clone(),
                     description: "File offset of section data".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "sh_size".into(),
-                    offset: if self.is_64 { 32 } else { 20 },
+                    offset: layout.size_offset,
                     field_type: word_t.clone(),
                     description: "Size of section data".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "sh_link".into(),
-                    offset: if self.is_64 { 40 } else { 24 },
+                    offset: layout.link_offset,
                     field_type: u32_t.clone(),
                     description: "Section-specific link".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "sh_info".into(),
-                    offset: if self.is_64 { 44 } else { 28 },
+                    offset: layout.info_offset,
                     field_type: u32_t.clone(),
                     description: "Section-specific extra info".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "sh_addralign".into(),
-                    offset: if self.is_64 { 48 } else { 32 },
+                    offset: layout.addralign_offset,
                     field_type: word_t.clone(),
                     description: "Required alignment".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "sh_entsize".into(),
-                    offset: if self.is_64 { 56 } else { 36 },
+                    offset: layout.entsize_offset,
                     field_type: word_t,
                     description: "Entry size for table sections".into(),
                     editable: true,

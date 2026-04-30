@@ -1,5 +1,160 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct HeaderLayout {
+    pub ehdr_size: u64,
+    pub phoff_offset: u64,
+    pub shoff_offset: u64,
+    pub flags_offset: u64,
+    pub ehsize_offset: u64,
+    pub phentsize_offset: u64,
+    pub phnum_offset: u64,
+    pub shentsize_offset: u64,
+    pub shnum_offset: u64,
+    pub shstrndx_offset: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ProgramHeaderLayout {
+    pub entry_size: u64,
+    pub flags_offset: u64,
+    pub offset_offset: u64,
+    pub vaddr_offset: u64,
+    pub paddr_offset: u64,
+    pub filesz_offset: u64,
+    pub memsz_offset: u64,
+    pub align_offset: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SectionHeaderLayout {
+    pub entry_size: u64,
+    pub flags_offset: u64,
+    pub addr_offset: u64,
+    pub offset_offset: u64,
+    pub size_offset: u64,
+    pub link_offset: u64,
+    pub info_offset: u64,
+    pub addralign_offset: u64,
+    pub entsize_offset: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SymbolLayout {
+    pub entry_size: u64,
+    pub info_offset: u64,
+    pub other_offset: u64,
+    pub shndx_offset: u64,
+    pub value_offset: u64,
+    pub size_offset: u64,
+}
+
+pub(super) fn header_layout(is_64: bool) -> HeaderLayout {
+    if is_64 {
+        HeaderLayout {
+            ehdr_size: ELF64_EHDR_SIZE,
+            phoff_offset: 32,
+            shoff_offset: 40,
+            flags_offset: 48,
+            ehsize_offset: 52,
+            phentsize_offset: 54,
+            phnum_offset: 56,
+            shentsize_offset: 58,
+            shnum_offset: 60,
+            shstrndx_offset: 62,
+        }
+    } else {
+        HeaderLayout {
+            ehdr_size: ELF32_EHDR_SIZE,
+            phoff_offset: 28,
+            shoff_offset: 32,
+            flags_offset: 36,
+            ehsize_offset: 40,
+            phentsize_offset: 42,
+            phnum_offset: 44,
+            shentsize_offset: 46,
+            shnum_offset: 48,
+            shstrndx_offset: 50,
+        }
+    }
+}
+
+pub(super) fn program_header_layout(is_64: bool) -> ProgramHeaderLayout {
+    if is_64 {
+        ProgramHeaderLayout {
+            entry_size: ELF64_PHDR_SIZE,
+            flags_offset: 4,
+            offset_offset: 8,
+            vaddr_offset: 16,
+            paddr_offset: 24,
+            filesz_offset: 32,
+            memsz_offset: 40,
+            align_offset: 48,
+        }
+    } else {
+        ProgramHeaderLayout {
+            entry_size: ELF32_PHDR_SIZE,
+            flags_offset: 24,
+            offset_offset: 4,
+            vaddr_offset: 8,
+            paddr_offset: 12,
+            filesz_offset: 16,
+            memsz_offset: 20,
+            align_offset: 28,
+        }
+    }
+}
+
+pub(super) fn section_header_layout(is_64: bool) -> SectionHeaderLayout {
+    if is_64 {
+        SectionHeaderLayout {
+            entry_size: ELF64_SHDR_SIZE,
+            flags_offset: 8,
+            addr_offset: 16,
+            offset_offset: 24,
+            size_offset: 32,
+            link_offset: 40,
+            info_offset: 44,
+            addralign_offset: 48,
+            entsize_offset: 56,
+        }
+    } else {
+        SectionHeaderLayout {
+            entry_size: ELF32_SHDR_SIZE,
+            flags_offset: 8,
+            addr_offset: 12,
+            offset_offset: 16,
+            size_offset: 20,
+            link_offset: 24,
+            info_offset: 28,
+            addralign_offset: 32,
+            entsize_offset: 36,
+        }
+    }
+}
+
+pub(super) fn symbol_layout(is_64: bool) -> SymbolLayout {
+    if is_64 {
+        SymbolLayout {
+            entry_size: 24,
+            info_offset: 4,
+            other_offset: 5,
+            shndx_offset: 6,
+            value_offset: 8,
+            size_offset: 16,
+        }
+    } else {
+        SymbolLayout {
+            entry_size: 16,
+            info_offset: 12,
+            other_offset: 13,
+            shndx_offset: 14,
+            value_offset: 4,
+            size_offset: 8,
+        }
+    }
+}
+
 pub(super) fn data_range_struct(
     name: String,
     base_offset: u64,

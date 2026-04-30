@@ -91,51 +91,35 @@ const GNU_PROPERTY_X86_ISA_1_USED: u32 = 0xc0010002;
 const GNU_PROPERTY_X86_ISA_1_NEEDED: u32 = 0xc0008002;
 const GNU_PROPERTY_AARCH64_FEATURE_1_AND: u32 = 0xc0000000;
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ProgramHeaderInfo {
     index: usize,
     entry_offset: u64,
     p_type: u32,
-    flags: u32,
     offset: u64,
-    vaddr: u64,
-    paddr: u64,
     filesz: u64,
-    memsz: u64,
-    align: u64,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct SectionHeaderInfo {
     index: usize,
     entry_offset: u64,
     name_offset: u32,
     name: String,
     sh_type: u32,
-    flags: u64,
-    addr: u64,
     offset: u64,
     size: u64,
     link: u32,
-    info: u32,
-    addralign: u64,
     entsize: u64,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct SymbolInfo {
-    index: usize,
     entry_offset: u64,
     name_offset: u32,
     name: String,
     info: u8,
     other: u8,
-    shndx: u16,
-    value: u64,
-    size: u64,
 }
 
 struct HeaderSummary {
@@ -262,6 +246,22 @@ impl<'a> ElfParser<'a> {
         total.min(self.entry_cap.max(1))
     }
 
+    fn header_layout(&self) -> HeaderLayout {
+        header_layout(self.is_64)
+    }
+
+    fn program_header_layout(&self) -> ProgramHeaderLayout {
+        program_header_layout(self.is_64)
+    }
+
+    fn section_header_layout(&self) -> SectionHeaderLayout {
+        section_header_layout(self.is_64)
+    }
+
+    fn symbol_layout(&self) -> SymbolLayout {
+        symbol_layout(self.is_64)
+    }
+
     fn u16_t(&self) -> FieldType {
         if self.is_le {
             FieldType::U16Le
@@ -306,6 +306,19 @@ impl<'a> ElfParser<'a> {
         } else {
             FieldType::I32Be
         }
+    }
+
+    fn read_word(&mut self, offset: u64) -> Option<u64> {
+        if self.is_64 {
+            self.read_u64(offset)
+        } else {
+            self.read_u32(offset).map(u64::from)
+        }
+    }
+
+    fn require_bytes(&mut self, offset: u64, len: u64) -> Option<()> {
+        let len = usize::try_from(len).ok()?;
+        read_bytes_raw(self.doc, offset, len).map(|_| ())
     }
 
     fn read_u16(&mut self, offset: u64) -> Option<u16> {

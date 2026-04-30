@@ -70,12 +70,11 @@ impl ElfParser<'_> {
         section: &SectionHeaderInfo,
         sections: &[SectionHeaderInfo],
     ) -> Option<StructDef> {
+        let layout = self.symbol_layout();
         let entry_size = if section.entsize > 0 {
             section.entsize
-        } else if self.is_64 {
-            24
         } else {
-            16
+            layout.entry_size
         };
         if entry_size == 0 || section.size < entry_size || section.offset >= self.doc.len() {
             return None;
@@ -133,35 +132,35 @@ impl ElfParser<'_> {
                     },
                     FieldDef {
                         name: "st_info".into(),
-                        offset: if self.is_64 { 4 } else { 12 },
+                        offset: layout.info_offset,
                         field_type: FieldType::U8,
                         description: "Packed symbol bind/type".into(),
                         editable: false,
                     },
                     FieldDef {
                         name: "st_other".into(),
-                        offset: if self.is_64 { 5 } else { 13 },
+                        offset: layout.other_offset,
                         field_type: FieldType::U8,
                         description: "Packed symbol visibility".into(),
                         editable: false,
                     },
                     FieldDef {
                         name: "st_shndx".into(),
-                        offset: if self.is_64 { 6 } else { 14 },
+                        offset: layout.shndx_offset,
                         field_type: self.u16_t(),
                         description: "Section index".into(),
                         editable: false,
                     },
                     FieldDef {
                         name: "st_value".into(),
-                        offset: if self.is_64 { 8 } else { 4 },
+                        offset: layout.value_offset,
                         field_type: word_t.clone(),
                         description: "Symbol value".into(),
                         editable: false,
                     },
                     FieldDef {
                         name: "st_size".into(),
-                        offset: if self.is_64 { 16 } else { 8 },
+                        offset: layout.size_offset,
                         field_type: word_t.clone(),
                         description: "Symbol size".into(),
                         editable: false,
@@ -429,12 +428,11 @@ impl ElfParser<'_> {
         sections: &[SectionHeaderInfo],
         index: usize,
     ) -> Option<SymbolInfo> {
+        let layout = self.symbol_layout();
         let entry_size = if section.entsize > 0 {
             section.entsize
-        } else if self.is_64 {
-            24
         } else {
-            16
+            layout.entry_size
         };
         if entry_size == 0 {
             return None;
@@ -444,38 +442,20 @@ impl ElfParser<'_> {
             return None;
         }
         let entry_offset = section.offset.saturating_add(rel);
+        self.require_bytes(entry_offset, layout.entry_size)?;
         let name_offset = self.read_u32(entry_offset)?;
-        let (info, other, shndx, value, size) = if self.is_64 {
-            (
-                read_u8(self.doc, entry_offset + 4)?,
-                read_u8(self.doc, entry_offset + 5)?,
-                self.read_u16(entry_offset + 6)?,
-                self.read_u64(entry_offset + 8)?,
-                self.read_u64(entry_offset + 16)?,
-            )
-        } else {
-            (
-                read_u8(self.doc, entry_offset + 12)?,
-                read_u8(self.doc, entry_offset + 13)?,
-                self.read_u16(entry_offset + 14)?,
-                self.read_u32(entry_offset + 4)? as u64,
-                self.read_u32(entry_offset + 8)? as u64,
-            )
-        };
+        let info = read_u8(self.doc, entry_offset + layout.info_offset)?;
+        let other = read_u8(self.doc, entry_offset + layout.other_offset)?;
         let name = section_link_target(sections, section.link)
             .filter(|table| table.sh_type == SHT_STRTAB)
             .and_then(|table| self.read_string_from_table(table, name_offset as u64))
             .unwrap_or_default();
         Some(SymbolInfo {
-            index,
             entry_offset,
             name_offset,
             name,
             info,
             other,
-            shndx,
-            value,
-            size,
         })
     }
 }
