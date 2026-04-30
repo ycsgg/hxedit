@@ -183,6 +183,7 @@ fn parses_basic_commands() {
             backward: true,
         }
     );
+    #[cfg(feature = "disasm")]
     assert_eq!(
         parse_command("si mov rax").unwrap(),
         Command::SearchInstruction {
@@ -190,6 +191,7 @@ fn parses_basic_commands() {
             backward: false,
         }
     );
+    #[cfg(feature = "disasm")]
     assert_eq!(
         parse_command("si! ret").unwrap(),
         Command::SearchInstruction {
@@ -197,6 +199,10 @@ fn parses_basic_commands() {
             backward: true,
         }
     );
+    #[cfg(not(feature = "disasm"))]
+    assert!(parse_command("si mov rax").is_err());
+    #[cfg(not(feature = "disasm"))]
+    assert!(parse_command("si! ret").is_err());
     assert_eq!(parse_command("data").unwrap(), Command::Data);
     assert_eq!(parse_command("data off").unwrap(), Command::DataOff);
 }
@@ -267,6 +273,7 @@ fn parses_hash_commands() {
     );
 }
 
+#[cfg(feature = "disasm")]
 #[test]
 fn parses_disassembly_commands() {
     assert_eq!(
@@ -287,4 +294,12 @@ fn parses_disassembly_commands() {
         }
     );
     assert_eq!(parse_command("dis off").unwrap(), Command::DisassembleOff);
+}
+
+#[cfg(not(feature = "disasm"))]
+#[test]
+fn disassembly_commands_are_hidden_without_feature() {
+    assert!(parse_command("dis").is_err());
+    assert!(parse_command("dis x86_64").is_err());
+    assert!(parse_command("dis! x86_64 0x20").is_err());
 }

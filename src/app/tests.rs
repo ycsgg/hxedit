@@ -96,6 +96,7 @@ fn app_with_inspector_field(bytes: &[u8], offset: u64, size: usize) -> App {
     app
 }
 
+#[cfg(feature = "disasm-capstone")]
 fn build_disassembly_elf64(code: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0_u8; 0x200];
     bytes[0..4].copy_from_slice(b"\x7fELF");
@@ -119,6 +120,7 @@ fn build_disassembly_elf64(code: &[u8]) -> Vec<u8> {
     bytes
 }
 
+#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
 fn build_disassembly_elf64_with_symbol(code: &[u8], symbol_name: &str) -> Vec<u8> {
     let text_offset = 0x100usize;
     let text_addr = 0x401000u64;
@@ -978,6 +980,7 @@ fn hash_command_various_algorithms_and_ranges() {
 // Disassembly: view switch, viewport alignment, symbols
 // ═══════════════════════════════════════════════════════════════════════════
 
+#[cfg(feature = "disasm-capstone")]
 #[test]
 fn disassemble_command_switches_view_and_aligns_viewport() {
     let bytes = {
@@ -1025,6 +1028,7 @@ fn disassemble_command_switches_view_and_aligns_viewport() {
     }
 }
 
+#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
 #[test]
 fn disassembly_symbols_and_call_targets() {
     // Symbol labels and virtual addresses
@@ -1094,6 +1098,7 @@ fn disassembly_symbols_and_call_targets() {
     assert_eq!(target.virtual_address, 0x401000);
 }
 
+#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
 #[test]
 fn symbol_panel_toggle_restores_symbol_page() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0xc3], "entry");
@@ -1126,6 +1131,7 @@ fn symbol_panel_toggle_restores_symbol_page() {
     assert_eq!(app.mode, Mode::Inspector);
 }
 
+#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
 #[test]
 fn symbol_panel_scrolls_and_mouse_click_navigates() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0x90, 0x90, 0xc3], "entry");
@@ -1176,6 +1182,7 @@ fn symbol_panel_scrolls_and_mouse_click_navigates() {
     assert!(app.symbol_state().unwrap().detail_scroll_offset > 0);
 }
 
+#[cfg(feature = "disasm-capstone")]
 #[test]
 fn disassemble_force_and_off_commands() {
     // Force command with explicit arch
@@ -1200,6 +1207,7 @@ fn disassemble_force_and_off_commands() {
     assert!(app2.disasm_backend.is_none());
 }
 
+#[cfg(feature = "disasm-capstone")]
 #[test]
 fn disassembly_navigation_and_scroll() {
     let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
@@ -1249,6 +1257,7 @@ fn disassembly_navigation_and_scroll() {
     }
 }
 
+#[cfg(feature = "disasm-capstone")]
 #[test]
 fn disassembly_search_variants() {
     let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
@@ -1282,6 +1291,7 @@ fn disassembly_search_variants() {
 // Disassembly view editing: nibble edit, undo, redo, fill, replace
 // ═══════════════════════════════════════════════════════════════════════════
 
+#[cfg(feature = "disasm-capstone")]
 #[test]
 fn disassembly_editing_undo_redo_and_fill() {
     // Nibble edit updates instruction text
@@ -1361,6 +1371,7 @@ fn disassembly_editing_undo_redo_and_fill() {
     assert!(rows3[1].text.contains("int3"));
 }
 
+#[cfg(feature = "disasm-capstone")]
 #[test]
 fn disassembly_insert_blocked_and_replace_restricted() {
     let bytes = build_disassembly_elf64(&[0x90, 0xc3]);

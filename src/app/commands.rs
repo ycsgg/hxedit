@@ -1,12 +1,14 @@
-use crate::app::{
-    App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState, SidePanel,
-    SymbolState,
-};
+use crate::app::{App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState};
+#[cfg(feature = "symbols")]
+use crate::app::{SidePanel, SymbolState};
 use crate::commands::parser::parse_command;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
+#[cfg(feature = "disasm")]
 use crate::disasm::backend::resolve_backend_kind;
+#[cfg(feature = "disasm")]
 use crate::disasm::DisassemblyState;
 use crate::error::{HxError, HxResult};
+#[cfg(feature = "disasm")]
 use crate::executable::{detect_executable_info, force_raw_executable_info, override_arch};
 use crate::format::parse::StructValue;
 use crate::mode::Mode;
@@ -85,19 +87,25 @@ impl App {
             Command::SearchHex { pattern, backward } => {
                 self.execute_search_command(SearchKind::Hex, pattern, backward)
             }
+            #[cfg(feature = "disasm")]
             Command::SearchInstruction { pattern, backward } => {
                 self.execute_instruction_search_command(pattern, backward)
             }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
+            #[cfg(feature = "disasm")]
             Command::Disassemble { arch } => self.execute_disassemble_command(arch.as_deref()),
+            #[cfg(feature = "disasm")]
             Command::DisassembleForce { arch, offset } => {
                 self.execute_disassemble_force_command(&arch, offset)
             }
+            #[cfg(feature = "disasm")]
             Command::DisassembleOff => {
                 self.execute_disassemble_off_command();
                 Ok(())
             }
+            #[cfg(feature = "symbols")]
             Command::Symbols => self.execute_symbols_command(),
+            #[cfg(feature = "symbols")]
             Command::SymbolsOff => {
                 self.execute_symbols_off_command();
                 Ok(())
@@ -555,6 +563,7 @@ impl App {
         self.run_search(&search, search_direction(backward))
     }
 
+    #[cfg(feature = "disasm")]
     fn execute_instruction_search_command(
         &mut self,
         pattern: String,
@@ -568,6 +577,7 @@ impl App {
         self.run_search(&search, search_direction(backward))
     }
 
+    #[cfg(feature = "disasm")]
     fn execute_disassemble_command(&mut self, arch: Option<&str>) -> HxResult<()> {
         let mut info = detect_executable_info(&mut self.document).ok_or_else(|| {
             crate::error::HxError::DisassemblyUnavailable(
@@ -590,18 +600,21 @@ impl App {
         self.enter_disassembly_view(info, backend, target)
     }
 
+    #[cfg(feature = "disasm")]
     fn execute_disassemble_force_command(&mut self, arch: &str, offset: u64) -> HxResult<()> {
         let info = force_raw_executable_info(self.document.len(), arch, offset)?;
         let backend = resolve_backend_kind(&info, None)?;
         self.enter_disassembly_view(info, backend, offset)
     }
 
+    #[cfg(feature = "disasm")]
     fn execute_disassemble_off_command(&mut self) {
         self.main_view = crate::app::MainView::Hex;
         self.clear_disassembly_runtime();
         self.set_info_status("disassembly off");
     }
 
+    #[cfg(feature = "disasm")]
     fn enter_disassembly_view(
         &mut self,
         info: crate::executable::ExecutableInfo,
@@ -683,6 +696,7 @@ impl App {
         Ok(())
     }
 
+    #[cfg(feature = "symbols")]
     fn execute_symbols_command(&mut self) -> HxResult<()> {
         // Need ExecutableInfo to display symbols
         let info = match &self.main_view {
@@ -709,6 +723,7 @@ impl App {
         Ok(())
     }
 
+    #[cfg(feature = "symbols")]
     fn execute_symbols_off_command(&mut self) {
         // Try to restore inspector
         self.refresh_inspector();

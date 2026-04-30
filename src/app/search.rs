@@ -1,8 +1,11 @@
 use std::time::Instant;
 
 use crate::app::{App, SearchDirection, SearchState};
+#[cfg(feature = "disasm")]
 use crate::disasm::DisasmRowKind;
-use crate::error::{HxError, HxResult};
+#[cfg(feature = "disasm")]
+use crate::error::HxError;
+use crate::error::HxResult;
 
 impl App {
     pub(crate) fn repeat_search(&mut self, direction: SearchDirection) -> HxResult<()> {
@@ -19,10 +22,18 @@ impl App {
         direction: SearchDirection,
     ) -> HxResult<()> {
         let started_at = Instant::now();
+        #[cfg(feature = "disasm")]
         let (found, wrapped) = if let Some(pattern) = search.byte_pattern() {
             self.run_byte_search(pattern, direction)?
         } else if let Some(pattern) = search.instruction_query() {
             self.run_instruction_search(pattern, direction)?
+        } else {
+            (None, false)
+        };
+
+        #[cfg(not(feature = "disasm"))]
+        let (found, wrapped) = if let Some(pattern) = search.byte_pattern() {
+            self.run_byte_search(pattern, direction)?
         } else {
             (None, false)
         };
@@ -95,6 +106,7 @@ impl App {
         })
     }
 
+    #[cfg(feature = "disasm")]
     fn run_instruction_search(
         &mut self,
         pattern: &str,
@@ -141,6 +153,7 @@ impl App {
         })
     }
 
+    #[cfg(feature = "disasm")]
     fn search_instruction_forward_from(
         &mut self,
         state: &crate::disasm::DisassemblyState,
@@ -178,6 +191,7 @@ impl App {
         Ok(None)
     }
 
+    #[cfg(feature = "disasm")]
     fn search_instruction_backward_before(
         &mut self,
         state: &crate::disasm::DisassemblyState,

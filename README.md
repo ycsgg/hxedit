@@ -14,6 +14,16 @@ cargo run -- <file>
 hxedit --readonly --offset 0x100 --inspector some.bin
 ```
 
+## Build Profiles
+
+| Profile | Build command | Includes |
+|------|------|------|
+| `simple` | `cargo build --release --no-default-features` | Core hex editor, inspector, search, hash, copy/paste, export |
+| `default` | `cargo build --release` | `simple` + disassembly view / instruction search / symbol side panel |
+| `full` | `cargo build --release --no-default-features --features full` | `default` + reserved `asm` feature hook for future assembler backend integration |
+
+`full` is wired today so future assembler support can land without changing the build flavor name; the current tree still does **not** expose a `:asm` command yet.
+
 ## Features
 
 - **Non-destructive editing** — overwrite bytes, insert new bytes, or mark bytes as deleted; all changes are undoable
@@ -24,6 +34,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 - **Hash computation** — compute MD5, SHA1, SHA256, SHA512, or CRC32 of a selection or the entire file
 - **Clipboard integration** — copy selections as hex, binary, numeric, or base64 text; paste from clipboard as hex or base64
 - **Batch transforms** — fill repeated patterns, replace matching byte/text sequences, and export selections as raw bytes or C/Python literals
+- **Optional executable browsing** — default builds include `:dis`, `:si`, and `:sym`; simple builds omit the disassembly / symbol stack entirely
 - **Large file support** — paged I/O with configurable cache for responsive editing of files much larger than memory
 - **Read-only mode** — automatically falls back to read-only when the file cannot be opened for writing
 - **Adaptive colors** — auto-detects terminal color support (true-color / 256-color / 16-color / no color)
@@ -113,8 +124,8 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 | `:s! <text>` | Search ASCII upward |
 | `:S <hex>` | Search hex bytes downward |
 | `:S! <hex>` | Search hex bytes upward |
-| `:si <text>` | Search decoded instruction text downward in disassembly view |
-| `:si! <text>` | Search decoded instruction text upward in disassembly view |
+| `:si <text>` | Search decoded instruction text downward in disassembly view (`default` / `full`) |
+| `:si! <text>` | Search decoded instruction text upward in disassembly view (`default` / `full`) |
 
 Search wraps around automatically — forward search continues from the start after EOF, backward search continues from the end after BOF. The current search also highlights all visible hits in the hex grid.
 
@@ -157,11 +168,11 @@ Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (littl
 | `:hash sha256` | Compute SHA-256 |
 | `:hash sha512` | Compute SHA-512 |
 | `:hash crc32` | Compute CRC32 |
-| `:dis [arch]` | Enter the current read-only disassembly view for recognized ELF / PE / Mach-O executables |
-| `:dis! <arch> <offset>` | Force raw disassembly from a display offset even without executable-container detect |
-| `:dis off` | Return from disassembly view to the normal hex/ascii view |
-| `:sym` | Show executable symbols/import targets in the side panel |
-| `:sym off` | Close the symbol page and restore the inspector when available |
+| `:dis [arch]` | Enter the current read-only disassembly view for recognized ELF / PE / Mach-O executables (`default` / `full`) |
+| `:dis! <arch> <offset>` | Force raw disassembly from a display offset even without executable-container detect (`default` / `full`) |
+| `:dis off` | Return from disassembly view to the normal hex/ascii view (`default` / `full`) |
+| `:sym` | Show executable symbols/import targets in the side panel (`default` / `full`) |
+| `:sym off` | Close the symbol page and restore the inspector when available (`default` / `full`) |
 | `:data` | Show cursor-relative primitive data decoding in the side panel |
 | `:data off` | Close the data page |
 
@@ -176,7 +187,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 | `:format` | Reset to auto-detected format |
 | `:format elf\|png\|zip\|gzip\|gif\|bmp\|wav\|tar\|jpeg` | Force a specific format |
 
-## Disassembly (Current Stage)
+## Disassembly (Current Stage, `default` / `full` builds)
 
 - `:dis` now delivers a real read-only disassembly pane: executable container detect, arch resolution, backend resolve, and decoded instruction rows in the left main view
 - `:dis! arch offset` can force a raw disassembly view on arbitrary bytes; current forced mode assumes little-endian decoding for the chosen arch
@@ -242,6 +253,6 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 ## CI / Release
 
 - The repository pins Rust to `1.94.1` via `rust-toolchain.toml`, and GitHub Actions installs the same toolchain explicitly
-- Every push / pull request runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets` on Ubuntu / Windows
+- Every push / pull request runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets` across the supported `simple` / `default` / `full` feature combinations on Ubuntu / Windows
 - Pushing a tag like `v0.1.0` also builds release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, then publishes a GitHub Release with `SHA256SUMS.txt`
 - Intel macOS release artifacts are no longer produced; GitHub-hosted CI only relies on Ubuntu / Windows for regular verification

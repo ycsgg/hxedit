@@ -93,7 +93,13 @@ pub fn hint_for(input: &str) -> CommandHint {
                 "search hex bytes downward like: S 7f 45 4c 46".to_owned()
             },
         },
-        "si" | "si!" | "search-instruction" | "search-insn" => CommandHint {
+        #[cfg(feature = "disasm")]
+        "si"
+        | "si!"
+        | "search-instruction"
+        | "search-instruction!"
+        | "search-insn"
+        | "search-insn!" => CommandHint {
             syntax: format!("{name} <instruction-text>"),
             details: if name.ends_with('!') {
                 "search decoded instruction text upward in disassembly view; matches mnemonic and operands, then jumps to the matching instruction row".to_owned()
@@ -122,6 +128,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
             details: "compute hash of the current selection (visual or selected inspector field), or the entire file if no selection is active".to_owned(),
         },
+        #[cfg(feature = "disasm")]
         "dis" | "disassemble" => {
             let syntax = match rest.map(str::trim) {
                 Some("off") => "dis off".to_owned(),
@@ -133,10 +140,12 @@ pub fn hint_for(input: &str) -> CommandHint {
                 details: "enter the read-only disassembly main view for ELF/PE/Mach-O using detected executable metadata and the current decode backend; `dis off` returns to hex view".to_owned(),
             }
         }
+        #[cfg(feature = "disasm")]
         "dis!" | "disassemble!" => CommandHint {
             syntax: format!("{name} <x86|x86_64|arm|aarch64|riscv64> <offset>"),
             details: "force a raw disassembly view from the given display offset even when the file is not recognized as ELF/PE/Mach-O; assumes little-endian decoding for the chosen arch".to_owned(),
         },
+        #[cfg(feature = "symbols")]
         "sym" | "symbols" => {
             let syntax = match rest.map(str::trim) {
                 Some("off") => "sym off".to_owned(),
@@ -267,7 +276,8 @@ fn paste_hint(name: &str, rest: Option<&str>, insert: bool) -> CommandHint {
 }
 
 fn known_commands() -> Vec<&'static str> {
-    vec![
+    #[allow(unused_mut)]
+    let mut commands = vec![
         "q",
         "quit",
         "q!",
@@ -286,12 +296,6 @@ fn known_commands() -> Vec<&'static str> {
         "s!",
         "S",
         "S!",
-        "si",
-        "si!",
-        "search-instruction",
-        "search-instruction!",
-        "search-insn",
-        "search-insn!",
         "u",
         "undo",
         "redo",
@@ -302,12 +306,6 @@ fn known_commands() -> Vec<&'static str> {
         "copy",
         "export",
         "hash",
-        "dis",
-        "dis!",
-        "disassemble",
-        "disassemble!",
-        "sym",
-        "symbols",
         "data",
         "p",
         "paste",
@@ -329,7 +327,27 @@ fn known_commands() -> Vec<&'static str> {
         "pi?!",
         "paste-insert!?",
         "paste-insert?!",
-    ]
+    ];
+    #[cfg(feature = "disasm")]
+    {
+        commands.extend([
+            "si",
+            "si!",
+            "search-instruction",
+            "search-instruction!",
+            "search-insn",
+            "search-insn!",
+            "dis",
+            "dis!",
+            "disassemble",
+            "disassemble!",
+        ]);
+    }
+    #[cfg(feature = "symbols")]
+    {
+        commands.extend(["sym", "symbols"]);
+    }
+    commands
 }
 
 #[cfg(test)]
@@ -385,11 +403,19 @@ mod tests {
         assert!(hint.details.contains("inspector"));
     }
 
+    #[cfg(feature = "symbols")]
     #[test]
     fn symbol_hint_mentions_side_panel() {
         let hint = hint_for("sym");
         assert!(hint.syntax.contains("sym off"));
         assert!(hint.details.contains("side panel"));
+    }
+
+    #[cfg(not(feature = "symbols"))]
+    #[test]
+    fn symbol_hint_hidden_when_feature_disabled() {
+        let hint = hint_for("sym");
+        assert_eq!(hint.syntax, "unknown command");
     }
 
     #[test]

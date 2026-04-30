@@ -201,7 +201,7 @@ fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> (String, Vec
     (out, symbolized_names)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "disasm-capstone"))]
 mod tests {
     use std::fs;
 
@@ -660,6 +660,7 @@ mod tests {
         assert_eq!(target.display_name.as_deref(), Some("target"));
     }
 
+    #[cfg(feature = "symbols")]
     #[test]
     fn decode_region_rows_resolves_elf_plt_import_targets() {
         let mut doc = doc_with_bytes(&x86_64_elf_with_plt_import_call("puts"));

@@ -79,6 +79,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 backward: name.ends_with('!'),
             })
         }
+        #[cfg(feature = "disasm")]
         "si"
         | "si!"
         | "search-instruction"
@@ -100,6 +101,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 .ok_or_else(|| HxError::InvalidHashAlgorithm(arg.to_owned()))?;
             Ok(Command::Hash { algorithm: algo })
         }
+        #[cfg(feature = "disasm")]
         "dis" | "disassemble" => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Disassemble { arch: None }),
             Some("off") => Ok(Command::DisassembleOff),
@@ -107,6 +109,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 arch: Some(arg.to_owned()),
             }),
         },
+        #[cfg(feature = "disasm")]
         "dis!" | "disassemble!" => {
             let rest = rest.ok_or(HxError::MissingArgument("arch offset"))?;
             let mut parts = rest.split_whitespace();
@@ -120,6 +123,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 offset: parse_offset(offset)?,
             })
         }
+        #[cfg(feature = "symbols")]
         "sym" | "symbols" => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Symbols),
             Some("off") => Ok(Command::SymbolsOff),
@@ -476,5 +480,51 @@ mod tests {
     fn hash_command_requires_algorithm_argument() {
         let err = parse_command("hash").unwrap_err();
         assert!(err.to_string().contains("hash algorithm"));
+    }
+
+    #[cfg(feature = "disasm")]
+    #[test]
+    fn disassembly_commands_parse_when_feature_enabled() {
+        assert_eq!(
+            parse_command("dis").unwrap(),
+            Command::Disassemble { arch: None }
+        );
+        assert_eq!(parse_command("dis off").unwrap(), Command::DisassembleOff);
+        assert_eq!(
+            parse_command("si ret").unwrap(),
+            Command::SearchInstruction {
+                pattern: "ret".to_owned(),
+                backward: false,
+            }
+        );
+    }
+
+    #[cfg(not(feature = "disasm"))]
+    #[test]
+    fn disassembly_commands_are_unknown_when_feature_disabled() {
+        assert!(matches!(
+            parse_command("dis"),
+            Err(HxError::UnknownCommand(name)) if name == "dis"
+        ));
+        assert!(matches!(
+            parse_command("si ret"),
+            Err(HxError::UnknownCommand(name)) if name == "si"
+        ));
+    }
+
+    #[cfg(feature = "symbols")]
+    #[test]
+    fn symbol_commands_parse_when_feature_enabled() {
+        assert_eq!(parse_command("sym").unwrap(), Command::Symbols);
+        assert_eq!(parse_command("sym off").unwrap(), Command::SymbolsOff);
+    }
+
+    #[cfg(not(feature = "symbols"))]
+    #[test]
+    fn symbol_commands_are_unknown_when_feature_disabled() {
+        assert!(matches!(
+            parse_command("sym"),
+            Err(HxError::UnknownCommand(name)) if name == "sym"
+        ));
     }
 }

@@ -46,6 +46,7 @@ use navigation::align_offset;
 
 /// Owns the editor runtime: document state, viewport state, and the TUI loop.
 #[allow(clippy::large_enum_variant)]
+#[cfg_attr(not(feature = "disasm"), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MainView {
     Hex,
@@ -56,6 +57,7 @@ pub(crate) enum MainView {
 #[derive(Debug)]
 pub(crate) enum SidePanel {
     Inspector(InspectorState),
+    #[cfg_attr(not(feature = "symbols"), allow(dead_code))]
     Symbol(SymbolState),
     Data(DataState),
 }
@@ -202,6 +204,7 @@ pub(crate) struct SearchState {
 #[derive(Debug, Clone)]
 enum SearchQuery {
     Bytes(Vec<u8>),
+    #[cfg(feature = "disasm")]
     Instruction(String),
 }
 
@@ -214,6 +217,7 @@ struct PasteState {
 enum SearchKind {
     Ascii,
     Hex,
+    #[cfg(feature = "disasm")]
     Instruction,
 }
 
@@ -238,6 +242,7 @@ impl SearchKind {
         match self {
             Self::Ascii => "ascii",
             Self::Hex => "hex",
+            #[cfg(feature = "disasm")]
             Self::Instruction => "instruction",
         }
     }
@@ -247,12 +252,15 @@ impl SearchState {
     fn byte_pattern(&self) -> Option<&[u8]> {
         match &self.query {
             SearchQuery::Bytes(pattern) => Some(pattern),
+            #[cfg(feature = "disasm")]
             SearchQuery::Instruction(_) => None,
         }
     }
 
+    #[cfg_attr(not(feature = "disasm"), allow(dead_code))]
     fn instruction_query(&self) -> Option<&str> {
         match &self.query {
+            #[cfg(feature = "disasm")]
             SearchQuery::Instruction(pattern) => Some(pattern.as_str()),
             SearchQuery::Bytes(_) => None,
         }
@@ -261,6 +269,7 @@ impl SearchState {
     fn pattern_len(&self) -> usize {
         match &self.query {
             SearchQuery::Bytes(pattern) => pattern.len(),
+            #[cfg(feature = "disasm")]
             SearchQuery::Instruction(pattern) => pattern.len(),
         }
     }
@@ -400,6 +409,7 @@ impl App {
         Ok(app)
     }
 
+    #[cfg_attr(not(feature = "disasm"), allow(dead_code))]
     pub(crate) fn reset_disassembly_runtime(&mut self) -> crate::error::HxResult<()> {
         if let MainView::Disassembly(state) = &self.main_view {
             self.disasm_backend = Some(crate::disasm::backend::resolve_backend(

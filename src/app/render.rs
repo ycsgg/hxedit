@@ -594,7 +594,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{App, MainPaneLines};
+    use super::App;
     use crate::cli::Cli;
     use crate::commands::types::Command;
 
@@ -634,6 +634,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "disasm-capstone")]
     #[test]
     fn disassembly_main_view_renders_decoded_instruction_lines() {
         let mut app = app_with_bytes(&{
@@ -662,7 +663,7 @@ mod tests {
             .unwrap();
         let lines = app.build_disassembly_lines(4);
         match lines.pane {
-            MainPaneLines::Disassembly { text, .. } => {
+            super::MainPaneLines::Disassembly { text, .. } => {
                 let joined = text
                     .iter()
                     .flat_map(|line| line.spans.iter().map(|s| s.content.as_ref()))

@@ -13,13 +13,17 @@ categories = ["command-line-utilities", "development-tools"]
 publish = false
 
 [features]
-default = [
-    "disasm-capstone",
+default = ["default-bundle"]
+default-bundle = [
     "disasm-capstone-full",
     "disasm-capstone-x86",
     "disasm-capstone-arm64",
+    "symbols",
 ]
 disasm = []
+symbols = ["disasm", "dep:object", "dep:symbolic-common", "dep:symbolic-demangle"]
+asm = ["disasm"]
+full = ["default-bundle", "asm"]
 disasm-capstone = ["disasm", "dep:capstone"]
 disasm-capstone-full = ["disasm-capstone", "capstone/full"]
 disasm-capstone-x86 = ["disasm-capstone", "capstone/arch_x86"]
@@ -40,9 +44,9 @@ sha2 = "0.10"
 supports-color = "3"
 thiserror = "2.0"
 capstone = { version = "0.14", default-features = false, features = ["std"], optional = true }
-object = "0.39"
-symbolic-common = "12.18"
-symbolic-demangle = "12.18"
+object = { version = "0.39", optional = true }
+symbolic-common = { version = "12.18", optional = true }
+symbolic-demangle = { version = "12.18", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

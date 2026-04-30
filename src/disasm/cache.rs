@@ -192,7 +192,7 @@ impl DisasmCache {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "disasm-capstone"))]
 mod tests {
     use std::fs;
 

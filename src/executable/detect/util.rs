@@ -1,8 +1,11 @@
+#[cfg(feature = "symbols")]
 use symbolic_common::Name;
+#[cfg(feature = "symbols")]
 use symbolic_demangle::{Demangle, DemangleOptions};
 
 use crate::executable::types::{CodeSpan, Endian};
 
+#[cfg(feature = "symbols")]
 pub(super) fn demangle_symbol(name: &str) -> String {
     let name = name.trim();
     if name.is_empty() {
@@ -30,6 +33,13 @@ pub(super) fn demangle_symbol(name: &str) -> String {
     normalize_symbol_name(name).to_owned()
 }
 
+#[cfg_attr(not(feature = "symbols"), allow(dead_code))]
+#[cfg(not(feature = "symbols"))]
+pub(super) fn demangle_symbol(name: &str) -> String {
+    normalize_symbol_name(name.trim()).to_owned()
+}
+
+#[cfg_attr(not(feature = "symbols"), allow(dead_code))]
 fn normalize_symbol_name(name: &str) -> &str {
     let mut name = strip_import_prefix(name);
     name = strip_single_leading_underscore(name);
@@ -38,10 +48,12 @@ fn normalize_symbol_name(name: &str) -> &str {
     name
 }
 
+#[cfg_attr(not(feature = "symbols"), allow(dead_code))]
 fn strip_import_prefix(name: &str) -> &str {
     name.strip_prefix("__imp_").unwrap_or(name)
 }
 
+#[cfg_attr(not(feature = "symbols"), allow(dead_code))]
 fn strip_single_leading_underscore(name: &str) -> &str {
     let Some(stripped) = name.strip_prefix('_') else {
         return name;
@@ -59,6 +71,7 @@ fn strip_single_leading_underscore(name: &str) -> &str {
     }
 }
 
+#[cfg_attr(not(feature = "symbols"), allow(dead_code))]
 fn strip_elf_suffix(name: &str) -> &str {
     if let Some(stripped) = name.strip_suffix("@plt") {
         return stripped;
@@ -76,6 +89,7 @@ fn strip_elf_suffix(name: &str) -> &str {
     name
 }
 
+#[cfg_attr(not(feature = "symbols"), allow(dead_code))]
 fn strip_stdcall_suffix(name: &str) -> &str {
     let Some((base, suffix)) = name.rsplit_once('@') else {
         return name;
@@ -141,6 +155,7 @@ mod tests {
         assert_eq!(demangle_symbol("_MessageBoxA@16"), "MessageBoxA");
     }
 
+    #[cfg(feature = "symbols")]
     #[test]
     fn demangles_cpp_symbols() {
         // GCC-style C++ mangling
@@ -153,6 +168,7 @@ mod tests {
         assert!(demangle_symbol("_ZN3std9basic_iosIcSt11char_traitsIcEED2Ev").contains("std"));
     }
 
+    #[cfg(feature = "symbols")]
     #[test]
     fn demangles_rust_symbols() {
         // Legacy Rust mangling

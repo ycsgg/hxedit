@@ -106,6 +106,7 @@ pub enum Command {
         pattern: Vec<u8>,
         backward: bool,
     },
+    #[cfg(feature = "disasm")]
     SearchInstruction {
         pattern: String,
         backward: bool,
@@ -121,15 +122,20 @@ pub enum Command {
     Hash {
         algorithm: HashAlgorithm,
     },
+    #[cfg(feature = "disasm")]
     Disassemble {
         arch: Option<String>,
     },
+    #[cfg(feature = "disasm")]
     DisassembleForce {
         arch: String,
         offset: u64,
     },
+    #[cfg(feature = "disasm")]
     DisassembleOff,
+    #[cfg(feature = "symbols")]
     Symbols,
+    #[cfg(feature = "symbols")]
     SymbolsOff,
     Data,
     DataOff,
