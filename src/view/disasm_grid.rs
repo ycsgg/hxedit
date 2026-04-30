@@ -56,10 +56,26 @@ pub fn build_bytes(rows: &[DisasmRow], cursor: u64, palette: &Palette) -> Vec<Li
         .collect()
 }
 
-pub fn build_text(rows: &[DisasmRow], cursor: u64, palette: &Palette) -> Vec<Line<'static>> {
+pub fn build_text(
+    rows: &[DisasmRow],
+    cursor: u64,
+    editing: Option<(u64, &str)>,
+    palette: &Palette,
+) -> Vec<Line<'static>> {
     rows.iter()
         .map(|row| match row.kind {
-            DisasmRowKind::Instruction => build_instruction_text(row, cursor, palette),
+            DisasmRowKind::Instruction => {
+                if editing.is_some_and(|(row_offset, _)| row_offset == row.offset) {
+                    build_edit_text(
+                        row,
+                        editing.map(|(_, buffer)| buffer).unwrap_or_default(),
+                        cursor,
+                        palette,
+                    )
+                } else {
+                    build_instruction_text(row, cursor, palette)
+                }
+            }
             DisasmRowKind::Data => {
                 let style = if row_contains_cursor(row, cursor) {
                     palette.cursor.patch(palette.disasm_data)
@@ -82,6 +98,15 @@ pub fn build_text(rows: &[DisasmRow], cursor: u64, palette: &Palette) -> Vec<Lin
             }
         })
         .collect()
+}
+
+fn build_edit_text(row: &DisasmRow, buffer: &str, cursor: u64, palette: &Palette) -> Line<'static> {
+    let style = if row_contains_cursor(row, cursor) {
+        palette.cursor.patch(palette.inspector_edit)
+    } else {
+        palette.inspector_edit
+    };
+    Line::from(vec![Span::styled(buffer.to_owned(), style)])
 }
 
 fn build_instruction_text(row: &DisasmRow, cursor: u64, palette: &Palette) -> Line<'static> {
@@ -266,6 +291,7 @@ mod tests {
             virtual_address: Some(0x401000),
             bytes: vec![0x48, 0x8b, 0x45, 0xf8],
             text: "mov rax, [rbp - 0x8]".to_owned(),
+            assembly_text: "mov rax, [rbp - 0x8]".to_owned(),
             symbolized_names: Vec::new(),
             symbol_label: Some("entry".to_owned()),
             direct_target: Some(crate::disasm::DirectBranchTarget {
@@ -298,7 +324,7 @@ mod tests {
     #[test]
     fn instruction_text_uses_multiple_operand_styles() {
         let palette = Palette::new(ColorLevel::Basic);
-        let lines = build_text(&sample_rows(), 0x100, &palette);
+        let lines = build_text(&sample_rows(), 0x100, None, &palette);
         let line = &lines[0];
         assert!(line
             .spans
@@ -336,6 +362,7 @@ mod tests {
             virtual_address: Some(0x401000),
             bytes: vec![0xe8, 0xfb, 0x0f, 0x00, 0x00],
             text: "call entry".to_owned(),
+            assembly_text: "call 0x402000".to_owned(),
             symbolized_names: vec!["entry".to_owned()],
             symbol_label: None,
             direct_target: Some(crate::disasm::DirectBranchTarget {
@@ -347,7 +374,7 @@ mod tests {
             kind: DisasmRowKind::Instruction,
         }];
 
-        let lines = build_text(&rows, 0x100, &palette);
+        let lines = build_text(&rows, 0x100, None, &palette);
         let line = &lines[0];
         assert!(line.spans.iter().any(|span| span.content.contains("→")));
         assert!(line
@@ -368,6 +395,7 @@ mod tests {
             virtual_address: Some(0x401000),
             bytes: vec![0xe8, 0xfb, 0x0f, 0x00, 0x00],
             text: "call entry".to_owned(),
+            assembly_text: "call 0x402000".to_owned(),
             symbolized_names: vec!["entry".to_owned()],
             symbol_label: None,
             direct_target: None,
@@ -375,7 +403,7 @@ mod tests {
             kind: DisasmRowKind::Instruction,
         }];
 
-        let lines = build_text(&rows, 0x100, &palette);
+        let lines = build_text(&rows, 0x100, None, &palette);
         assert!(lines[0]
             .spans
             .iter()

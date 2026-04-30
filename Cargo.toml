@@ -3,7 +3,7 @@ name = "hxedit"
 version = "0.1.1"
 edition = "2021"
 description = "A terminal hex editor optimized for large files"
-license = "MIT"
+license = "GPL-2.0-only"
 authors = ["ycsgg <ycs_gg@outlook.com>"]
 repository = "https://github.com/ycsgg/hxedit"
 homepage = "https://github.com/ycsgg/hxedit"
@@ -22,7 +22,7 @@ default-bundle = [
 ]
 disasm = []
 symbols = ["disasm", "dep:object", "dep:symbolic-common", "dep:symbolic-demangle"]
-asm = ["disasm"]
+asm = ["disasm", "dep:keystone-engine"]
 full = ["default-bundle", "asm"]
 disasm-capstone = ["disasm", "dep:capstone"]
 disasm-capstone-full = ["disasm-capstone", "capstone/full"]
@@ -47,6 +47,7 @@ capstone = { version = "0.14", default-features = false, features = ["std"], opt
 object = { version = "0.39", optional = true }
 symbolic-common = { version = "12.18", optional = true }
 symbolic-demangle = { version = "12.18", optional = true }
+keystone-engine = { version = "0.1.0", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
@@ -55,3 +56,6 @@ tempfile = "3.14"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[patch.crates-io]
+keystone-engine = { path = "vendor/keystone-engine" }

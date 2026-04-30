@@ -1371,6 +1371,117 @@ fn disassembly_editing_undo_redo_and_fill() {
     assert!(rows3[1].text.contains("int3"));
 }
 
+#[cfg(all(feature = "disasm-capstone", not(feature = "asm")))]
+#[test]
+fn disassembly_inline_assemble_requires_asm_feature() {
+    let bytes = build_disassembly_elf64(&[0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    app.handle_action(Action::BeginDisasmEdit);
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app.disasm_edit.is_none());
+    assert_eq!(app.status_level, StatusLevel::Error);
+    assert!(app
+        .status_message
+        .contains("keystone backend is not enabled"));
+}
+
+#[cfg(all(feature = "disasm-capstone", feature = "asm"))]
+#[test]
+fn disassembly_inline_assemble_invalid_submit_exits_with_error() {
+    let bytes = build_disassembly_elf64(&[0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    app.handle_action(Action::BeginDisasmEdit);
+    assert_eq!(app.mode, Mode::DisasmEdit);
+    app.disasm_edit.as_mut().unwrap().buffer = "definitely_not_valid".to_owned();
+
+    app.handle_action(Action::CommandSubmit);
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app.disasm_edit.is_none());
+    assert_eq!(app.status_level, StatusLevel::Error);
+    assert!(app.status_message.contains("assembly error"));
+}
+
+#[cfg(all(feature = "disasm-capstone", feature = "asm"))]
+#[test]
+fn disassembly_inline_assemble_shorter_patch_nop_fills_current_instruction() {
+    let bytes = build_disassembly_elf64(&[0x48, 0x83, 0xec, 0x20, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    app.handle_action(Action::BeginDisasmEdit);
+    app.disasm_edit.as_mut().unwrap().buffer = "nop".to_owned();
+    app.handle_action(Action::CommandSubmit);
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(
+        app.document.read_logical_range(0x100, 5).unwrap(),
+        vec![0x90, 0x90, 0x90, 0x90, 0xc3]
+    );
+    assert_eq!(app.status_level, StatusLevel::Info);
+    assert!(app.status_message.contains("3 trailing nop"));
+}
+
+#[cfg(all(feature = "disasm-capstone", feature = "asm"))]
+#[test]
+fn disassembly_inline_assemble_longer_patch_warns_and_nops_truncated_tail() {
+    let bytes = build_disassembly_elf64(&[0x83, 0xc0, 0x01, 0x55, 0x48, 0x89, 0xe5, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    app.handle_action(Action::BeginDisasmEdit);
+    app.disasm_edit.as_mut().unwrap().buffer = "mov eax, 0x11223344".to_owned();
+    app.handle_action(Action::CommandSubmit);
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(
+        app.document.read_logical_range(0x100, 8).unwrap(),
+        vec![0xb8, 0x44, 0x33, 0x22, 0x11, 0x90, 0x90, 0xc3]
+    );
+    assert_eq!(app.status_level, StatusLevel::Warning);
+    assert!(app.status_message.contains("covered 3 rows"));
+    assert!(app.status_message.contains("trailing nop 2"));
+}
+
+#[cfg(all(feature = "disasm-capstone", feature = "symbols", feature = "asm"))]
+#[test]
+fn disassembly_inline_assemble_uses_raw_text_without_breaking_symbolized_display() {
+    let bytes =
+        build_disassembly_elf64_with_symbol(&[0x90, 0xE8, 0xFA, 0xFF, 0xFF, 0xFF, 0xC3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.cursor = 0x101;
+
+    let state = match &app.main_view {
+        crate::app::MainView::Disassembly(state) => state.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let rows = app
+        .collect_disassembly_rows(&state, state.viewport_top, 3)
+        .unwrap();
+    assert_eq!(rows[1].text, "call entry");
+    assert_ne!(rows[1].assembly_text, rows[1].text);
+    assert!(rows[1].assembly_text.contains("0x401000"));
+
+    app.handle_action(Action::BeginDisasmEdit);
+
+    assert_eq!(app.mode, Mode::DisasmEdit);
+    assert_eq!(
+        app.disasm_edit.as_ref().unwrap().buffer,
+        rows[1].assembly_text
+    );
+}
+
 #[cfg(feature = "disasm-capstone")]
 #[test]
 fn disassembly_insert_blocked_and_replace_restricted() {

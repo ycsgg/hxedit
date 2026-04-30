@@ -224,7 +224,8 @@ impl App {
             | Mode::Visual
             | Mode::Command
             | Mode::Inspector
-            | Mode::InspectorEdit => Ok(()),
+            | Mode::InspectorEdit
+            | Mode::DisasmEdit => Ok(()),
         }
     }
 

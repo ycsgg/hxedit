@@ -12,6 +12,7 @@ pub enum Action {
     EnterReplace,
     ToggleVisual,
     EnterCommand,
+    BeginDisasmEdit,
     LeaveMode,
     DeleteByte,
     SearchNext,

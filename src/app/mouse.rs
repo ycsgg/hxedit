@@ -161,6 +161,9 @@ impl App {
                     if self.mode.is_inspector() {
                         self.leave_mode();
                     }
+                    if matches!(self.mode, Mode::DisasmEdit) {
+                        self.cancel_disasm_edit();
+                    }
                     if matches!(self.mode, Mode::InsertHex { .. }) {
                         self.commit_pending_insert();
                     }
@@ -186,7 +189,8 @@ impl App {
                             self.selection_anchor = None;
                             self.mode = Mode::Normal;
                         }
-                        Mode::Normal | Mode::Inspector | Mode::InspectorEdit => {}
+                        Mode::Normal | Mode::Inspector | Mode::InspectorEdit | Mode::DisasmEdit => {
+                        }
                     }
                     self.ensure_cursor_visible();
                     self.sync_inspector_to_cursor();

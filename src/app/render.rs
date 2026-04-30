@@ -4,7 +4,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::app::{App, SidePanel};
+use crate::app::{App, MainView, SidePanel};
 use crate::commands::hints;
 use crate::core::document::ByteSlot;
 use crate::disasm::DisasmRow;
@@ -348,11 +348,14 @@ impl App {
         }
 
         let cursor = self.cursor_anchor_offset();
+        let editing = self
+            .disasm_edit()
+            .map(|edit| (edit.row_offset, edit.buffer.as_str()));
         MainLines {
             gutter: disasm_grid::build_gutter(rows, gutter_width, cursor, &self.palette),
             pane: MainPaneLines::Disassembly {
                 bytes: disasm_grid::build_bytes(rows, cursor, &self.palette),
-                text: disasm_grid::build_text(rows, cursor, &self.palette),
+                text: disasm_grid::build_text(rows, cursor, editing, &self.palette),
             },
         }
     }
@@ -413,7 +416,7 @@ impl App {
     }
 
     fn render_main_grids(
-        &self,
+        &mut self,
         frame: &mut ratatui::Frame<'_>,
         columns: layout::MainColumns,
         lines: MainLines,
@@ -445,7 +448,47 @@ impl App {
                     Paragraph::new(text).wrap(Wrap { trim: false }),
                     columns.ascii,
                 );
+                self.render_disassembly_edit_cursor(frame, columns);
             }
+        }
+    }
+
+    fn render_disassembly_edit_cursor(
+        &mut self,
+        frame: &mut ratatui::Frame<'_>,
+        columns: layout::MainColumns,
+    ) {
+        if self.mode != Mode::DisasmEdit {
+            return;
+        }
+        let Some((row_offset, cursor_pos, buffer_len)) = self
+            .disasm_edit()
+            .map(|edit| (edit.row_offset, edit.cursor_pos, edit.buffer.len()))
+        else {
+            return;
+        };
+        let MainView::Disassembly(state) = &self.main_view else {
+            return;
+        };
+        let state = state.clone();
+        let Ok(rows) =
+            self.collect_disassembly_rows(&state, state.viewport_top, self.visible_rows() as usize)
+        else {
+            return;
+        };
+        let visible_row = match rows.iter().position(|row| row.offset == row_offset) {
+            Some(row) => row,
+            None => return,
+        };
+        let Some(edit) = self.disasm_edit() else {
+            return;
+        };
+        let cursor_col = edit.buffer[..cursor_pos.min(buffer_len)].chars().count() as u16;
+        if visible_row < columns.ascii.height as usize && cursor_col < columns.ascii.width {
+            frame.set_cursor_position((
+                columns.ascii.x + cursor_col,
+                columns.ascii.y + visible_row as u16,
+            ));
         }
     }
 

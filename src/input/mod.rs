@@ -1,4 +1,5 @@
 pub mod command;
+pub mod disasm_edit;
 pub mod edit;
 pub mod inspector;
 pub mod keymap;

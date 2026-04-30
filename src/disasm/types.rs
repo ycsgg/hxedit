@@ -30,6 +30,7 @@ pub struct DisasmRow {
     pub offset: u64,
     pub virtual_address: Option<u64>,
     pub bytes: Vec<u8>,
+    pub assembly_text: String,
     pub text: String,
     pub symbolized_names: Vec<String>,
     pub symbol_label: Option<String>,
@@ -49,6 +50,7 @@ impl DisasmRow {
         Self {
             offset,
             virtual_address,
+            assembly_text: format_db_bytes(&bytes),
             text: format_db_bytes(&bytes),
             bytes,
             symbolized_names: Vec::new(),
@@ -70,6 +72,7 @@ impl DisasmRow {
             offset,
             virtual_address,
             bytes: vec![byte],
+            assembly_text: format_db_bytes(&[byte]),
             text: format_db_bytes(&[byte]),
             symbolized_names: Vec::new(),
             symbol_label,

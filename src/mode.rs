@@ -34,6 +34,8 @@ pub enum Mode {
     Inspector,
     /// Inspector field is being edited inline.
     InspectorEdit,
+    /// Disassembly instruction text is being edited inline.
+    DisasmEdit,
 }
 
 impl Mode {
@@ -54,6 +56,7 @@ impl Mode {
             Self::Command => "COMMAND",
             Self::Inspector => "INSPECT",
             Self::InspectorEdit => "INSPEDIT",
+            Self::DisasmEdit => "ASMEDIT",
         }
     }
 }

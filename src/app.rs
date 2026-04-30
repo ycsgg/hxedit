@@ -6,6 +6,7 @@ mod clipboard_ops;
 mod command_input;
 mod commands;
 mod data_state;
+mod disasm_editing;
 mod editing_state;
 mod events;
 mod inspector_state;
@@ -110,6 +111,7 @@ pub struct App {
     profiler: Option<Profiler>,
     disasm_cache: Option<DisasmCache>,
     disasm_backend: Option<Box<dyn crate::disasm::backend::DisassemblerBackend>>,
+    disasm_edit: Option<DisasmEdit>,
     // ── Side panel state ──
     /// Whether the side panel (inspector or symbols) is shown.
     show_inspector: bool,
@@ -154,6 +156,17 @@ pub(crate) struct InspectorEdit {
     /// Index of the InspectorRow being edited.
     pub row_index: usize,
     /// Text edit buffer.
+    pub buffer: String,
+    /// Cursor position within the buffer.
+    pub cursor_pos: usize,
+}
+
+/// Inline edit state for the selected disassembly instruction row.
+#[derive(Debug, Clone)]
+pub(crate) struct DisasmEdit {
+    /// Start offset of the instruction row being edited.
+    pub row_offset: u64,
+    /// Unsymbolized instruction text sent to the assembler backend.
     pub buffer: String,
     /// Cursor position within the buffer.
     pub cursor_pos: usize,
@@ -391,6 +404,7 @@ impl App {
             }),
             disasm_cache: None,
             disasm_backend: None,
+            disasm_edit: None,
             document,
             cursor,
             config,

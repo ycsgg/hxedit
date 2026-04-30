@@ -94,6 +94,7 @@ impl App {
                 self.toggle_visual();
                 Ok(())
             }
+            Action::BeginDisasmEdit => self.begin_disasm_edit(),
             Action::EnterInsert => self.enter_hex_mode(true),
             Action::EnterReplace => self.enter_hex_mode(false),
             Action::EnterCommand => {
@@ -124,6 +125,48 @@ impl App {
     }
 
     fn handle_command_action(&mut self, action: Action) -> HxResult<bool> {
+        if matches!(self.mode, Mode::DisasmEdit) {
+            return match action {
+                Action::CommandChar(c) => {
+                    self.insert_disasm_char(c);
+                    Ok(true)
+                }
+                Action::CommandLeft => {
+                    self.move_disasm_cursor(true);
+                    Ok(true)
+                }
+                Action::CommandRight => {
+                    self.move_disasm_cursor(false);
+                    Ok(true)
+                }
+                Action::CommandHome => {
+                    self.set_disasm_cursor(true);
+                    Ok(true)
+                }
+                Action::CommandEnd => {
+                    self.set_disasm_cursor(false);
+                    Ok(true)
+                }
+                Action::CommandDelete => {
+                    self.delete_disasm_char();
+                    Ok(true)
+                }
+                Action::CommandBackspace => {
+                    self.backspace_disasm_char();
+                    Ok(true)
+                }
+                Action::CommandSubmit => {
+                    self.submit_disasm_edit()?;
+                    Ok(true)
+                }
+                Action::CommandCancel => {
+                    self.cancel_disasm_edit();
+                    Ok(true)
+                }
+                _ => Ok(false),
+            };
+        }
+
         match action {
             Action::CommandChar(c) => {
                 self.insert_command_char(c);
@@ -288,6 +331,9 @@ impl App {
     fn enter_command_mode(&mut self) {
         let return_mode = if matches!(self.mode, Mode::InsertHex { .. }) {
             self.commit_pending_insert();
+            Mode::Normal
+        } else if matches!(self.mode, Mode::DisasmEdit) {
+            self.cancel_disasm_edit();
             Mode::Normal
         } else {
             self.mode

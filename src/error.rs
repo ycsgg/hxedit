@@ -36,6 +36,8 @@ pub enum HxError {
     UnknownDisassemblyArch(String),
     #[error("disassembly unavailable: {0}")]
     DisassemblyUnavailable(String),
+    #[error("assembly error: {0}")]
+    AssemblyError(String),
     #[error("invalid hex pattern: {0}")]
     InvalidHexPattern(String),
     #[error("unknown command: {0}")]

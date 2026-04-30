@@ -16,7 +16,8 @@ impl App {
             | Mode::InsertHex { .. }
             | Mode::Command
             | Mode::Inspector
-            | Mode::InspectorEdit => {}
+            | Mode::InspectorEdit
+            | Mode::DisasmEdit => {}
         }
     }
 
@@ -53,6 +54,9 @@ impl App {
                 }
                 self.mode = Mode::Inspector;
             }
+            Mode::DisasmEdit => {
+                self.cancel_disasm_edit();
+            }
             Mode::EditHex { .. } | Mode::Normal => {
                 self.mode = Mode::Normal;
             }
@@ -74,6 +78,7 @@ impl App {
             {
                 Mode::Inspector
             }
+            Mode::DisasmEdit if self.disasm_edit().is_none() => Mode::Normal,
             other => other,
         }
     }

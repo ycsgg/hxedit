@@ -122,6 +122,7 @@ fn decode_instruction_row(
                 offset,
                 virtual_address,
                 bytes: decoded.bytes,
+                assembly_text: decoded.text,
                 text,
                 symbolized_names,
                 symbol_label,

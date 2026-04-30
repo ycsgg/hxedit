@@ -133,7 +133,7 @@ impl App {
         Ok(())
     }
 
-    fn current_disassembly_state(&self) -> Option<DisassemblyState> {
+    pub(crate) fn current_disassembly_state(&self) -> Option<DisassemblyState> {
         match &self.main_view {
             MainView::Disassembly(state) => Some(state.clone()),
             MainView::Hex => None,

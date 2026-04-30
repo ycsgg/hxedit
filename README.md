@@ -20,9 +20,9 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 |------|------|------|
 | `simple` | `cargo build --release --no-default-features` | Core hex editor, inspector, search, hash, copy/paste, export |
 | `default` | `cargo build --release` | `simple` + disassembly view / instruction search / symbol side panel |
-| `full` | `cargo build --release --no-default-features --features full` | `default` + reserved `asm` feature hook for future assembler backend integration |
+| `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching in disassembly view |
 
-`full` is wired today so future assembler support can land without changing the build flavor name; the current tree still does **not** expose a `:asm` command yet.
+`full` enables the `asm` feature and vendors `keystone-engine` for inline instruction patching. There is still no separate `:asm` command; patching happens directly inside `:dis`.
 
 ## Features
 
@@ -63,6 +63,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 | COMMAND | Enter `:` commands with live hints |
 | INSPECT | Browse parsed format fields |
 | INSPEDIT | Edit an inspector field inline |
+| ASMEDIT | Edit one disassembly instruction inline before assemble-patch submission |
 
 ## Keybindings
 
@@ -80,6 +81,13 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 - `0-9 a-f` — enter hex nibbles in edit/insert mode
 - `Backspace` — delete in edit/insert mode
 - `Ctrl+Z` / `Ctrl+Y` — undo / redo
+
+### Disassembly Patch (`full` only)
+
+- `Enter` in `:dis` — edit the current instruction row inline
+- `Esc` — cancel inline assembly edit
+- `Enter` while editing — assemble and overwrite in place
+- Inline assembly edit accepts exactly one statement and currently does not resolve symbol names in the input text
 
 ### Selection & Search
 
@@ -187,7 +195,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 | `:format` | Reset to auto-detected format |
 | `:format elf\|png\|zip\|gzip\|gif\|bmp\|wav\|tar\|jpeg` | Force a specific format |
 
-## Disassembly (Current Stage, `default` / `full` builds)
+## Disassembly (`default` / `full` builds)
 
 - `:dis` now delivers a real read-only disassembly pane: executable container detect, arch resolution, backend resolve, and decoded instruction rows in the left main view
 - `:dis! arch offset` can force a raw disassembly view on arbitrary bytes; current forced mode assumes little-endian decoding for the chosen arch
@@ -204,9 +212,15 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 - symbolized operands、行尾 `<symbol>` 标签与 direct-target symbol hint 现在共用更醒目的 symbol accent color，避免在反汇编文本里和普通 operand 混在一起
 - 进入 `:dis` 时状态栏会附带当前已收集的 symbol / import 计数（若存在）
 - 当前 dis 主视图仍保持更宽的 instruction text 区域和较窄的 bytes 列，便于 review 指令文本可读性
+- Disassembly view remains overwrite-only for layout-changing edits such as insert/delete/paste-insert
+- `full` build 额外开放 inline assemble patch：`Enter` 进入当前 instruction 的单行编辑，提交后使用 `KeystoneBackend` 把输入汇编翻译成字节码
+- assemble patch 长度策略：
+  - `new_len < old_len`：剩余字节统一补 `NOP`
+  - `new_len == old_len`：普通原地 overwrite
+  - `new_len > old_len`：允许向下覆盖并给出 warning；如果截断后续指令，则把被截断指令剩余尾部补成 `NOP`
+- v1 的 inline assemble 输入暂不做 symbol / relocation 联动；现有 symbolized disassembly 显示逻辑保持不变，编辑缓冲区始终使用原始 unsymbolized instruction text
 - `hxedit` 的目标仍是 byte-level editor + executable browsing，不会把 `:dis` 扩成重度 binary analysis 工具；CFG、function graph、decompiler、自动函数恢复都不在近期目标内
 - 后续会优先补“方便查看”的轻量能力，例如 direct call/jump target 提示、symbol/import 名字映射、以及 PLT / GOT 一类可浏览元数据，而不是引入完整分析框架
-- Disassembly view remains overwrite-only for layout-changing edits such as insert/delete/paste-insert
 - 更深入的 import thunk / PLT / GOT / symbol target 解析，以及更细粒度的 patch-triggered cache invalidation 仍在后续阶段
 
 ## Status Bar
@@ -256,3 +270,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 - Every push / pull request runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets` across the supported `simple` / `default` / `full` feature combinations on Ubuntu / Windows
 - Pushing a tag like `v0.1.0` also builds release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, then publishes a GitHub Release with `SHA256SUMS.txt`
 - Intel macOS release artifacts are no longer produced; GitHub-hosted CI only relies on Ubuntu / Windows for regular verification
+
+## License
+
+`hxedit` is distributed under `GPL-2.0-only`. The `asm` / `full` build vendors `keystone-engine` under the same licensing boundary for inline assemble patch support.
