@@ -219,6 +219,8 @@ enum SearchQuery {
     Bytes(Vec<u8>),
     #[cfg(feature = "disasm")]
     Instruction(String),
+    #[cfg(feature = "symbols")]
+    Symbol(String),
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +234,8 @@ enum SearchKind {
     Hex,
     #[cfg(feature = "disasm")]
     Instruction,
+    #[cfg(feature = "symbols")]
+    Symbol,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -257,6 +261,8 @@ impl SearchKind {
             Self::Hex => "hex",
             #[cfg(feature = "disasm")]
             Self::Instruction => "instruction",
+            #[cfg(feature = "symbols")]
+            Self::Symbol => "symbol",
         }
     }
 }
@@ -267,6 +273,8 @@ impl SearchState {
             SearchQuery::Bytes(pattern) => Some(pattern),
             #[cfg(feature = "disasm")]
             SearchQuery::Instruction(_) => None,
+            #[cfg(feature = "symbols")]
+            SearchQuery::Symbol(_) => None,
         }
     }
 
@@ -276,6 +284,19 @@ impl SearchState {
             #[cfg(feature = "disasm")]
             SearchQuery::Instruction(pattern) => Some(pattern.as_str()),
             SearchQuery::Bytes(_) => None,
+            #[cfg(feature = "symbols")]
+            SearchQuery::Symbol(_) => None,
+        }
+    }
+
+    #[cfg_attr(not(feature = "symbols"), allow(dead_code))]
+    fn symbol_query(&self) -> Option<&str> {
+        match &self.query {
+            #[cfg(feature = "symbols")]
+            SearchQuery::Symbol(pattern) => Some(pattern.as_str()),
+            SearchQuery::Bytes(_) => None,
+            #[cfg(feature = "disasm")]
+            SearchQuery::Instruction(_) => None,
         }
     }
 
@@ -284,6 +305,8 @@ impl SearchState {
             SearchQuery::Bytes(pattern) => pattern.len(),
             #[cfg(feature = "disasm")]
             SearchQuery::Instruction(pattern) => pattern.len(),
+            #[cfg(feature = "symbols")]
+            SearchQuery::Symbol(pattern) => pattern.len(),
         }
     }
 }

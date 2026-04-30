@@ -199,10 +199,28 @@ fn parses_basic_commands() {
             backward: true,
         }
     );
+    #[cfg(feature = "symbols")]
+    assert_eq!(
+        parse_command("symbol entry").unwrap(),
+        Command::SearchSymbol {
+            pattern: "entry".to_owned(),
+            backward: false,
+        }
+    );
+    #[cfg(feature = "symbols")]
+    assert_eq!(
+        parse_command("symbol! entry").unwrap(),
+        Command::SearchSymbol {
+            pattern: "entry".to_owned(),
+            backward: true,
+        }
+    );
     #[cfg(not(feature = "disasm"))]
     assert!(parse_command("si mov rax").is_err());
     #[cfg(not(feature = "disasm"))]
     assert!(parse_command("si! ret").is_err());
+    #[cfg(not(feature = "symbols"))]
+    assert!(parse_command("symbol entry").is_err());
     assert_eq!(parse_command("data").unwrap(), Command::Data);
     assert_eq!(parse_command("data off").unwrap(), Command::DataOff);
 }

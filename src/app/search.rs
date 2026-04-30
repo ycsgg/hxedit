@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::app::{App, SearchDirection, SearchState};
 #[cfg(feature = "disasm")]
-use crate::disasm::DisasmRowKind;
+use crate::disasm::{DisasmRow, DisasmRowKind};
 #[cfg(feature = "disasm")]
 use crate::error::HxError;
 use crate::error::HxResult;
@@ -23,12 +23,25 @@ impl App {
     ) -> HxResult<()> {
         let started_at = Instant::now();
         #[cfg(feature = "disasm")]
-        let (found, wrapped) = if let Some(pattern) = search.byte_pattern() {
-            self.run_byte_search(pattern, direction)?
-        } else if let Some(pattern) = search.instruction_query() {
-            self.run_instruction_search(pattern, direction)?
-        } else {
-            (None, false)
+        let (found, wrapped) = {
+            if let Some(pattern) = search.byte_pattern() {
+                self.run_byte_search(pattern, direction)?
+            } else if let Some(pattern) = search.instruction_query() {
+                self.run_instruction_search(pattern, direction)?
+            } else {
+                #[cfg(feature = "symbols")]
+                {
+                    if let Some(pattern) = search.symbol_query() {
+                        self.run_symbol_search(pattern, direction)?
+                    } else {
+                        (None, false)
+                    }
+                }
+                #[cfg(not(feature = "symbols"))]
+                {
+                    (None, false)
+                }
+            }
         };
 
         #[cfg(not(feature = "disasm"))]
@@ -124,11 +137,17 @@ impl App {
         Ok(match direction {
             SearchDirection::Forward => {
                 let start = self.cursor_anchor_offset().saturating_add(1);
-                if let Some(found) = self.search_instruction_forward_from(&state, pattern, start)? {
+                if let Some(found) = self.search_disassembly_forward_from(&state, start, |row| {
+                    row.kind == DisasmRowKind::Instruction
+                        && row.text.to_ascii_lowercase().contains(pattern)
+                })? {
                     (Some(found), false)
                 } else {
                     (
-                        self.search_instruction_forward_from(&state, pattern, 0)?,
+                        self.search_disassembly_forward_from(&state, 0, |row| {
+                            row.kind == DisasmRowKind::Instruction
+                                && row.text.to_ascii_lowercase().contains(pattern)
+                        })?,
                         start > 0,
                     )
                 }
@@ -136,15 +155,74 @@ impl App {
             SearchDirection::Backward => {
                 let limit_exclusive = self.cursor_anchor_offset();
                 if let Some(found) =
-                    self.search_instruction_backward_before(&state, pattern, limit_exclusive)?
+                    self.search_disassembly_backward_before(&state, limit_exclusive, |row| {
+                        row.kind == DisasmRowKind::Instruction
+                            && row.text.to_ascii_lowercase().contains(pattern)
+                    })?
                 {
                     (Some(found), false)
                 } else {
                     (
-                        self.search_instruction_backward_before(
+                        self.search_disassembly_backward_before(
                             &state,
-                            pattern,
                             self.document.len(),
+                            |row| {
+                                row.kind == DisasmRowKind::Instruction
+                                    && row.text.to_ascii_lowercase().contains(pattern)
+                            },
+                        )?,
+                        limit_exclusive < self.document.len(),
+                    )
+                }
+            }
+        })
+    }
+
+    #[cfg(feature = "symbols")]
+    fn run_symbol_search(
+        &mut self,
+        pattern: &str,
+        direction: SearchDirection,
+    ) -> HxResult<(Option<u64>, bool)> {
+        let state = match &self.main_view {
+            crate::app::MainView::Disassembly(state) => state.clone(),
+            crate::app::MainView::Hex => {
+                return Err(HxError::DisassemblyUnavailable(
+                    "symbol search requires disassembly view; run :dis first".to_owned(),
+                ));
+            }
+        };
+
+        Ok(match direction {
+            SearchDirection::Forward => {
+                let start = self.cursor_anchor_offset().saturating_add(1);
+                if let Some(found) = self.search_disassembly_forward_from(&state, start, |row| {
+                    row_matches_symbol_query(row, pattern)
+                })? {
+                    (Some(found), false)
+                } else {
+                    (
+                        self.search_disassembly_forward_from(&state, 0, |row| {
+                            row_matches_symbol_query(row, pattern)
+                        })?,
+                        start > 0,
+                    )
+                }
+            }
+            SearchDirection::Backward => {
+                let limit_exclusive = self.cursor_anchor_offset();
+                if let Some(found) =
+                    self.search_disassembly_backward_before(&state, limit_exclusive, |row| {
+                        row_matches_symbol_query(row, pattern)
+                    })?
+                {
+                    (Some(found), false)
+                } else {
+                    (
+                        self.search_disassembly_backward_before(
+                            &state,
+                            self.document.len(),
+                            |row| row_matches_symbol_query(row, pattern),
                         )?,
                         limit_exclusive < self.document.len(),
                     )
@@ -154,11 +232,11 @@ impl App {
     }
 
     #[cfg(feature = "disasm")]
-    fn search_instruction_forward_from(
+    fn search_disassembly_forward_from(
         &mut self,
         state: &crate::disasm::DisassemblyState,
-        pattern: &str,
         start: u64,
+        mut matches_row: impl FnMut(&DisasmRow) -> bool,
     ) -> HxResult<Option<u64>> {
         if self.document.is_empty() {
             return Ok(None);
@@ -177,9 +255,7 @@ impl App {
                 if start > row.offset && start <= row_end {
                     continue;
                 }
-                if row.kind == DisasmRowKind::Instruction
-                    && row.text.to_ascii_lowercase().contains(pattern)
-                {
+                if matches_row(&row) {
                     return Ok(Some(row.offset));
                 }
             }
@@ -192,11 +268,11 @@ impl App {
     }
 
     #[cfg(feature = "disasm")]
-    fn search_instruction_backward_before(
+    fn search_disassembly_backward_before(
         &mut self,
         state: &crate::disasm::DisassemblyState,
-        pattern: &str,
         limit_exclusive: u64,
+        mut matches_row: impl FnMut(&DisasmRow) -> bool,
     ) -> HxResult<Option<u64>> {
         if self.document.is_empty() || limit_exclusive == 0 {
             return Ok(None);
@@ -216,9 +292,7 @@ impl App {
                     return Ok(last_match);
                 }
                 next_cursor = row_end.saturating_add(1);
-                if row.kind == DisasmRowKind::Instruction
-                    && row.text.to_ascii_lowercase().contains(pattern)
-                {
+                if matches_row(&row) {
                     last_match = Some(row.offset);
                 }
             }
@@ -229,4 +303,24 @@ impl App {
         }
         Ok(last_match)
     }
+}
+
+#[cfg(feature = "symbols")]
+fn row_matches_symbol_query(row: &DisasmRow, pattern: &str) -> bool {
+    if row.kind != DisasmRowKind::Instruction {
+        return false;
+    }
+
+    row.symbol_label
+        .as_deref()
+        .is_some_and(|name| name.to_ascii_lowercase().contains(pattern))
+        || row
+            .symbolized_names
+            .iter()
+            .any(|name| name.to_ascii_lowercase().contains(pattern))
+        || row
+            .direct_target
+            .as_ref()
+            .and_then(|target| target.display_name.as_deref())
+            .is_some_and(|name| name.to_ascii_lowercase().contains(pattern))
 }

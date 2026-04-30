@@ -95,6 +95,17 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 backward: name.ends_with('!'),
             })
         }
+        #[cfg(feature = "symbols")]
+        "symbol" | "symbol!" | "search-symbol" | "search-symbol!" => {
+            let arg = rest.ok_or(HxError::MissingArgument("symbol search pattern"))?;
+            if arg.is_empty() {
+                return Err(HxError::EmptySearch);
+            }
+            Ok(Command::SearchSymbol {
+                pattern: arg.to_owned(),
+                backward: name.ends_with('!'),
+            })
+        }
         "hash" => {
             let arg = rest.ok_or(HxError::MissingArgument("hash algorithm"))?;
             let algo = HashAlgorithm::parse(arg)
@@ -517,6 +528,20 @@ mod tests {
     fn symbol_commands_parse_when_feature_enabled() {
         assert_eq!(parse_command("sym").unwrap(), Command::Symbols);
         assert_eq!(parse_command("sym off").unwrap(), Command::SymbolsOff);
+        assert_eq!(
+            parse_command("symbol entry").unwrap(),
+            Command::SearchSymbol {
+                pattern: "entry".to_owned(),
+                backward: false,
+            }
+        );
+        assert_eq!(
+            parse_command("symbol! entry").unwrap(),
+            Command::SearchSymbol {
+                pattern: "entry".to_owned(),
+                backward: true,
+            }
+        );
     }
 
     #[cfg(not(feature = "symbols"))]
@@ -525,6 +550,10 @@ mod tests {
         assert!(matches!(
             parse_command("sym"),
             Err(HxError::UnknownCommand(name)) if name == "sym"
+        ));
+        assert!(matches!(
+            parse_command("symbol entry"),
+            Err(HxError::UnknownCommand(name)) if name == "symbol"
         ));
     }
 }

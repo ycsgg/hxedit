@@ -111,6 +111,11 @@ pub enum Command {
         pattern: String,
         backward: bool,
     },
+    #[cfg(feature = "symbols")]
+    SearchSymbol {
+        pattern: String,
+        backward: bool,
+    },
     Inspector,
     /// `:insp more` — raise the per-format entry cap by one batch and
     /// re-parse so pagination-aware formats (ELF / PNG / ZIP / GIF / WAV) reveal more

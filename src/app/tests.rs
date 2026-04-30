@@ -1100,6 +1100,37 @@ fn disassembly_symbols_and_call_targets() {
 
 #[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
 #[test]
+fn symbol_search_finds_all_symbolized_occurrences() {
+    let bytes = build_disassembly_elf64_with_symbol(
+        &[
+            0x90, 0xE8, 0xFA, 0xFF, 0xFF, 0xFF, 0xE8, 0xF5, 0xFF, 0xFF, 0xFF, 0xC3,
+        ],
+        "entry",
+    );
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    app.execute_command(Command::SearchSymbol {
+        pattern: "entry".to_owned(),
+        backward: false,
+    })
+    .unwrap();
+    assert_eq!(app.cursor, 0x101);
+
+    app.repeat_search(SearchDirection::Forward).unwrap();
+    assert_eq!(app.cursor, 0x106);
+
+    app.repeat_search(SearchDirection::Forward).unwrap();
+    assert_eq!(app.cursor, 0x100);
+    assert_eq!(app.status_level, StatusLevel::Notice);
+
+    app.repeat_search(SearchDirection::Backward).unwrap();
+    assert_eq!(app.cursor, 0x106);
+}
+
+#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[test]
 fn symbol_panel_toggle_restores_symbol_page() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0xc3], "entry");
     let mut app = app_with_bytes(&bytes);

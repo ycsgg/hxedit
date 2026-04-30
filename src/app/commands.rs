@@ -91,6 +91,10 @@ impl App {
             Command::SearchInstruction { pattern, backward } => {
                 self.execute_instruction_search_command(pattern, backward)
             }
+            #[cfg(feature = "symbols")]
+            Command::SearchSymbol { pattern, backward } => {
+                self.execute_symbol_search_command(pattern, backward)
+            }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
             #[cfg(feature = "disasm")]
             Command::Disassemble { arch } => self.execute_disassemble_command(arch.as_deref()),
@@ -572,6 +576,16 @@ impl App {
         let search = SearchState {
             kind: SearchKind::Instruction,
             query: crate::app::SearchQuery::Instruction(pattern.to_ascii_lowercase()),
+        };
+        self.last_search = Some(search.clone());
+        self.run_search(&search, search_direction(backward))
+    }
+
+    #[cfg(feature = "symbols")]
+    fn execute_symbol_search_command(&mut self, pattern: String, backward: bool) -> HxResult<()> {
+        let search = SearchState {
+            kind: SearchKind::Symbol,
+            query: crate::app::SearchQuery::Symbol(pattern.to_ascii_lowercase()),
         };
         self.last_search = Some(search.clone());
         self.run_search(&search, search_direction(backward))

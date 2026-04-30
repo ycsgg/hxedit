@@ -107,6 +107,15 @@ pub fn hint_for(input: &str) -> CommandHint {
                 "search decoded instruction text downward in disassembly view; matches mnemonic and operands, then jumps to the matching instruction row".to_owned()
             },
         },
+        #[cfg(feature = "symbols")]
+        "symbol" | "symbol!" | "search-symbol" | "search-symbol!" => CommandHint {
+            syntax: format!("{name} <symbol-name>"),
+            details: if name.ends_with('!') {
+                "search symbolized disassembly rows upward in disassembly view; matches symbol labels, symbolized operands, and direct-target symbol hints, then jumps to the matching row".to_owned()
+            } else {
+                "search symbolized disassembly rows downward in disassembly view; matches symbol labels, symbolized operands, and direct-target symbol hints, then jumps to the matching row".to_owned()
+            },
+        },
         "u" | "undo" => CommandHint {
             syntax: format!("{name} [steps]"),
             details: "undo one change by default; pass a positive number to undo more".to_owned(),
@@ -345,7 +354,7 @@ fn known_commands() -> Vec<&'static str> {
     }
     #[cfg(feature = "symbols")]
     {
-        commands.extend(["sym", "symbols"]);
+        commands.extend(["sym", "symbols", "symbol", "symbol!"]);
     }
     commands
 }
@@ -409,6 +418,14 @@ mod tests {
         let hint = hint_for("sym");
         assert!(hint.syntax.contains("sym off"));
         assert!(hint.details.contains("side panel"));
+    }
+
+    #[cfg(feature = "symbols")]
+    #[test]
+    fn symbol_search_hint_mentions_disassembly_rows() {
+        let hint = hint_for("symbol");
+        assert!(hint.syntax.contains("<symbol-name>"));
+        assert!(hint.details.contains("symbolized"));
     }
 
     #[cfg(not(feature = "symbols"))]

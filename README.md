@@ -34,7 +34,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 - **Hash computation** — compute MD5, SHA1, SHA256, SHA512, or CRC32 of a selection or the entire file
 - **Clipboard integration** — copy selections as hex, binary, numeric, or base64 text; paste from clipboard as hex or base64
 - **Batch transforms** — fill repeated patterns, replace matching byte/text sequences, and export selections as raw bytes or C/Python literals
-- **Optional executable browsing** — default builds include `:dis`, `:si`, and `:sym`; simple builds omit the disassembly / symbol stack entirely
+- **Optional executable browsing** — default builds include `:dis`, `:si`, `:symbol`, and `:sym`; simple builds omit the disassembly / symbol stack entirely
 - **Large file support** — paged I/O with configurable cache for responsive editing of files much larger than memory
 - **Read-only mode** — automatically falls back to read-only when the file cannot be opened for writing
 - **Adaptive colors** — auto-detects terminal color support (true-color / 256-color / 16-color / no color)
@@ -134,10 +134,12 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 | `:S! <hex>` | Search hex bytes upward |
 | `:si <text>` | Search decoded instruction text downward in disassembly view (`default` / `full`) |
 | `:si! <text>` | Search decoded instruction text upward in disassembly view (`default` / `full`) |
+| `:symbol <name>` | Search symbolized disassembly rows downward by symbol name (`default` / `full`) |
+| `:symbol! <name>` | Search symbolized disassembly rows upward by symbol name (`default` / `full`) |
 
 Search wraps around automatically — forward search continues from the start after EOF, backward search continues from the end after BOF. The current search also highlights all visible hits in the hex grid.
 
-In disassembly view, byte search results now jump to the containing instruction row, and `:si` / `:si!` search decoded instruction text directly.
+In disassembly view, byte search results now jump to the containing instruction row, `:si` / `:si!` search decoded instruction text directly, and `:symbol` / `:symbol!` search symbol labels, symbolized operands, and direct-target symbol hints by name.
 
 Successful `:g` commands report how many display bytes were moved, e.g. `moved +0x1000 → 0x1234`.
 
