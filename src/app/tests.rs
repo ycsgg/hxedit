@@ -716,6 +716,35 @@ fn search_forward_backward_and_wrap() {
     assert!(app3.status_message.contains("wrapped"));
 }
 
+#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[test]
+fn search_repeat_works_while_side_panel_has_focus() {
+    let bytes = build_disassembly_elf64_with_symbol(
+        &[
+            0x90, 0xE8, 0xFA, 0xFF, 0xFF, 0xFF, 0xE8, 0xF5, 0xFF, 0xFF, 0xFF, 0xC3,
+        ],
+        "entry",
+    );
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.execute_command(Command::Symbols).unwrap();
+    assert_eq!(app.mode, Mode::Inspector);
+
+    app.execute_command(Command::SearchSymbol {
+        pattern: "entry".to_owned(),
+        backward: false,
+    })
+    .unwrap();
+    assert_eq!(app.cursor, 0x101);
+
+    app.handle_action(Action::SearchNext);
+    assert_eq!(app.cursor, 0x106);
+
+    app.handle_action(Action::SearchPrev);
+    assert_eq!(app.cursor, 0x101);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Goto command: end, relative offsets, delta reporting
 // ═══════════════════════════════════════════════════════════════════════════

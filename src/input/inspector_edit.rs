@@ -9,7 +9,6 @@ pub fn map(key: KeyEvent) -> Option<Action> {
     }
 
     match key.code {
-        // Navigation
         KeyCode::Up | KeyCode::Char('k') => Some(Action::InspectorUp),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::InspectorDown),
         KeyCode::Left => Some(Action::InspectorLeft),
@@ -17,34 +16,12 @@ pub fn map(key: KeyEvent) -> Option<Action> {
         KeyCode::Home => Some(Action::InspectorHome),
         KeyCode::End => Some(Action::InspectorEnd),
         KeyCode::Delete => Some(Action::InspectorDelete),
-
-        // Space: toggle collapse/expand on the selected header. When a field is
-        // being edited the space still reaches the buffer via Char(' ').
-        KeyCode::Char(' ') => Some(Action::InspectorToggleCollapse),
-
-        // Begin / submit edit, or toggle collapse when a header is selected
-        // (the branching happens in the event handler so this map stays simple).
         KeyCode::Enter => Some(Action::InspectorEnter),
-
-        // Leave current inspector sub-mode (edit -> inspector, inspector -> normal)
         KeyCode::Esc => Some(Action::LeaveMode),
-
-        // Toggle inspector panel / focus
         KeyCode::Tab => Some(Action::ToggleInspector),
-
-        // Enter command mode from inspector
         KeyCode::Char(':') => Some(Action::EnterCommand),
-
-        // Search should keep working even while a side panel owns focus.
-        KeyCode::Char('n') => Some(Action::SearchNext),
-        KeyCode::Char('p') => Some(Action::SearchPrev),
-
-        // Backspace while editing
         KeyCode::Backspace => Some(Action::InspectorBackspace),
-
-        // Other chars become input when editing
         KeyCode::Char(c) => Some(Action::InspectorChar(c)),
-
         _ => None,
     }
 }

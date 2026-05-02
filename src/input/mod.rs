@@ -2,6 +2,7 @@ pub mod command;
 pub mod disasm_edit;
 pub mod edit;
 pub mod inspector;
+pub mod inspector_edit;
 pub mod keymap;
 pub mod mouse;
 pub mod normal;
