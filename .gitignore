@@ -1,5 +1,5 @@
 ref/
-target/
+/target/
 *.swp
 prof
 tgbot
