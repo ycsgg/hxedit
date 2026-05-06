@@ -118,12 +118,6 @@ tag release 会按明确的 `OS * arch * feature` 矩阵发布。
 - `windows` / `x86_64` / `default`
 - `windows` / `x86_64` / `full`
 
-## 当前限制
-
-- 保存目前仍是 rewrite-save
-- overwrite paste 到 EOF 会截断，不会自动 append
-- 剪贴板 copy 目前仍以文本表示为主，不直接写 raw binary clipboard
-
 ## 许可证
 
 `hxedit` 以 `GPL-2.0-only` 发布。

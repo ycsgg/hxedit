@@ -118,12 +118,6 @@ Current release matrix:
 - `windows` / `x86_64` / `default`
 - `windows` / `x86_64` / `full`
 
-## Limitations
-
-- Save is currently rewrite-save only
-- Overwrite paste truncates at EOF instead of auto-appending
-- Clipboard copy is still text-oriented rather than raw binary clipboard output
-
 ## License
 
 `hxedit` is distributed under `GPL-2.0-only`.
