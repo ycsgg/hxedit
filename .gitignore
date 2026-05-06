@@ -5,6 +5,7 @@ prof
 tgbot
 *.md
 !README.md
+!README_CN.md
 !CHANGELOG.md
 *.log
 test.png
