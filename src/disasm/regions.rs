@@ -116,6 +116,7 @@ mod tests {
             symbols_by_va: Default::default(),
             target_names_by_va: Default::default(),
             symbols_by_name: Default::default(),
+            target_names_by_name: Default::default(),
             imports: Vec::new(),
         }
     }

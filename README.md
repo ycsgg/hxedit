@@ -87,7 +87,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 - `Enter` in `:dis` — edit the current instruction row inline
 - `Esc` — cancel inline assembly edit
 - `Enter` while editing — assemble and overwrite in place
-- Inline assembly edit accepts exactly one statement and currently does not resolve symbol names in the input text
+- Inline assembly edit accepts exactly one statement; v1 keeps the raw instruction text in the edit buffer, but direct branch/call operands can now resolve exact symbol/import names such as `call strcmp`
 
 ### Selection & Search
 
@@ -220,7 +220,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
   - `new_len < old_len`：剩余字节统一补 `NOP`
   - `new_len == old_len`：普通原地 overwrite
   - `new_len > old_len`：允许向下覆盖并给出 warning；如果截断后续指令，则把被截断指令剩余尾部补成 `NOP`
-- v1 的 inline assemble 输入暂不做 symbol / relocation 联动；现有 symbolized disassembly 显示逻辑保持不变，编辑缓冲区始终使用原始 unsymbolized instruction text
+- v1 的 inline assemble 仍保持单行 raw-text 编辑缓冲区，但提交前会额外解析 direct branch/call 的单 token symbol/import 名（例如 `call strcmp` / `jmp entry` / `bl memcpy`）并改写成目标地址后交给 Keystone；更复杂的 relocation / expression / memory-operand symbol 仍留在后续阶段
 - `hxedit` 的目标仍是 byte-level editor + executable browsing，不会把 `:dis` 扩成重度 binary analysis 工具；CFG、function graph、decompiler、自动函数恢复都不在近期目标内
 - 后续会优先补“方便查看”的轻量能力，例如 direct call/jump target 提示、symbol/import 名字映射、以及 PLT / GOT 一类可浏览元数据，而不是引入完整分析框架
 - 更深入的 import thunk / PLT / GOT / symbol target 解析，以及更细粒度的 patch-triggered cache invalidation 仍在后续阶段

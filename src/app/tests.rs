@@ -1202,14 +1202,25 @@ fn symbol_panel_scrolls_and_mouse_click_navigates() {
 
     if let Some(state) = app.symbol_state_mut() {
         for index in 1..5 {
+            let name = format!("target_{index}");
             state
                 .info
                 .target_names_by_va
-                .insert(0x401000 + index, format!("target_{index}"));
+                .insert(0x401000 + index, name.clone());
+            state
+                .info
+                .target_names_by_name
+                .entry(name)
+                .or_default()
+                .push(0x401000 + index);
         }
         state.info.target_names_by_va.insert(
             0x401004,
             "very_long_symbol_name_that_wraps_across_multiple_detail_rows".to_owned(),
+        );
+        state.info.target_names_by_name.insert(
+            "very_long_symbol_name_that_wraps_across_multiple_detail_rows".to_owned(),
+            vec![0x401004],
         );
     }
 
@@ -1540,6 +1551,79 @@ fn disassembly_inline_assemble_uses_raw_text_without_breaking_symbolized_display
         app.disasm_edit.as_ref().unwrap().buffer,
         rows[1].assembly_text
     );
+}
+
+#[cfg(all(feature = "disasm-capstone", feature = "symbols", feature = "asm"))]
+#[test]
+fn disassembly_inline_assemble_resolves_direct_symbol_name() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0x90, 0x90, 0x90, 0xc3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.cursor = 0x101;
+
+    app.handle_action(Action::BeginDisasmEdit);
+    app.disasm_edit.as_mut().unwrap().buffer = "call entry".to_owned();
+    app.handle_action(Action::CommandSubmit);
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(
+        app.document.read_logical_range(0x101, 5).unwrap(),
+        vec![0xe8, 0xfa, 0xff, 0xff, 0xff]
+    );
+    assert_eq!(app.status_level, StatusLevel::Warning);
+    assert!(app.status_message.contains("resolved entry -> 0x401000"));
+}
+
+#[cfg(all(feature = "disasm-capstone", feature = "symbols", feature = "asm"))]
+#[test]
+fn disassembly_inline_assemble_resolves_import_target_name() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0x90, 0x90, 0x90, 0xc3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    if let crate::app::MainView::Disassembly(state) = &mut app.main_view {
+        state
+            .info
+            .target_names_by_va
+            .insert(0x401030, "strcmp".to_owned());
+        state
+            .info
+            .target_names_by_name
+            .insert("strcmp".to_owned(), vec![0x401030]);
+    }
+    app.cursor = 0x100;
+
+    app.handle_action(Action::BeginDisasmEdit);
+    app.disasm_edit.as_mut().unwrap().buffer = "call strcmp".to_owned();
+    app.handle_action(Action::CommandSubmit);
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(
+        app.document.read_logical_range(0x100, 5).unwrap(),
+        vec![0xe8, 0x2b, 0x00, 0x00, 0x00]
+    );
+    assert!(app.status_message.contains("resolved strcmp -> 0x401030"));
+}
+
+#[cfg(all(feature = "disasm-capstone", feature = "symbols", feature = "asm"))]
+#[test]
+fn disassembly_inline_assemble_unknown_symbol_keeps_document_unchanged() {
+    let bytes = build_disassembly_elf64(&[0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    let before = app.document.read_logical_range(0x100, 2).unwrap();
+
+    app.handle_action(Action::BeginDisasmEdit);
+    app.disasm_edit.as_mut().unwrap().buffer = "call missing_symbol".to_owned();
+    app.handle_action(Action::CommandSubmit);
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app.disasm_edit.is_none());
+    assert_eq!(app.status_level, StatusLevel::Error);
+    assert!(app.status_message.contains("unknown patch symbol"));
+    assert_eq!(app.document.read_logical_range(0x100, 2).unwrap(), before);
 }
 
 #[cfg(feature = "disasm-capstone")]

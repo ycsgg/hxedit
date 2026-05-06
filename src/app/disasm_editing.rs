@@ -1,5 +1,5 @@
 use crate::app::{App, DisasmEdit, EditOp, ReplacementChange};
-use crate::disasm::assembler::resolve_assembler_backend;
+use crate::disasm::assembler::{resolve_assembler_backend, resolve_patch_symbols};
 use crate::disasm::{plan_assembly_patch, DisasmRow, DisasmRowKind};
 use crate::error::{HxError, HxResult};
 use crate::mode::Mode;
@@ -66,12 +66,13 @@ impl App {
 
         let backend = resolve_assembler_backend(&state.info, None)?;
         let address = row.virtual_address.unwrap_or(row.offset);
+        let resolved = resolve_patch_symbols(&state.info, state.info.arch, &edit.buffer)?;
         let assembled = backend.assemble_one(
             state.info.arch,
             state.info.bitness,
             state.info.endian,
             address,
-            &edit.buffer,
+            &resolved.statement,
         )?;
         let rows = self.collect_patch_rows(&state, row.offset, assembled.len())?;
         let plan = plan_assembly_patch(&rows, &assembled, state.info.arch)?;
@@ -83,7 +84,7 @@ impl App {
             self.refresh_inspector();
         }
 
-        self.set_disassembly_patch_status(&row, &plan, changed);
+        self.set_disassembly_patch_status(&row, &plan, changed, resolved.resolved_symbol.as_ref());
         Ok(())
     }
 
@@ -203,16 +204,20 @@ impl App {
         row: &DisasmRow,
         plan: &crate::disasm::AssemblyPatchPlan,
         changed: bool,
+        resolved_symbol: Option<&crate::disasm::assembler::ResolvedPatchSymbol>,
     ) {
         let label = format!("patched {}", row.label());
+        let resolved_suffix = resolved_symbol
+            .map(|symbol| format!("; resolved {} -> 0x{:x}", symbol.token, symbol.address))
+            .unwrap_or_default();
         if !changed {
-            self.set_info_status(format!("{label}; bytes unchanged"));
+            self.set_info_status(format!("{label}{resolved_suffix}; bytes unchanged"));
             return;
         }
 
         if plan.patch_len > plan.original_len {
             self.set_warning_status(format!(
-                "{label}; {} bytes > old {}, covered {} rows, trailing nop {}",
+                "{label}{resolved_suffix}; {} bytes > old {}, covered {} rows, trailing nop {}",
                 plan.patch_bytes.len(),
                 plan.original_len,
                 plan.covered_rows,
@@ -220,13 +225,16 @@ impl App {
             ));
         } else if plan.trailing_nop_len > 0 {
             self.set_info_status(format!(
-                "{label}; {}→{} bytes with {} trailing nop",
+                "{label}{resolved_suffix}; {}→{} bytes with {} trailing nop",
                 plan.patch_bytes.len() - plan.trailing_nop_len,
                 plan.patch_len,
                 plan.trailing_nop_len
             ));
         } else {
-            self.set_info_status(format!("{label}; {} bytes", plan.patch_len));
+            self.set_info_status(format!(
+                "{label}{resolved_suffix}; {} bytes",
+                plan.patch_len
+            ));
         }
     }
 }

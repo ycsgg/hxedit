@@ -146,6 +146,25 @@ pub struct ImportInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatchSymbolLookup {
+    Resolved(u64),
+    Ambiguous(Vec<u64>),
+    Missing,
+}
+
+impl PatchSymbolLookup {
+    fn from_addresses(mut addresses: Vec<u64>) -> Self {
+        addresses.sort_unstable();
+        addresses.dedup();
+        match addresses.len() {
+            0 => Self::Missing,
+            1 => Self::Resolved(addresses[0]),
+            _ => Self::Ambiguous(addresses),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutableInfo {
     pub kind: ExecutableKind,
     pub arch: ExecutableArch,
@@ -156,7 +175,8 @@ pub struct ExecutableInfo {
     pub code_spans: Vec<CodeSpan>,
     pub symbols_by_va: BTreeMap<u64, SymbolInfo>,
     pub target_names_by_va: Box<BTreeMap<u64, String>>,
-    pub symbols_by_name: HashMap<String, u64>,
+    pub symbols_by_name: HashMap<String, Vec<u64>>,
+    pub target_names_by_name: HashMap<String, Vec<u64>>,
     pub imports: Vec<ImportInfo>,
 }
 
@@ -214,5 +234,29 @@ impl ExecutableInfo {
 
     pub fn import_count(&self) -> usize {
         self.imports.len()
+    }
+
+    pub fn lookup_patch_symbol(&self, name: &str) -> PatchSymbolLookup {
+        if let Some(addresses) = self.symbols_by_name.get(name) {
+            return PatchSymbolLookup::from_addresses(addresses.clone());
+        }
+
+        let raw_matches = self
+            .symbols_by_va
+            .iter()
+            .filter_map(|(&address, symbol)| {
+                (symbol.raw_name.as_deref() == Some(name)).then_some(address)
+            })
+            .collect::<Vec<_>>();
+        match PatchSymbolLookup::from_addresses(raw_matches) {
+            PatchSymbolLookup::Missing => {}
+            result => return result,
+        }
+
+        if let Some(addresses) = self.target_names_by_name.get(name) {
+            return PatchSymbolLookup::from_addresses(addresses.clone());
+        }
+
+        PatchSymbolLookup::Missing
     }
 }

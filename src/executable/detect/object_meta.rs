@@ -122,9 +122,7 @@ fn insert_named_symbol(
         return;
     }
     let display_name = demangle_symbol(raw_name);
-    info.symbols_by_name
-        .entry(display_name.clone())
-        .or_insert(address);
+    push_name_index(&mut info.symbols_by_name, &display_name, address);
     info.symbols_by_va.entry(address).or_insert(SymbolInfo {
         display_name,
         raw_name: Some(raw_name.to_owned()),
@@ -188,9 +186,21 @@ fn insert_target_name(info: &mut ExecutableInfo, address: u64, raw_name: &str) {
     if display_name.is_empty() || info.symbols_by_va.contains_key(&address) {
         return;
     }
+    push_name_index(&mut info.target_names_by_name, &display_name, address);
     info.target_names_by_va
         .entry(address)
         .or_insert(display_name);
+}
+
+fn push_name_index(
+    index: &mut std::collections::HashMap<String, Vec<u64>>,
+    name: &str,
+    address: u64,
+) {
+    let addresses = index.entry(name.to_owned()).or_default();
+    if !addresses.contains(&address) {
+        addresses.push(address);
+    }
 }
 
 fn is_elf_plt_relocation(arch: ExecutableArch, r_type: u32) -> bool {
