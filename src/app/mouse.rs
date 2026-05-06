@@ -1,7 +1,7 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 use crate::app::App;
-use crate::app::SidePanel;
+use crate::app::SidePanelKind;
 use crate::format::parse::InspectorRow;
 use crate::mode::{Mode, NibblePhase};
 use crate::util::geometry::rect_contains;
@@ -10,28 +10,28 @@ impl App {
     pub(crate) fn handle_mouse(&mut self, mouse_event: MouseEvent) {
         match mouse_event.kind {
             MouseEventKind::ScrollUp => {
-                let over_inspector = self
+                let over_side_panel = self
                     .last_columns
-                    .and_then(|columns| columns.inspector)
+                    .and_then(|columns| columns.side_panel)
                     .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row));
-                if over_inspector {
-                    if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
+                if over_side_panel {
+                    if self.active_side_panel == SidePanelKind::Symbol {
                         let visible_row = self
                             .last_columns
-                            .and_then(|columns| columns.inspector)
+                            .and_then(|columns| columns.side_panel)
                             .map(|area| mouse_event.row.saturating_sub(area.y) as usize)
                             .unwrap_or(0);
                         if visible_row > self.symbol_list_visible_rows() {
                             let width = self
                                 .last_columns
-                                .and_then(|columns| columns.inspector)
+                                .and_then(|columns| columns.side_panel)
                                 .map(|area| area.width)
                                 .unwrap_or(1);
                             self.scroll_symbol_detail(-3, width);
                         } else {
                             self.scroll_symbol_panel(-3);
                         }
-                    } else if matches!(self.side_panel, Some(SidePanel::Data(_))) {
+                    } else if self.active_side_panel == SidePanelKind::Data {
                         self.scroll_data_panel(-3);
                     } else {
                         self.scroll_inspector(-3);
@@ -42,28 +42,28 @@ impl App {
                 }
             }
             MouseEventKind::ScrollDown => {
-                let over_inspector = self
+                let over_side_panel = self
                     .last_columns
-                    .and_then(|columns| columns.inspector)
+                    .and_then(|columns| columns.side_panel)
                     .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row));
-                if over_inspector {
-                    if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
+                if over_side_panel {
+                    if self.active_side_panel == SidePanelKind::Symbol {
                         let visible_row = self
                             .last_columns
-                            .and_then(|columns| columns.inspector)
+                            .and_then(|columns| columns.side_panel)
                             .map(|area| mouse_event.row.saturating_sub(area.y) as usize)
                             .unwrap_or(0);
                         if visible_row > self.symbol_list_visible_rows() {
                             let width = self
                                 .last_columns
-                                .and_then(|columns| columns.inspector)
+                                .and_then(|columns| columns.side_panel)
                                 .map(|area| area.width)
                                 .unwrap_or(1);
                             self.scroll_symbol_detail(3, width);
                         } else {
                             self.scroll_symbol_panel(3);
                         }
-                    } else if matches!(self.side_panel, Some(SidePanel::Data(_))) {
+                    } else if self.active_side_panel == SidePanelKind::Data {
                         self.scroll_data_panel(3);
                     } else {
                         self.scroll_inspector(3);
@@ -79,25 +79,23 @@ impl App {
                 };
 
                 if columns
-                    .inspector
+                    .side_panel
                     .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row))
                 {
-                    if !self.mode.is_inspector() {
+                    if !self.mode.is_side_panel() {
                         self.leave_mode();
                     }
-                    self.mode = Mode::Inspector;
+                    self.mode = Mode::SidePanel;
                 }
 
                 if let Some(hit) =
                     self.main_view_mouse_hit(columns, mouse_event.column, mouse_event.row)
                 {
-                    if let Some(visible_row) = hit.inspector_row {
-                        if self.show_inspector {
-                            self.mode = Mode::Inspector;
+                    if let Some(visible_row) = hit.side_panel_row {
+                        if self.show_side_panel {
+                            self.mode = Mode::SidePanel;
                         }
-                        if self.show_inspector
-                            && matches!(self.side_panel, Some(SidePanel::Symbol(_)))
-                        {
+                        if self.show_side_panel && self.active_side_panel == SidePanelKind::Symbol {
                             if visible_row >= self.symbol_list_visible_rows() {
                                 return;
                             }
@@ -111,9 +109,7 @@ impl App {
                             }
                             return;
                         }
-                        if self.show_inspector
-                            && matches!(self.side_panel, Some(SidePanel::Data(_)))
-                        {
+                        if self.show_side_panel && self.active_side_panel == SidePanelKind::Data {
                             let actual_row = self
                                 .data_state()
                                 .map(|state| state.scroll_offset + visible_row + 1)
@@ -121,8 +117,11 @@ impl App {
                             self.select_data_panel_row(actual_row);
                             return;
                         }
-                        if self.show_inspector && self.inspector().is_some() {
-                            let width = columns.inspector.map(|area| area.width).unwrap_or(32);
+                        if self.show_side_panel
+                            && self.active_side_panel == SidePanelKind::Inspector
+                            && self.inspector().is_some()
+                        {
+                            let width = columns.side_panel.map(|area| area.width).unwrap_or(32);
                             let actual_visual_row = self
                                 .inspector()
                                 .map(|inspector| inspector.scroll_offset + visible_row)
@@ -158,7 +157,7 @@ impl App {
                         return;
                     }
 
-                    if self.mode.is_inspector() {
+                    if self.mode.is_side_panel() {
                         self.leave_mode();
                     }
                     if matches!(self.mode, Mode::DisasmEdit) {
@@ -189,7 +188,7 @@ impl App {
                             self.selection_anchor = None;
                             self.mode = Mode::Normal;
                         }
-                        Mode::Normal | Mode::Inspector | Mode::InspectorEdit | Mode::DisasmEdit => {
+                        Mode::Normal | Mode::SidePanel | Mode::InspectorEdit | Mode::DisasmEdit => {
                         }
                     }
                     self.ensure_cursor_visible();

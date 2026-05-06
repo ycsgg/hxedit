@@ -59,7 +59,7 @@ pub fn hint_for(input: &str) -> CommandHint {
                     "reveal the next batch of paginated inspector entries beyond the current cap"
                         .to_owned()
                 } else {
-                    "toggle format inspector panel; `:insp more` reveals the next batch of paginated entries when a format uses capped lists".to_owned()
+                    "show or focus the inspector page in the side panel; `:insp more` reveals the next batch of paginated entries when a format uses capped lists".to_owned()
                 },
             }
         }

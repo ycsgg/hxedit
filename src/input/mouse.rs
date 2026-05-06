@@ -10,7 +10,7 @@ use crate::view::layout::MainColumns;
 pub struct MouseHit {
     pub offset: u64,
     pub phase: Option<NibblePhase>,
-    pub inspector_row: Option<usize>,
+    pub side_panel_row: Option<usize>,
 }
 
 pub fn disassembly_hit_test(
@@ -19,9 +19,9 @@ pub fn disassembly_hit_test(
     y: u16,
     rows: &[DisasmRow],
 ) -> Option<MouseHit> {
-    if let Some(inspector) = columns.inspector {
-        if rect_contains(inspector, x, y) {
-            return inspector_hit(inspector, y);
+    if let Some(side_panel) = columns.side_panel {
+        if rect_contains(side_panel, x, y) {
+            return side_panel_hit(side_panel, y);
         }
     }
 
@@ -43,7 +43,7 @@ pub fn disassembly_hit_test(
     Some(MouseHit {
         offset,
         phase,
-        inspector_row: None,
+        side_panel_row: None,
     })
 }
 
@@ -56,17 +56,17 @@ pub fn hit_test(
     file_len: u64,
 ) -> Option<MouseHit> {
     if file_len == 0 || bytes_per_line == 0 {
-        if let Some(inspector) = columns.inspector {
-            if rect_contains(inspector, x, y) {
-                return inspector_hit(inspector, y);
+        if let Some(side_panel) = columns.side_panel {
+            if rect_contains(side_panel, x, y) {
+                return side_panel_hit(side_panel, y);
             }
         }
         return None;
     }
 
-    if let Some(inspector) = columns.inspector {
-        if rect_contains(inspector, x, y) {
-            return inspector_hit(inspector, y);
+    if let Some(side_panel) = columns.side_panel {
+        if rect_contains(side_panel, x, y) {
+            return side_panel_hit(side_panel, y);
         }
     }
 
@@ -89,19 +89,19 @@ pub fn hit_test(
     (offset < file_len).then_some(MouseHit {
         offset,
         phase,
-        inspector_row: None,
+        side_panel_row: None,
     })
 }
 
-fn inspector_hit(inspector: Rect, y: u16) -> Option<MouseHit> {
-    let line = y.saturating_sub(inspector.y) as usize;
+fn side_panel_hit(side_panel: Rect, y: u16) -> Option<MouseHit> {
+    let line = y.saturating_sub(side_panel.y) as usize;
     if line == 0 {
         return None;
     }
     Some(MouseHit {
         offset: 0,
         phase: None,
-        inspector_row: Some(line - 1),
+        side_panel_row: Some(line - 1),
     })
 }
 
@@ -183,8 +183,8 @@ mod tests {
             hex: Rect::new(9, 0, 49, 5),
             sep2: Rect::new(58, 0, 1, 5),
             ascii: Rect::new(59, 0, 17, 5),
-            sep3: None,
-            inspector: None,
+            side_panel_sep: None,
+            side_panel: None,
         }
     }
 
@@ -196,8 +196,8 @@ mod tests {
             hex: Rect::new(19, 0, 24, 5),
             sep2: Rect::new(43, 0, 1, 5),
             ascii: Rect::new(44, 0, 30, 5),
-            sep3: None,
-            inspector: None,
+            side_panel_sep: None,
+            side_panel: None,
         }
     }
 
@@ -250,7 +250,7 @@ mod tests {
             MouseHit {
                 offset: 0x20 + 32,
                 phase: None,
-                inspector_row: None,
+                side_panel_row: None,
             }
         );
     }
@@ -263,7 +263,7 @@ mod tests {
             MouseHit {
                 offset: 0x10,
                 phase: Some(NibblePhase::Low),
-                inspector_row: None,
+                side_panel_row: None,
             }
         );
     }
@@ -276,7 +276,7 @@ mod tests {
             MouseHit {
                 offset: 8,
                 phase: None,
-                inspector_row: None,
+                side_panel_row: None,
             }
         );
     }
@@ -284,14 +284,14 @@ mod tests {
     #[test]
     fn inspector_click_returns_visible_row() {
         let mut columns = columns();
-        columns.inspector = Some(Rect::new(76, 0, 16, 5));
+        columns.side_panel = Some(Rect::new(76, 0, 16, 5));
         let hit = hit_test(columns, 80, 3, 0, 16, 256).unwrap();
         assert_eq!(
             hit,
             MouseHit {
                 offset: 0,
                 phase: None,
-                inspector_row: Some(2),
+                side_panel_row: Some(2),
             }
         );
     }
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn inspector_title_row_does_not_select_a_field() {
         let mut columns = columns();
-        columns.inspector = Some(Rect::new(76, 0, 16, 5));
+        columns.side_panel = Some(Rect::new(76, 0, 16, 5));
         assert_eq!(hit_test(columns, 80, 0, 0, 16, 256), None);
     }
 

@@ -1,4 +1,5 @@
-use crate::app::{App, DataState, SidePanel};
+use crate::app::SidePanelKind;
+use crate::app::{App, DataState};
 use crate::core::document::ByteSlot;
 use crate::mode::Mode;
 
@@ -6,25 +7,19 @@ const DATA_READ_BYTES: usize = 16;
 
 impl App {
     pub(crate) fn data_state(&self) -> Option<&DataState> {
-        match &self.side_panel {
-            Some(SidePanel::Data(state)) => Some(state),
-            _ => None,
-        }
+        self.data_state.as_ref()
     }
 
     pub(crate) fn data_state_mut(&mut self) -> Option<&mut DataState> {
-        match &mut self.side_panel {
-            Some(SidePanel::Data(state)) => Some(state),
-            _ => None,
-        }
+        self.data_state.as_mut()
     }
 
     pub(crate) fn refresh_data_panel(&mut self) {
-        if !matches!(self.side_panel, Some(SidePanel::Data(_))) {
+        if self.data_state.is_none() {
             return;
         }
         let previous = self.data_state().cloned();
-        self.side_panel = Some(SidePanel::Data(DataState {
+        self.data_state = Some(DataState {
             base_offset: self.cursor_anchor_offset(),
             bytes: self.read_data_panel_bytes(),
             scroll_offset: previous
@@ -32,27 +27,27 @@ impl App {
                 .map(|state| state.scroll_offset)
                 .unwrap_or(0),
             selected_label: previous.and_then(|state| state.selected_label),
-        }));
+        });
     }
 
     pub(crate) fn open_data_panel(&mut self) {
-        self.show_inspector = true;
-        self.side_panel = Some(SidePanel::Data(DataState {
+        self.show_side_panel = true;
+        self.data_state = Some(DataState {
             base_offset: self.cursor_anchor_offset(),
             bytes: self.read_data_panel_bytes(),
             scroll_offset: 0,
             selected_label: None,
-        }));
-        self.inspector_error = None;
-        self.mode = Mode::Inspector;
+        });
+        self.focus_data_panel();
         self.set_info_status("data panel opened at cursor");
     }
 
     pub(crate) fn close_data_panel(&mut self) {
-        if matches!(self.side_panel, Some(SidePanel::Data(_))) {
-            self.side_panel = None;
-            self.show_inspector = false;
-            if self.mode.is_inspector() {
+        if self.data_state.is_some() {
+            self.data_state = None;
+            self.active_side_panel = SidePanelKind::Inspector;
+            self.show_side_panel = false;
+            if self.mode.is_side_panel() {
                 self.mode = Mode::Normal;
             }
             self.clear_status();
@@ -60,7 +55,7 @@ impl App {
     }
 
     pub(crate) fn scroll_data_panel(&mut self, rows: i64) {
-        let visible_rows = self.inspector_visible_rows();
+        let visible_rows = self.side_panel_visible_rows();
         let total_rows = crate::view::data_panel::line_count();
         let Some(state) = self.data_state_mut() else {
             return;
@@ -74,6 +69,34 @@ impl App {
         } else {
             state.scroll_offset.saturating_sub((-rows) as usize)
         };
+    }
+
+    pub(crate) fn focus_data_panel(&mut self) {
+        self.active_side_panel = SidePanelKind::Data;
+        self.mode = Mode::SidePanel;
+        self.refresh_data_panel();
+    }
+
+    pub(crate) fn move_data_panel_selection(&mut self, delta: i64) {
+        let current = self
+            .data_state()
+            .and_then(|state| {
+                state
+                    .selected_label
+                    .as_deref()
+                    .and_then(position_for_label)
+                    .map(|index| index + 1)
+            })
+            .unwrap_or(1);
+        let last = crate::view::data_panel::line_count()
+            .saturating_sub(1)
+            .max(1);
+        let target = if delta >= 0 {
+            current.saturating_add(delta as usize).min(last)
+        } else {
+            current.saturating_sub((-delta) as usize).max(1)
+        };
+        self.select_data_panel_row(target);
     }
 
     pub(crate) fn select_data_panel_row(&mut self, visual_row: usize) {
@@ -112,4 +135,9 @@ impl App {
         }
         bytes
     }
+}
+
+fn position_for_label(label: &str) -> Option<usize> {
+    (1..crate::view::data_panel::line_count())
+        .find(|visual_row| crate::view::data_panel::label_at_visual_row(*visual_row) == Some(label))
 }

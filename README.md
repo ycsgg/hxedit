@@ -45,7 +45,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 |------|-------------|
 | `--readonly` | Open without write access; auto-detected if the file lacks write permission |
 | `--offset <n\|0xhex>` | Start at a specific byte offset |
-| `--inspector` | Open with the inspector panel enabled |
+| `--inspector` | Open with the side panel visible on the inspector page |
 | `--bytes-per-line <n>` | Bytes shown per row (default 16) |
 | `--page-size <n>` | Page cache read size (default 16384) |
 | `--cache-pages <n>` | Page cache capacity (default 128) |
@@ -61,7 +61,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 | INSERT | Insert new bytes nibble-by-nibble |
 | VISUAL | Select a byte range for operations |
 | COMMAND | Enter `:` commands with live hints |
-| INSPECT | Browse parsed format fields |
+| PANEL | Focus the active side-panel page |
 | INSPEDIT | Edit an inspector field inline |
 | ASMEDIT | Edit one disassembly instruction inline before assemble-patch submission |
 
@@ -192,7 +192,7 @@ Hashes the active selection (visual or selected inspector field) if active, othe
 
 | Command | Description |
 |---------|-------------|
-| `:insp` | Toggle inspector panel |
+| `:insp` | Show/focus the inspector page in the side panel; run again to hide it when already focused |
 | `:insp more` | Reveal the next batch of paginated entries beyond the current cap |
 | `:format` | Reset to auto-detected format |
 | `:format elf\|png\|zip\|gzip\|gif\|bmp\|wav\|tar\|jpeg` | Force a specific format |

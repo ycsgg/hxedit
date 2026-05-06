@@ -24,10 +24,10 @@ pub fn map(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('x') => Some(Action::DeleteByte),
         KeyCode::Char('n') => Some(Action::SearchNext),
         KeyCode::Char('p') => Some(Action::SearchPrev),
-        KeyCode::Char('t') => Some(Action::ToggleInspector),
+        KeyCode::Char('t') => Some(Action::ToggleSidePanel),
         KeyCode::Enter => Some(Action::BeginDisasmEdit),
         KeyCode::Char(':') => Some(Action::EnterCommand),
-        KeyCode::Tab => Some(Action::ToggleInspector),
+        KeyCode::Tab => Some(Action::ToggleSidePanel),
         _ => None,
     }
 }

@@ -34,7 +34,7 @@ pub struct Cli {
     #[arg(long, value_name = "OFFSET")]
     pub offset: Option<String>,
 
-    /// Open with format inspector panel
+    /// Open with the side panel visible on the inspector page
     #[arg(long)]
     pub inspector: bool,
 }

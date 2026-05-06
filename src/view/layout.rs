@@ -1,7 +1,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::Block;
 
-pub const MIN_INSPECTOR_WIDTH: u16 = 80;
+pub const MIN_SIDE_PANEL_WIDTH: u16 = 80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MainPaneKind {
@@ -19,7 +19,7 @@ pub struct ScreenLayout {
 
 /// Fixed column layout for the hex viewer body.
 ///
-/// When show_inspector is true, sep3 and inspector are Some.
+/// When show_side_panel is true, side_panel_sep and side_panel are Some.
 #[derive(Debug, Clone, Copy)]
 pub struct MainColumns {
     pub main_pane_kind: MainPaneKind,
@@ -28,10 +28,10 @@ pub struct MainColumns {
     pub hex: Rect,
     pub sep2: Rect,
     pub ascii: Rect,
-    /// Inspector separator. Only present when inspector is open.
-    pub sep3: Option<Rect>,
-    /// Inspector panel area. Only present when inspector is open.
-    pub inspector: Option<Rect>,
+    /// Side-panel separator. Only present when the side panel is visible.
+    pub side_panel_sep: Option<Rect>,
+    /// Side-panel area. Hosts inspector / symbol / data pages.
+    pub side_panel: Option<Rect>,
 }
 
 pub fn split_screen(area: Rect, show_command: bool) -> ScreenLayout {
@@ -61,7 +61,7 @@ pub fn split_main(
     block: &Block,
     area: Rect,
     gutter_width: u16,
-    show_inspector: bool,
+    show_side_panel: bool,
     main_pane_kind: MainPaneKind,
 ) -> MainColumns {
     let inner = block.inner(area);
@@ -70,7 +70,7 @@ pub fn split_main(
         MainPaneKind::Disassembly => (2, 4, 3),
     };
 
-    if show_inspector && inner.width >= MIN_INSPECTOR_WIDTH {
+    if show_side_panel && inner.width >= MIN_SIDE_PANEL_WIDTH {
         let sections = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -90,8 +90,8 @@ pub fn split_main(
             hex: sections[2],
             sep2: sections[3],
             ascii: sections[4],
-            sep3: Some(sections[5]),
-            inspector: Some(sections[6]),
+            side_panel_sep: Some(sections[5]),
+            side_panel: Some(sections[6]),
         }
     } else {
         let sections = Layout::default()
@@ -111,8 +111,8 @@ pub fn split_main(
             hex: sections[2],
             sep2: sections[3],
             ascii: sections[4],
-            sep3: None,
-            inspector: None,
+            side_panel_sep: None,
+            side_panel: None,
         }
     }
 }
@@ -154,9 +154,9 @@ mod tests {
         let area = Rect::new(0, 0, 120, 24);
         let block = Block::default();
         let columns = split_main(&block, area, 8, true, MainPaneKind::Hex);
-        let inspector = columns.inspector.expect("inspector visible");
-        assert!(columns.hex.width > inspector.width);
-        assert!(inspector.width > columns.ascii.width);
+        let side_panel = columns.side_panel.expect("side panel visible");
+        assert!(columns.hex.width > side_panel.width);
+        assert!(side_panel.width > columns.ascii.width);
     }
 
     #[test]
@@ -166,8 +166,8 @@ mod tests {
         let hex = split_main(&block, area, 8, true, MainPaneKind::Hex);
         let dis = split_main(&block, area, 8, true, MainPaneKind::Disassembly);
         assert!(
-            dis.inspector.expect("dis inspector").width
-                >= hex.inspector.expect("hex inspector").width
+            dis.side_panel.expect("dis side panel").width
+                >= hex.side_panel.expect("hex side panel").width
         );
         assert!(dis.ascii.width > dis.hex.width);
     }

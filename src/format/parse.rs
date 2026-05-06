@@ -43,7 +43,7 @@ pub struct StructValue {
     pub children: Vec<StructValue>,
 }
 
-/// A single row in the inspector panel.
+/// A single row in the inspector page.
 ///
 /// Flattened from the StructValue tree for rendering.
 #[derive(Debug, Clone)]

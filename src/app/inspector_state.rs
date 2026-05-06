@@ -1,11 +1,12 @@
-use crate::app::{App, InspectorState, SidePanel};
+use crate::app::SidePanelKind;
+use crate::app::{App, InspectorState};
 use crate::error::{HxError, HxResult};
 use crate::format;
 use crate::format::parse::{InspectorRow, NodePath, StructValue};
 use crate::format::types::FieldDef;
 use crate::mode::Mode;
 use crate::view::inspector as inspector_view;
-use crate::view::layout::MIN_INSPECTOR_WIDTH;
+use crate::view::layout::MIN_SIDE_PANEL_WIDTH;
 
 /// Structs at this depth (and deeper) are collapsed on first build. `1` keeps
 /// top-level structs expanded so the user sees where the file starts, but
@@ -13,22 +14,109 @@ use crate::view::layout::MIN_INSPECTOR_WIDTH;
 const DEFAULT_COLLAPSED_DEPTH: usize = 1;
 
 impl App {
+    fn should_refresh_inspector(&self) -> bool {
+        self.inspector_state.is_some()
+            || self.inspector_error.is_some()
+            || (self.show_side_panel && self.active_side_panel == SidePanelKind::Inspector)
+            || self.inspector_format_override.is_some()
+    }
+
+    fn rebuild_inspector_state(&mut self, surface_feedback: bool) {
+        let previous_scroll = self
+            .inspector()
+            .map(|state| state.scroll_offset)
+            .unwrap_or(0);
+        let previous_selected_offset = self
+            .inspector()
+            .and_then(|state| field_offset_for_row(&state.rows, state.selected_row));
+        let previous_collapsed = self.inspector().map(|state| state.collapsed_nodes.clone());
+        let previous_format = self.inspector().map(|state| state.format_name.clone());
+
+        let detected = if let Some(name) = self.inspector_format_override.as_deref() {
+            format::detect::detect_by_name_with_cap(
+                name,
+                &mut self.document,
+                self.inspector_entry_cap,
+            )
+        } else {
+            format::detect::detect_format_with_cap(&mut self.document, self.inspector_entry_cap)
+        };
+
+        if let Some(def) = detected {
+            match format::parse::parse_format(&def, &mut self.document) {
+                Ok(structs) => {
+                    let collapsed_nodes = previous_collapsed.unwrap_or_else(|| {
+                        format::parse::initial_collapsed_nodes(&structs, DEFAULT_COLLAPSED_DEPTH)
+                    });
+                    let rows = format::parse::flatten(&structs, &collapsed_nodes);
+                    let selected_row = previous_selected_offset
+                        .and_then(|offset| find_row_covering_offset(&rows, offset))
+                        .or_else(|| find_row_covering_offset(&rows, self.cursor))
+                        .unwrap_or_else(|| first_selectable_row(&rows));
+
+                    self.inspector_state = Some(InspectorState {
+                        format_name: def.name,
+                        structs,
+                        rows,
+                        scroll_offset: previous_scroll,
+                        selected_row,
+                        editing: None,
+                        collapsed_nodes,
+                    });
+                    self.inspector_error = None;
+                    self.ensure_inspector_selection_visible();
+                }
+                Err(err) => {
+                    let message = format!("inspector parse failed [{}]: {}", def.name, err);
+                    if self.inspector_error.as_deref() != Some(message.as_str()) {
+                        eprintln!("{message}");
+                    }
+                    self.inspector_state = None;
+                    self.inspector_error = Some(message.clone());
+                    if surface_feedback {
+                        self.set_error_status(message);
+                    }
+                    if matches!(self.mode, Mode::InspectorEdit) {
+                        self.mode = Mode::SidePanel;
+                    }
+                }
+            }
+        } else {
+            self.inspector_state = None;
+            self.inspector_error = None;
+            if surface_feedback {
+                self.set_warning_status(format!(
+                    "format lost: {} header/magic no longer matches",
+                    previous_format.unwrap_or_else(|| "current".to_owned())
+                ));
+                if matches!(self.mode, Mode::InspectorEdit | Mode::SidePanel) {
+                    self.mode = Mode::Normal;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn activate_inspector_page(&mut self) {
+        self.active_side_panel = SidePanelKind::Inspector;
+    }
+
+    pub(crate) fn ensure_inspector_page_state(&mut self, surface_feedback: bool) {
+        self.activate_inspector_page();
+        if self.inspector_state.is_none() && self.inspector_error.is_none() {
+            self.rebuild_inspector_state(surface_feedback);
+        }
+    }
+
     fn supported_inspector_formats() -> &'static str {
         "ELF / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG"
     }
 
     pub(crate) fn inspector(&self) -> Option<&InspectorState> {
-        match &self.side_panel {
-            Some(SidePanel::Inspector(state)) => Some(state),
-            _ => None,
-        }
+        self.inspector_state.as_ref()
     }
 
     pub(crate) fn inspector_mut(&mut self) -> Option<&mut InspectorState> {
-        match &mut self.side_panel {
-            Some(SidePanel::Inspector(state)) => Some(state),
-            _ => None,
-        }
+        self.inspector_state.as_mut()
     }
 
     pub(crate) fn inspector_has_editable_fields(&self) -> bool {
@@ -56,52 +144,52 @@ impl App {
                 + columns.hex.width
                 + columns.sep2.width
                 + columns.ascii.width
-                + columns.sep3.map(|area| area.width).unwrap_or(0)
-                + columns.inspector.map(|area| area.width).unwrap_or(0)
+                + columns.side_panel_sep.map(|area| area.width).unwrap_or(0)
+                + columns.side_panel.map(|area| area.width).unwrap_or(0)
         })
     }
 
-    fn warn_inspector_too_narrow(&mut self) {
+    fn warn_side_panel_too_narrow(&mut self) {
         match self.current_main_inner_width() {
             Some(current) => self.set_warning_status(format!(
-                "inspector hidden; terminal too narrow (current {} columns, need {}+)",
-                current, MIN_INSPECTOR_WIDTH
+                "side panel hidden; terminal too narrow (current {} columns, need {}+)",
+                current, MIN_SIDE_PANEL_WIDTH
             )),
             None => self.set_warning_status(format!(
-                "inspector hidden; terminal too narrow (need {}+ columns)",
-                MIN_INSPECTOR_WIDTH
+                "side panel hidden; terminal too narrow (need {}+ columns)",
+                MIN_SIDE_PANEL_WIDTH
             )),
         }
     }
 
-    pub(crate) fn inspector_panel_visible(&self) -> bool {
+    pub(crate) fn side_panel_layout_visible(&self) -> bool {
         self.current_main_inner_width()
-            .map(|width| width >= MIN_INSPECTOR_WIDTH)
+            .map(|width| width >= MIN_SIDE_PANEL_WIDTH)
             .unwrap_or(true)
     }
 
-    pub(crate) fn ensure_inspector_mode_visible(&mut self) {
-        if !self.mode.is_inspector() || self.inspector_panel_visible() {
+    pub(crate) fn ensure_side_panel_focus_visible(&mut self) {
+        if !self.mode.is_side_panel() || self.side_panel_layout_visible() {
             return;
         }
         if let Some(inspector) = self.inspector_mut() {
             inspector.editing = None;
         }
         self.mode = Mode::Normal;
-        self.warn_inspector_too_narrow();
+        self.warn_side_panel_too_narrow();
     }
 
-    pub(crate) fn focus_inspector_or_warn(&mut self) -> bool {
-        self.focus_inspector_or_warn_with_toggle(false)
+    pub(crate) fn focus_inspector_page_or_warn(&mut self) -> bool {
+        self.focus_inspector_page_or_warn_with_toggle(false)
     }
 
-    fn focus_inspector_or_warn_with_toggle(&mut self, is_toggle_attempt: bool) -> bool {
-        if !self.inspector_panel_visible() {
+    fn focus_inspector_page_or_warn_with_toggle(&mut self, is_toggle_attempt: bool) -> bool {
+        if !self.side_panel_layout_visible() {
             if let Some(inspector) = self.inspector_mut() {
                 inspector.editing = None;
             }
             self.mode = Mode::Normal;
-            self.warn_inspector_too_narrow();
+            self.warn_side_panel_too_narrow();
             return false;
         }
         if let Some(error) = self.inspector_error.as_ref() {
@@ -112,9 +200,9 @@ impl App {
         if self.inspector().is_none() {
             // No format detected
             if is_toggle_attempt {
-                // User pressed Tab/`:insp` again to toggle, close inspector
+                // User pressed Tab/`:insp` again to toggle, close the panel.
                 self.mode = Mode::Normal;
-                self.show_inspector = false;
+                self.show_side_panel = false;
                 self.clear_status();
                 return false;
             }
@@ -122,7 +210,8 @@ impl App {
             self.set_warning_status(self.no_format_detected_message());
             return false;
         }
-        self.mode = Mode::Inspector;
+        self.active_side_panel = SidePanelKind::Inspector;
+        self.mode = Mode::SidePanel;
         self.sync_inspector_to_cursor();
         if !self.inspector_has_editable_fields() {
             let format_name = self
@@ -152,52 +241,50 @@ impl App {
         }
     }
 
-    pub(crate) fn toggle_inspector_mode(&mut self) {
-        if !self.show_inspector {
-            self.show_inspector = true;
-            if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
-                self.mode = Mode::Inspector;
-                self.ensure_symbol_selection_visible();
-            } else if matches!(self.side_panel, Some(SidePanel::Data(_))) {
-                self.mode = Mode::Inspector;
-                self.refresh_data_panel();
-            } else {
-                self.refresh_inspector();
-                self.focus_inspector_or_warn_with_toggle(false);
+    pub(crate) fn toggle_side_panel(&mut self) {
+        if !self.show_side_panel {
+            self.show_side_panel = true;
+            match self.active_side_panel {
+                SidePanelKind::Symbol if self.symbol_state().is_some() => {
+                    self.focus_symbol_panel();
+                }
+                SidePanelKind::Data if self.data_state().is_some() => {
+                    self.focus_data_panel();
+                }
+                _ => {
+                    self.ensure_inspector_page_state(true);
+                    self.focus_inspector_page_or_warn_with_toggle(false);
+                }
             }
-        } else if !self.mode.is_inspector() {
-            if matches!(self.side_panel, Some(SidePanel::Symbol(_))) {
-                self.mode = Mode::Inspector;
-                self.ensure_symbol_selection_visible();
-            } else if matches!(self.side_panel, Some(SidePanel::Data(_))) {
-                self.mode = Mode::Inspector;
-                self.refresh_data_panel();
-            } else {
-                self.focus_inspector_or_warn_with_toggle(true);
+        } else if !self.mode.is_side_panel() {
+            match self.active_side_panel {
+                SidePanelKind::Symbol if self.symbol_state().is_some() => {
+                    self.focus_symbol_panel();
+                }
+                SidePanelKind::Data if self.data_state().is_some() => {
+                    self.focus_data_panel();
+                }
+                _ => {
+                    self.ensure_inspector_page_state(true);
+                    self.focus_inspector_page_or_warn_with_toggle(true);
+                }
             }
         } else {
             if let Some(inspector) = self.inspector_mut() {
                 inspector.editing = None;
             }
             self.mode = Mode::Normal;
-            self.show_inspector = false;
-            if !matches!(
-                self.side_panel,
-                Some(SidePanel::Symbol(_) | SidePanel::Data(_))
-            ) {
-                self.side_panel = None;
-                self.inspector_error = None;
-            }
+            self.show_side_panel = false;
         }
     }
 
-    pub(crate) fn inspector_visible_rows(&self) -> usize {
+    pub(crate) fn side_panel_visible_rows(&self) -> usize {
         self.view_rows.saturating_sub(1).max(1)
     }
 
-    pub(crate) fn current_inspector_width(&self) -> u16 {
+    pub(crate) fn current_side_panel_width(&self) -> u16 {
         self.last_columns
-            .and_then(|columns| columns.inspector)
+            .and_then(|columns| columns.side_panel)
             .map(|area| area.width)
             .unwrap_or(32)
     }
@@ -232,86 +319,14 @@ impl App {
         }
     }
 
-    /// Re-run format detection/parsing and refresh the inspector panel.
+    /// Re-run format detection/parsing and refresh the inspector page state.
     pub(crate) fn refresh_inspector(&mut self) {
-        if !self.show_inspector {
+        if !self.should_refresh_inspector() {
             return;
         }
-
-        let previous_scroll = self
-            .inspector()
-            .map(|state| state.scroll_offset)
-            .unwrap_or(0);
-        let previous_selected_offset = self
-            .inspector()
-            .and_then(|state| field_offset_for_row(&state.rows, state.selected_row));
-        let previous_collapsed = self.inspector().map(|state| state.collapsed_nodes.clone());
-        let previous_format = self.inspector().map(|state| state.format_name.clone());
-
-        let detected = if let Some(name) = self.inspector_format_override.as_deref() {
-            format::detect::detect_by_name_with_cap(
-                name,
-                &mut self.document,
-                self.inspector_entry_cap,
-            )
-        } else {
-            format::detect::detect_format_with_cap(&mut self.document, self.inspector_entry_cap)
-        };
-
-        if let Some(def) = detected {
-            match format::parse::parse_format(&def, &mut self.document) {
-                Ok(structs) => {
-                    let collapsed_nodes = previous_collapsed.unwrap_or_else(|| {
-                        format::parse::initial_collapsed_nodes(&structs, DEFAULT_COLLAPSED_DEPTH)
-                    });
-                    let rows = format::parse::flatten(&structs, &collapsed_nodes);
-                    let selected_row = previous_selected_offset
-                        .and_then(|offset| find_row_covering_offset(&rows, offset))
-                        .or_else(|| find_row_covering_offset(&rows, self.cursor))
-                        .unwrap_or_else(|| first_selectable_row(&rows));
-
-                    self.side_panel = Some(SidePanel::Inspector(InspectorState {
-                        format_name: def.name,
-                        structs,
-                        rows,
-                        scroll_offset: previous_scroll,
-                        selected_row,
-                        editing: None,
-                        collapsed_nodes,
-                    }));
-                    self.inspector_error = None;
-                    self.ensure_inspector_selection_visible();
-                }
-                Err(err) => {
-                    let message = format!("inspector parse failed [{}]: {}", def.name, err);
-                    if self.inspector_error.as_deref() != Some(message.as_str()) {
-                        eprintln!("{message}");
-                    }
-                    self.side_panel = None;
-                    self.inspector_error = Some(message.clone());
-                    self.set_error_status(message);
-                    if matches!(self.mode, Mode::InspectorEdit) {
-                        self.mode = Mode::Inspector;
-                    }
-                }
-            }
-        } else {
-            self.side_panel = None;
-            self.inspector_error = None;
-            // When detection previously succeeded and now fails, it's almost
-            // always because the user just overwrote part of the magic or
-            // header. Surfacing this makes it obvious why the panel suddenly
-            // went blank.
-            if let Some(prev_format) = previous_format {
-                self.set_warning_status(format!(
-                    "format lost: {} header/magic no longer matches",
-                    prev_format
-                ));
-                if matches!(self.mode, Mode::InspectorEdit | Mode::Inspector) {
-                    self.mode = Mode::Normal;
-                }
-            }
-        }
+        let surface_feedback =
+            self.show_side_panel && self.active_side_panel == SidePanelKind::Inspector;
+        self.rebuild_inspector_state(surface_feedback);
     }
 
     pub(crate) fn inspector_empty_panel_message(&self) -> String {
@@ -320,7 +335,10 @@ impl App {
 
     /// Sync inspector selection to the current hex cursor when hex has focus.
     pub(crate) fn sync_inspector_to_cursor(&mut self) {
-        if self.mode.is_inspector() {
+        if matches!(self.mode, Mode::InspectorEdit)
+            || (matches!(self.mode, Mode::SidePanel)
+                && self.active_side_panel == SidePanelKind::Inspector)
+        {
             return;
         }
         let cursor = self.cursor;
@@ -363,8 +381,8 @@ impl App {
 
     /// Ensure the selected inspector row stays within the visible panel window.
     pub(crate) fn ensure_inspector_selection_visible(&mut self) {
-        let visible_rows = self.inspector_visible_rows();
-        let width = self.current_inspector_width();
+        let visible_rows = self.side_panel_visible_rows();
+        let width = self.current_side_panel_width();
         let rendered = self.inspector_rendered_lines(width);
         let Some(inspector) = self.inspector_mut() else {
             return;
@@ -387,8 +405,8 @@ impl App {
     }
 
     pub(crate) fn scroll_inspector(&mut self, rows: i64) {
-        let visible_rows = self.inspector_visible_rows();
-        let width = self.current_inspector_width();
+        let visible_rows = self.side_panel_visible_rows();
+        let width = self.current_side_panel_width();
         let rendered_len = self.inspector_rendered_lines(width).len();
         let Some(inspector) = self.inspector_mut() else {
             return;
@@ -503,7 +521,7 @@ impl App {
             self.invalidate_disassembly_cache();
         }
         self.refresh_inspector();
-        self.mode = Mode::Inspector;
+        self.mode = Mode::SidePanel;
         self.sync_cursor_to_inspector();
         if !ops.is_empty() {
             self.push_undo_step(ops, cursor_before, mode_before, self.cursor, self.mode);

@@ -223,7 +223,7 @@ impl App {
             | Mode::Normal
             | Mode::Visual
             | Mode::Command
-            | Mode::Inspector
+            | Mode::SidePanel
             | Mode::InspectorEdit
             | Mode::DisasmEdit => Ok(()),
         }

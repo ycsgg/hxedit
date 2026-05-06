@@ -1,4 +1,4 @@
-use crate::app::{App, StatusLevel};
+use crate::app::{App, SidePanelKind, StatusLevel};
 use crate::mode::Mode;
 
 impl App {
@@ -15,7 +15,7 @@ impl App {
             Mode::EditHex { .. }
             | Mode::InsertHex { .. }
             | Mode::Command
-            | Mode::Inspector
+            | Mode::SidePanel
             | Mode::InspectorEdit
             | Mode::DisasmEdit => {}
         }
@@ -42,7 +42,7 @@ impl App {
                 self.commit_pending_insert();
                 self.mode = Mode::Normal;
             }
-            Mode::Inspector => {
+            Mode::SidePanel => {
                 if let Some(inspector) = self.inspector_mut() {
                     inspector.editing = None;
                 }
@@ -52,7 +52,7 @@ impl App {
                 if let Some(inspector) = self.inspector_mut() {
                     inspector.editing = None;
                 }
-                self.mode = Mode::Inspector;
+                self.mode = Mode::SidePanel;
             }
             Mode::DisasmEdit => {
                 self.cancel_disasm_edit();
@@ -65,8 +65,8 @@ impl App {
 
     pub(crate) fn normalize_mode(&self, mode: Mode) -> Mode {
         match mode {
-            Mode::Inspector | Mode::InspectorEdit
-                if !self.show_inspector || !self.inspector_panel_visible() =>
+            Mode::SidePanel | Mode::InspectorEdit
+                if !self.show_side_panel || !self.side_panel_layout_visible() =>
             {
                 Mode::Normal
             }
@@ -76,7 +76,10 @@ impl App {
                     .and_then(|inspector| inspector.editing.as_ref())
                     .is_none() =>
             {
-                Mode::Inspector
+                Mode::SidePanel
+            }
+            Mode::InspectorEdit if self.active_side_panel != SidePanelKind::Inspector => {
+                Mode::SidePanel
             }
             Mode::DisasmEdit if self.disasm_edit().is_none() => Mode::Normal,
             other => other,
@@ -84,10 +87,11 @@ impl App {
     }
 
     fn inspector_selection_is_active(&self) -> bool {
-        self.mode.is_inspector()
-            || self
-                .command_return_mode
-                .is_some_and(|mode| mode.is_inspector())
+        self.active_side_panel == SidePanelKind::Inspector
+            && (self.mode.is_side_panel()
+                || self
+                    .command_return_mode
+                    .is_some_and(|mode| mode.is_side_panel()))
     }
 
     pub(crate) fn selection_range(&self) -> Option<(u64, u64)> {

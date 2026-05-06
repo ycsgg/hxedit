@@ -34,29 +34,29 @@ pub enum Action {
     ForceQuit,
     Redo(usize),
 
-    // ── Inspector actions ──
-    /// Toggle inspector panel visibility / focus.
-    ToggleInspector,
-    /// Inspector mode: select previous field.
-    InspectorUp,
-    /// Inspector mode: select next field.
-    InspectorDown,
-    /// Inspector mode: begin editing / submit edit.
-    InspectorEnter,
-    /// Inspector editing: input character.
-    InspectorChar(char),
-    /// Inspector editing: backspace.
-    InspectorBackspace,
-    /// Inspector editing: move cursor left.
-    InspectorLeft,
-    /// Inspector editing: move cursor right.
-    InspectorRight,
-    /// Inspector editing: move cursor to buffer start.
-    InspectorHome,
-    /// Inspector editing: move cursor to buffer end.
-    InspectorEnd,
-    /// Inspector editing: delete character at cursor.
-    InspectorDelete,
-    /// Inspector mode: toggle collapse/expand of current struct header.
-    InspectorToggleCollapse,
+    // ── Side panel actions ──
+    /// Toggle side panel visibility / focus.
+    ToggleSidePanel,
+    /// Side panel mode: select previous row/item.
+    SidePanelUp,
+    /// Side panel mode: select next row/item.
+    SidePanelDown,
+    /// Side panel mode: activate the selected row/item or submit an edit.
+    SidePanelEnter,
+    /// Side panel editing: input character.
+    SidePanelChar(char),
+    /// Side panel editing: backspace.
+    SidePanelBackspace,
+    /// Side panel editing: move cursor left.
+    SidePanelLeft,
+    /// Side panel editing: move cursor right.
+    SidePanelRight,
+    /// Side panel editing: move cursor to buffer start.
+    SidePanelHome,
+    /// Side panel editing: move cursor to buffer end.
+    SidePanelEnd,
+    /// Side panel editing: delete character at cursor.
+    SidePanelDelete,
+    /// Inspector page: toggle collapse/expand of current struct header.
+    SidePanelToggleCollapse,
 }

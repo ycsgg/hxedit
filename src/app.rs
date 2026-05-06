@@ -54,13 +54,12 @@ pub(crate) enum MainView {
     Disassembly(DisassemblyState),
 }
 
-/// Side panel content: either inspector (format info) or symbol list.
-#[derive(Debug)]
-pub(crate) enum SidePanel {
-    Inspector(InspectorState),
-    #[cfg_attr(not(feature = "symbols"), allow(dead_code))]
-    Symbol(SymbolState),
-    Data(DataState),
+/// Which side panel page is currently selected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SidePanelKind {
+    Inspector,
+    Symbol,
+    Data,
 }
 
 /// Data inspector state for cursor-relative primitive decoding.
@@ -113,16 +112,22 @@ pub struct App {
     disasm_backend: Option<Box<dyn crate::disasm::backend::DisassemblerBackend>>,
     disasm_edit: Option<DisasmEdit>,
     // ── Side panel state ──
-    /// Whether the side panel (inspector or symbols) is shown.
-    show_inspector: bool,
+    /// Whether the side panel is currently shown.
+    show_side_panel: bool,
+    /// Which side panel page should render when the panel is visible.
+    active_side_panel: SidePanelKind,
     /// Manual format override for the inspector, e.g. `elf`.
     inspector_format_override: Option<String>,
     /// Per-format entry cap for pagination-aware parsers (ELF / PNG / ZIP / GIF / WAV).
     /// Starts at `DEFAULT_ENTRY_CAP` and grows by `ENTRY_CAP_BATCH` on each
     /// `:insp more` until all entries are loaded.
     inspector_entry_cap: usize,
-    /// Side panel content: inspector or symbol list.
-    side_panel: Option<SidePanel>,
+    /// Cached inspector state for the inspector page.
+    inspector_state: Option<InspectorState>,
+    /// Cached symbol side panel state.
+    symbol_state: Option<SymbolState>,
+    /// Cached cursor-relative data panel state.
+    data_state: Option<DataState>,
     /// Distinguishes “no detected format” from “detected but failed to parse”.
     inspector_error: Option<String>,
     /// Last non-fatal render read error already surfaced to stderr.
@@ -150,7 +155,7 @@ pub(crate) struct InspectorState {
     pub collapsed_nodes: BTreeSet<NodePath>,
 }
 
-/// Edit state for a field in the inspector panel.
+/// Edit state for a field in the inspector page.
 #[derive(Debug, Clone)]
 pub(crate) struct InspectorEdit {
     /// Index of the InspectorRow being edited.
@@ -384,7 +389,7 @@ impl App {
         };
         let after_init = Instant::now();
 
-        let show_inspector = config.inspector;
+        let show_side_panel = config.inspector;
         let mut app = Self {
             palette: Palette::new(config.color_level),
             viewport_top: align_offset(cursor, config.bytes_per_line),
@@ -431,15 +436,18 @@ impl App {
             document,
             cursor,
             config,
-            show_inspector,
+            show_side_panel,
+            active_side_panel: SidePanelKind::Inspector,
             inspector_format_override: None,
             inspector_entry_cap: crate::format::detect::DEFAULT_ENTRY_CAP,
-            side_panel: None,
+            inspector_state: None,
+            symbol_state: None,
+            data_state: None,
             inspector_error: None,
             last_render_error: None,
         };
 
-        if app.show_inspector {
+        if app.show_side_panel {
             app.refresh_inspector();
         }
         app.sync_inspector_to_cursor();

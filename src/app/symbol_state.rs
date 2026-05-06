@@ -1,6 +1,8 @@
-use crate::app::{App, SidePanel, SymbolState};
+use crate::app::SidePanelKind;
+use crate::app::{App, SymbolState};
 use crate::error::HxResult;
 use crate::executable::{SymbolSource, SymbolType};
+use crate::mode::Mode;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SymbolPanelEntry {
@@ -46,17 +48,17 @@ impl SymbolState {
 
 impl App {
     pub(crate) fn symbol_state(&self) -> Option<&SymbolState> {
-        match &self.side_panel {
-            Some(SidePanel::Symbol(state)) => Some(state),
-            _ => None,
-        }
+        self.symbol_state.as_ref()
     }
 
     pub(crate) fn symbol_state_mut(&mut self) -> Option<&mut SymbolState> {
-        match &mut self.side_panel {
-            Some(SidePanel::Symbol(state)) => Some(state),
-            _ => None,
-        }
+        self.symbol_state.as_mut()
+    }
+
+    pub(crate) fn focus_symbol_panel(&mut self) {
+        self.active_side_panel = SidePanelKind::Symbol;
+        self.mode = Mode::SidePanel;
+        self.ensure_symbol_selection_visible();
     }
 
     pub(crate) fn move_symbol_selection(&mut self, delta: i64) {
@@ -81,13 +83,13 @@ impl App {
     }
 
     pub(crate) fn ensure_symbol_selection_visible(&mut self) {
-        let (selected_row, scroll_offset) = match &self.side_panel {
-            Some(SidePanel::Symbol(state)) => (state.selected_row, state.scroll_offset),
-            _ => return,
+        let (selected_row, scroll_offset) = match self.symbol_state() {
+            Some(state) => (state.selected_row, state.scroll_offset),
+            None => return,
         };
         let visible_rows = self.symbol_list_visible_rows();
 
-        if let Some(SidePanel::Symbol(state)) = &mut self.side_panel {
+        if let Some(state) = self.symbol_state_mut() {
             if selected_row < scroll_offset {
                 state.scroll_offset = selected_row;
             } else if selected_row >= scroll_offset + visible_rows {
@@ -152,10 +154,7 @@ impl App {
     /// Enter key navigates to the selected symbol's location.
     pub(crate) fn navigate_to_selected_symbol(&mut self) -> HxResult<()> {
         // Extract necessary data first to avoid borrowing issues
-        let info = match &self.side_panel {
-            Some(SidePanel::Symbol(state)) => Some(state.info.clone()),
-            _ => None,
-        };
+        let info = self.symbol_state().map(|state| state.info.clone());
         let selected_row = self.symbol_state().map(|s| s.selected_row);
 
         let (Some(info), Some(selected_row)) = (info, selected_row) else {

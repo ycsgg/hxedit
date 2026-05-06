@@ -79,19 +79,18 @@ fn app_with_inspector_field(bytes: &[u8], offset: u64, size: usize) -> App {
     }];
     let collapsed_nodes = std::collections::BTreeSet::new();
     let rows = crate::format::parse::flatten(&structs, &collapsed_nodes);
-    app.show_inspector = true;
-    app.side_panel = Some(crate::app::SidePanel::Inspector(
-        crate::app::InspectorState {
-            format_name: "TEST".to_owned(),
-            structs,
-            rows,
-            scroll_offset: 0,
-            selected_row: 1,
-            editing: None,
-            collapsed_nodes,
-        },
-    ));
-    app.mode = Mode::Inspector;
+    app.show_side_panel = true;
+    app.active_side_panel = crate::app::SidePanelKind::Inspector;
+    app.inspector_state = Some(crate::app::InspectorState {
+        format_name: "TEST".to_owned(),
+        structs,
+        rows,
+        scroll_offset: 0,
+        selected_row: 1,
+        editing: None,
+        collapsed_nodes,
+    });
+    app.mode = Mode::SidePanel;
     app.cursor = offset;
     app
 }
@@ -498,7 +497,7 @@ fn inspector_sync_and_pagination() {
 
     // More detects nested ELF pagination markers
     let mut app2 = app_with_bytes(&build_paginated_elf64(70));
-    app2.show_inspector = true;
+    app2.show_side_panel = true;
     app2.inspector_format_override = Some("elf".to_owned());
     app2.inspector_entry_cap = 1;
     app2.refresh_inspector();
@@ -624,10 +623,8 @@ fn visual_mode_selection_and_delete() {
 fn data_panel_syncs_cursor_and_mouse_selection() {
     let mut app = app_with_bytes(b"A\xce\xbb\x34\x12\x00\x00\x00");
     app.execute_command(Command::Data).unwrap();
-    assert!(matches!(
-        app.side_panel,
-        Some(crate::app::SidePanel::Data(_))
-    ));
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Data);
+    assert!(app.data_state().is_some());
     assert_eq!(app.data_state().unwrap().base_offset, 0);
 
     app.move_horizontal(1);
@@ -642,8 +639,8 @@ fn data_panel_syncs_cursor_and_mouse_selection() {
         hex: ratatui::layout::Rect::new(9, 0, 20, 8),
         sep2: ratatui::layout::Rect::new(29, 0, 1, 8),
         ascii: ratatui::layout::Rect::new(30, 0, 20, 8),
-        sep3: Some(ratatui::layout::Rect::new(50, 0, 1, 8)),
-        inspector: Some(ratatui::layout::Rect::new(51, 0, 40, 8)),
+        side_panel_sep: Some(ratatui::layout::Rect::new(50, 0, 1, 8)),
+        side_panel: Some(ratatui::layout::Rect::new(51, 0, 40, 8)),
     });
     app.handle_mouse(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -729,7 +726,7 @@ fn search_repeat_works_while_side_panel_has_focus() {
     app.execute_command(Command::Disassemble { arch: None })
         .unwrap();
     app.execute_command(Command::Symbols).unwrap();
-    assert_eq!(app.mode, Mode::Inspector);
+    assert_eq!(app.mode, Mode::SidePanel);
 
     app.execute_command(Command::SearchSymbol {
         pattern: "entry".to_owned(),
@@ -1167,28 +1164,49 @@ fn symbol_panel_toggle_restores_symbol_page() {
         .unwrap();
     app.execute_command(Command::Symbols).unwrap();
 
-    assert!(matches!(
-        app.side_panel,
-        Some(crate::app::SidePanel::Symbol(_))
-    ));
-    assert!(app.show_inspector);
-    assert_eq!(app.mode, Mode::Inspector);
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Symbol);
+    assert!(app.symbol_state().is_some());
+    assert!(app.show_side_panel);
+    assert_eq!(app.mode, Mode::SidePanel);
 
-    app.handle_action(Action::ToggleInspector);
-    assert!(!app.show_inspector);
-    assert!(matches!(
-        app.side_panel,
-        Some(crate::app::SidePanel::Symbol(_))
-    ));
+    app.handle_action(Action::ToggleSidePanel);
+    assert!(!app.show_side_panel);
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Symbol);
+    assert!(app.symbol_state().is_some());
     assert_eq!(app.mode, Mode::Normal);
 
-    app.handle_action(Action::ToggleInspector);
-    assert!(app.show_inspector);
-    assert!(matches!(
-        app.side_panel,
-        Some(crate::app::SidePanel::Symbol(_))
-    ));
-    assert_eq!(app.mode, Mode::Inspector);
+    app.handle_action(Action::ToggleSidePanel);
+    assert!(app.show_side_panel);
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Symbol);
+    assert!(app.symbol_state().is_some());
+    assert_eq!(app.mode, Mode::SidePanel);
+}
+
+#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[test]
+fn hex_edit_does_not_replace_symbol_panel_with_inspector() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0xc3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.execute_command(Command::Symbols).unwrap();
+
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Symbol);
+    assert!(app.symbol_state().is_some());
+
+    app.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app.cursor = 0x100;
+    app.edit_nibble(0xC).unwrap();
+
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Symbol);
+    assert!(app.symbol_state().is_some());
+    assert!(app.show_side_panel);
+
+    app.execute_command(Command::SymbolsOff).unwrap();
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Inspector);
+    assert!(app.inspector().is_some() || app.inspector_error.is_some());
 }
 
 #[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
@@ -1235,8 +1253,8 @@ fn symbol_panel_scrolls_and_mouse_click_navigates() {
         hex: ratatui::layout::Rect::new(9, 0, 20, 8),
         sep2: ratatui::layout::Rect::new(29, 0, 1, 8),
         ascii: ratatui::layout::Rect::new(30, 0, 20, 8),
-        sep3: Some(ratatui::layout::Rect::new(50, 0, 1, 8)),
-        inspector: Some(ratatui::layout::Rect::new(51, 0, 40, 8)),
+        side_panel_sep: Some(ratatui::layout::Rect::new(50, 0, 1, 8)),
+        side_panel: Some(ratatui::layout::Rect::new(51, 0, 40, 8)),
     });
     app.handle_mouse(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),

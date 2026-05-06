@@ -64,7 +64,7 @@ pub struct FieldDef {
     pub field_type: FieldType,
     /// Human-readable description shown in tooltip / status bar.
     pub description: String,
-    /// Whether this field can be edited via the inspector panel.
+    /// Whether this field can be edited via the inspector page.
     /// Magic bytes etc. are typically set to false.
     pub editable: bool,
 }

@@ -1,6 +1,6 @@
 use crate::app::{App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState};
 #[cfg(feature = "symbols")]
-use crate::app::{SidePanel, SymbolState};
+use crate::app::{SidePanelKind, SymbolState};
 use crate::commands::parser::parse_command;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 #[cfg(feature = "disasm")]
@@ -483,25 +483,28 @@ impl App {
     }
 
     fn execute_inspector_command(&mut self) {
-        let from_inspector = self
-            .command_return_mode
-            .is_some_and(|mode| mode.is_inspector());
-        if !self.show_inspector {
-            self.show_inspector = true;
-            self.refresh_inspector();
-            self.focus_inspector_or_warn();
+        let from_inspector = self.active_side_panel == SidePanelKind::Inspector
+            && self
+                .command_return_mode
+                .is_some_and(|mode| mode.is_side_panel());
+        if !self.show_side_panel || self.active_side_panel != SidePanelKind::Inspector {
+            self.show_side_panel = true;
+            self.ensure_inspector_page_state(true);
+            self.focus_inspector_page_or_warn();
         } else if !from_inspector {
-            self.focus_inspector_or_warn();
+            self.ensure_inspector_page_state(true);
+            self.focus_inspector_page_or_warn();
         } else {
             self.mode = Mode::Normal;
-            self.show_inspector = false;
-            self.side_panel = None;
-            self.inspector_error = None;
+            self.show_side_panel = false;
         }
     }
 
     fn execute_inspector_more_command(&mut self) {
-        if !self.show_inspector || self.inspector().is_none() {
+        if !self.show_side_panel
+            || self.active_side_panel != SidePanelKind::Inspector
+            || self.inspector().is_none()
+        {
             self.set_warning_status("inspector not active; run `:insp` first");
             return;
         }
@@ -525,7 +528,8 @@ impl App {
     }
 
     fn execute_format_command(&mut self, name: Option<String>) {
-        self.show_inspector = true;
+        self.show_side_panel = true;
+        self.activate_inspector_page();
         // Reset pagination on explicit format switches so a leftover high cap
         // from a previous format doesn't silently over-parse the new one.
         self.inspector_entry_cap = crate::format::detect::DEFAULT_ENTRY_CAP;
@@ -533,8 +537,10 @@ impl App {
             Some(name) => self.execute_named_format_command(name),
             None => {
                 self.inspector_format_override = None;
+                self.inspector_state = None;
+                self.inspector_error = None;
                 self.refresh_inspector();
-                if self.focus_inspector_or_warn() {
+                if self.focus_inspector_page_or_warn() {
                     self.set_info_status("format: auto");
                 }
             }
@@ -544,8 +550,11 @@ impl App {
     fn execute_named_format_command(&mut self, name: String) {
         if crate::format::detect::detect_by_name(&name, &mut self.document).is_some() {
             self.inspector_format_override = Some(name.to_lowercase());
+            self.inspector_state = None;
+            self.inspector_error = None;
+            self.activate_inspector_page();
             self.refresh_inspector();
-            if self.focus_inspector_or_warn() {
+            if self.focus_inspector_page_or_warn() {
                 self.set_info_status(format!("format: {}", name));
             }
         } else {
@@ -725,28 +734,35 @@ impl App {
 
         // Create symbol panel state
         let count = info.symbols_by_va.len() + info.target_names_by_va.len();
-        self.side_panel = Some(SidePanel::Symbol(SymbolState {
+        self.symbol_state = Some(SymbolState {
             info,
             scroll_offset: 0,
             selected_row: 0,
             detail_scroll_offset: 0,
-        }));
-        self.show_inspector = true;
-        self.mode = Mode::Inspector;
+        });
+        self.show_side_panel = true;
+        self.focus_symbol_panel();
         self.set_info_status(format!("symbol view ({count} symbols)"));
         Ok(())
     }
 
     #[cfg(feature = "symbols")]
     fn execute_symbols_off_command(&mut self) {
+        self.symbol_state = None;
         // Try to restore inspector
-        self.refresh_inspector();
-        if matches!(self.side_panel, Some(SidePanel::Inspector(_))) {
+        self.ensure_inspector_page_state(false);
+        if self.inspector().is_some() || self.inspector_error.is_some() {
+            self.show_side_panel = true;
+            if self.mode.is_side_panel() {
+                self.mode = Mode::SidePanel;
+            }
             self.set_info_status("symbol view off");
         } else {
             // No format to display, close panel
-            self.side_panel = None;
-            self.show_inspector = false;
+            self.show_side_panel = false;
+            if self.mode.is_side_panel() {
+                self.mode = Mode::Normal;
+            }
             self.set_info_status("symbol view off (no format detected)");
         }
     }

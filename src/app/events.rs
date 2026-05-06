@@ -3,7 +3,7 @@ use crate::app::text_cursor::{
     backspace_char_before_cursor, delete_char_at_cursor, insert_char_at_cursor, move_cursor_end,
     move_cursor_home, move_cursor_left, move_cursor_right,
 };
-use crate::app::App;
+use crate::app::{App, SidePanelKind};
 use crate::error::{HxError, HxResult};
 use crate::format::parse::InspectorRow;
 use crate::mode::Mode;
@@ -24,7 +24,7 @@ impl App {
         if self.handle_command_action(action)? {
             return Ok(());
         }
-        if self.handle_inspector_action(action)? {
+        if self.handle_side_panel_action(action)? {
             return Ok(());
         }
         self.handle_editor_action(action)
@@ -49,28 +49,22 @@ impl App {
                 true
             }
             Action::PageUp => {
-                if self.mode.is_inspector()
-                    && matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_)))
-                {
+                if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Symbol {
                     self.move_symbol_selection(-(self.symbol_list_visible_rows() as i64));
-                } else if self.mode.is_inspector()
-                    && matches!(self.side_panel, Some(crate::app::SidePanel::Data(_)))
+                } else if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Data
                 {
-                    self.scroll_data_panel(-(self.inspector_visible_rows() as i64));
+                    self.scroll_data_panel(-(self.side_panel_visible_rows() as i64));
                 } else {
                     self.move_vertical(-(self.view_rows as i64));
                 }
                 true
             }
             Action::PageDown => {
-                if self.mode.is_inspector()
-                    && matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_)))
-                {
+                if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Symbol {
                     self.move_symbol_selection(self.symbol_list_visible_rows() as i64);
-                } else if self.mode.is_inspector()
-                    && matches!(self.side_panel, Some(crate::app::SidePanel::Data(_)))
+                } else if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Data
                 {
-                    self.scroll_data_panel(self.inspector_visible_rows() as i64);
+                    self.scroll_data_panel(self.side_panel_visible_rows() as i64);
                 } else {
                     self.move_vertical(self.view_rows as i64);
                 }
@@ -116,8 +110,8 @@ impl App {
                 self.should_quit = true;
                 Ok(())
             }
-            Action::ToggleInspector => {
-                self.toggle_inspector_mode();
+            Action::ToggleSidePanel => {
+                self.toggle_side_panel();
                 Ok(())
             }
             _ => Ok(()),
@@ -216,37 +210,34 @@ impl App {
         }
     }
 
-    fn handle_inspector_action(&mut self, action: Action) -> HxResult<bool> {
+    fn handle_side_panel_action(&mut self, action: Action) -> HxResult<bool> {
         match action {
-            Action::InspectorUp => {
-                // Check if we're in symbol panel
-                if matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_))) {
-                    self.move_symbol_selection(-1);
-                } else {
-                    self.move_inspector_selection(true);
+            Action::SidePanelUp => {
+                match self.active_side_panel {
+                    SidePanelKind::Inspector => self.move_inspector_selection(true),
+                    SidePanelKind::Symbol => self.move_symbol_selection(-1),
+                    SidePanelKind::Data => self.move_data_panel_selection(-1),
                 }
                 Ok(true)
             }
-            Action::InspectorDown => {
-                // Check if we're in symbol panel
-                if matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_))) {
-                    self.move_symbol_selection(1);
-                } else {
-                    self.move_inspector_selection(false);
+            Action::SidePanelDown => {
+                match self.active_side_panel {
+                    SidePanelKind::Inspector => self.move_inspector_selection(false),
+                    SidePanelKind::Symbol => self.move_symbol_selection(1),
+                    SidePanelKind::Data => self.move_data_panel_selection(1),
                 }
                 Ok(true)
             }
-            Action::InspectorEnter => {
-                // Check if we're in symbol panel
-                if matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_))) {
-                    self.navigate_to_selected_symbol()?;
-                } else {
-                    self.handle_inspector_enter()?;
+            Action::SidePanelEnter => {
+                match self.active_side_panel {
+                    SidePanelKind::Inspector => self.handle_inspector_enter()?,
+                    SidePanelKind::Symbol => self.navigate_to_selected_symbol()?,
+                    SidePanelKind::Data => self.move_data_panel_selection(0),
                 }
                 Ok(true)
             }
-            Action::InspectorToggleCollapse => {
-                if matches!(self.side_panel, Some(crate::app::SidePanel::Symbol(_))) {
+            Action::SidePanelToggleCollapse => {
+                if self.active_side_panel != SidePanelKind::Inspector {
                     return Ok(true);
                 }
                 // While a field is being edited the space key should reach the
@@ -261,32 +252,48 @@ impl App {
                 }
                 Ok(true)
             }
-            Action::InspectorChar(c) => {
-                self.insert_inspector_char(c);
+            Action::SidePanelChar(c) => {
+                if self.active_side_panel == SidePanelKind::Inspector {
+                    self.insert_inspector_char(c);
+                } else if c == 't' {
+                    self.toggle_side_panel();
+                }
                 Ok(true)
             }
-            Action::InspectorBackspace => {
-                self.backspace_inspector_char();
+            Action::SidePanelBackspace => {
+                if self.active_side_panel == SidePanelKind::Inspector {
+                    self.backspace_inspector_char();
+                }
                 Ok(true)
             }
-            Action::InspectorLeft => {
-                self.move_inspector_cursor(true);
+            Action::SidePanelLeft => {
+                if self.active_side_panel == SidePanelKind::Inspector {
+                    self.move_inspector_cursor(true);
+                }
                 Ok(true)
             }
-            Action::InspectorRight => {
-                self.move_inspector_cursor(false);
+            Action::SidePanelRight => {
+                if self.active_side_panel == SidePanelKind::Inspector {
+                    self.move_inspector_cursor(false);
+                }
                 Ok(true)
             }
-            Action::InspectorHome => {
-                self.set_inspector_cursor(true);
+            Action::SidePanelHome => {
+                if self.active_side_panel == SidePanelKind::Inspector {
+                    self.set_inspector_cursor(true);
+                }
                 Ok(true)
             }
-            Action::InspectorEnd => {
-                self.set_inspector_cursor(false);
+            Action::SidePanelEnd => {
+                if self.active_side_panel == SidePanelKind::Inspector {
+                    self.set_inspector_cursor(false);
+                }
                 Ok(true)
             }
-            Action::InspectorDelete => {
-                self.delete_inspector_char();
+            Action::SidePanelDelete => {
+                if self.active_side_panel == SidePanelKind::Inspector {
+                    self.delete_inspector_char();
+                }
                 Ok(true)
             }
             _ => Ok(false),
@@ -369,6 +376,9 @@ impl App {
     }
 
     fn move_inspector_selection(&mut self, upward: bool) {
+        if self.active_side_panel != SidePanelKind::Inspector {
+            return;
+        }
         let Some(inspector) = self.inspector_mut() else {
             return;
         };
@@ -455,7 +465,7 @@ impl App {
             if let Some(edit) = inspector.editing.as_mut() {
                 insert_char_at_cursor(&mut edit.buffer, &mut edit.cursor_pos, c);
             } else if c == 't' {
-                self.toggle_inspector_mode();
+                self.toggle_side_panel();
             }
         }
     }
@@ -571,19 +581,18 @@ mod tests {
         }];
         let collapsed_nodes = std::collections::BTreeSet::new();
         let rows = crate::format::parse::flatten(&structs, &collapsed_nodes);
-        app.show_inspector = true;
-        app.side_panel = Some(crate::app::SidePanel::Inspector(
-            crate::app::InspectorState {
-                format_name: format_name.to_owned(),
-                structs,
-                rows,
-                scroll_offset: 0,
-                selected_row: 1,
-                editing: None,
-                collapsed_nodes,
-            },
-        ));
-        app.mode = Mode::Inspector;
+        app.show_side_panel = true;
+        app.active_side_panel = crate::app::SidePanelKind::Inspector;
+        app.inspector_state = Some(crate::app::InspectorState {
+            format_name: format_name.to_owned(),
+            structs,
+            rows,
+            scroll_offset: 0,
+            selected_row: 1,
+            editing: None,
+            collapsed_nodes,
+        });
+        app.mode = Mode::SidePanel;
         app
     }
 
@@ -639,7 +648,7 @@ mod tests {
     #[test]
     fn inspector_enter_escape_and_format_warnings() {
         let mut app = app_with_inspector_field();
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert!(app
             .inspector()
@@ -647,7 +656,7 @@ mod tests {
             .is_some());
 
         app.handle_action(Action::LeaveMode);
-        assert_eq!(app.mode, Mode::Inspector);
+        assert_eq!(app.mode, Mode::SidePanel);
         assert!(app
             .inspector()
             .and_then(|inspector| inspector.editing.as_ref())
@@ -655,23 +664,23 @@ mod tests {
 
         // PNG format warning
         let mut app_png = app_with_inspector_field_for("PNG");
-        app_png.handle_action(Action::InspectorEnter);
+        app_png.handle_action(Action::SidePanelEnter);
         assert_eq!(app_png.status_level, crate::app::StatusLevel::Warning);
         assert!(app_png.status_message.contains("PNG inspector edits"));
 
         // GZIP format warning
         let mut app_gz = app_with_inspector_field_for("GZIP");
-        app_gz.handle_action(Action::InspectorEnter);
+        app_gz.handle_action(Action::SidePanelEnter);
         assert!(app_gz.status_message.contains("GZIP inspector edits"));
 
         // TAR format warning
         let mut app_tar = app_with_inspector_field_for("TAR");
-        app_tar.handle_action(Action::InspectorEnter);
+        app_tar.handle_action(Action::SidePanelEnter);
         assert!(app_tar.status_message.contains("TAR inspector edits"));
 
         // JPEG format warning
         let mut app_jpg = app_with_inspector_field_for("JPEG");
-        app_jpg.handle_action(Action::InspectorEnter);
+        app_jpg.handle_action(Action::SidePanelEnter);
         assert!(app_jpg.status_message.contains("JPEG inspector edits"));
     }
 
@@ -679,7 +688,7 @@ mod tests {
     fn inspector_warns_when_editing_png_field() {
         let mut app = app_with_inspector_field_for("PNG");
 
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
 
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
@@ -690,7 +699,7 @@ mod tests {
     fn inspector_warns_when_editing_gzip_field() {
         let mut app = app_with_inspector_field_for("GZIP");
 
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
 
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
@@ -701,7 +710,7 @@ mod tests {
     fn inspector_warns_when_editing_gif_field() {
         let mut app = app_with_inspector_field_for("GIF");
 
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
 
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
@@ -712,7 +721,7 @@ mod tests {
     fn inspector_warns_when_editing_bmp_field() {
         let mut app = app_with_inspector_field_for("BMP");
 
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
 
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
@@ -723,7 +732,7 @@ mod tests {
     fn inspector_warns_when_editing_wav_field() {
         let mut app = app_with_inspector_field_for("WAV");
 
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
 
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
@@ -734,7 +743,7 @@ mod tests {
     fn inspector_warns_when_editing_tar_field() {
         let mut app = app_with_inspector_field_for("TAR");
 
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
 
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
@@ -745,7 +754,7 @@ mod tests {
     fn inspector_warns_when_editing_jpeg_field() {
         let mut app = app_with_inspector_field_for("JPEG");
 
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
 
         assert_eq!(app.mode, Mode::InspectorEdit);
         assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
@@ -762,10 +771,10 @@ mod tests {
             hex: Rect::new(5, 0, 20, 4),
             sep2: Rect::new(25, 0, 1, 4),
             ascii: Rect::new(26, 0, 10, 4),
-            sep3: None,
-            inspector: None,
+            side_panel_sep: None,
+            side_panel: None,
         });
-        app.ensure_inspector_mode_visible();
+        app.ensure_side_panel_focus_visible();
         assert_eq!(app.mode, Mode::Normal);
         assert!(app.status_message.contains("too narrow"));
 
@@ -773,9 +782,9 @@ mod tests {
         let mut app2 = app_with_inspector_field();
         app2.mode = Mode::Normal;
         app2.last_columns = app.last_columns;
-        app2.handle_action(Action::ToggleInspector);
+        app2.handle_action(Action::ToggleSidePanel);
         assert_eq!(app2.mode, Mode::Normal);
-        assert!(app2.show_inspector);
+        assert!(app2.show_side_panel);
         assert!(app2.status_message.contains("too narrow"));
 
         // Entering inspector succeeds when width is sufficient
@@ -788,18 +797,18 @@ mod tests {
             hex: Rect::new(9, 0, 90, 4),
             sep2: Rect::new(99, 0, 1, 4),
             ascii: Rect::new(100, 0, 40, 4),
-            sep3: None,
-            inspector: None,
+            side_panel_sep: None,
+            side_panel: None,
         });
-        app3.handle_action(Action::ToggleInspector);
-        assert_eq!(app3.mode, Mode::Inspector);
+        app3.handle_action(Action::ToggleSidePanel);
+        assert_eq!(app3.mode, Mode::SidePanel);
         assert!(!app3.status_message.contains("too narrow"));
 
         // No detected format stays in normal with hint
         let mut app4 = app_with_len(8);
         app4.mode = Mode::Normal;
         app4.last_columns = app3.last_columns;
-        app4.handle_action(Action::ToggleInspector);
+        app4.handle_action(Action::ToggleSidePanel);
         assert_eq!(app4.mode, Mode::Normal);
         assert!(app4.status_message.contains("no format detected"));
         assert!(app4
@@ -810,14 +819,14 @@ mod tests {
         let mut app5 = app_with_inspector_field_editable("TEST", false);
         app5.mode = Mode::Normal;
         app5.last_columns = app3.last_columns;
-        app5.handle_action(Action::ToggleInspector);
-        assert_eq!(app5.mode, Mode::Inspector);
+        app5.handle_action(Action::ToggleSidePanel);
+        assert_eq!(app5.mode, Mode::SidePanel);
         assert!(app5.status_message.contains("view-only"));
 
         // Enter on read-only field reports reason
         let mut app6 = app_with_inspector_field_editable("TEST", false);
-        app6.handle_action(Action::InspectorEnter);
-        assert_eq!(app6.mode, Mode::Inspector);
+        app6.handle_action(Action::SidePanelEnter);
+        assert_eq!(app6.mode, Mode::SidePanel);
         assert!(app6.status_message.contains("read-only"));
     }
 
@@ -832,14 +841,14 @@ mod tests {
             hex: Rect::new(9, 0, 90, 4),
             sep2: Rect::new(99, 0, 1, 4),
             ascii: Rect::new(100, 0, 40, 4),
-            sep3: None,
-            inspector: None,
+            side_panel_sep: None,
+            side_panel: None,
         });
 
-        app.handle_action(Action::ToggleInspector);
+        app.handle_action(Action::ToggleSidePanel);
 
         assert_eq!(app.mode, Mode::Normal);
-        assert!(app.show_inspector);
+        assert!(app.show_side_panel);
         assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
         assert!(app.status_message.contains("no format detected"));
         assert!(app
@@ -858,13 +867,13 @@ mod tests {
             hex: Rect::new(9, 0, 90, 4),
             sep2: Rect::new(99, 0, 1, 4),
             ascii: Rect::new(100, 0, 40, 4),
-            sep3: None,
-            inspector: None,
+            side_panel_sep: None,
+            side_panel: None,
         });
 
-        app.handle_action(Action::ToggleInspector);
+        app.handle_action(Action::ToggleSidePanel);
 
-        assert_eq!(app.mode, Mode::Inspector);
+        assert_eq!(app.mode, Mode::SidePanel);
         assert_eq!(app.status_level, crate::app::StatusLevel::Info);
         assert!(app.status_message.contains("view-only"));
     }
@@ -873,12 +882,49 @@ mod tests {
     fn inspector_enter_on_read_only_field_reports_reason() {
         let mut app = app_with_inspector_field_editable("TEST", false);
 
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
 
-        assert_eq!(app.mode, Mode::Inspector);
+        assert_eq!(app.mode, Mode::SidePanel);
         assert_eq!(app.status_level, crate::app::StatusLevel::Info);
         assert!(app.status_message.contains("read-only"));
         assert!(app.status_message.contains("entry"));
+    }
+
+    #[test]
+    fn data_panel_keys_do_not_fall_through_to_inspector_editing() {
+        let mut app = app_with_len(8);
+        app.execute_command(crate::commands::types::Command::Data)
+            .unwrap();
+
+        app.handle_action(Action::SidePanelChar('x'));
+        assert_eq!(app.mode, Mode::SidePanel);
+        assert!(app.inspector().is_none());
+
+        app.handle_action(Action::SidePanelEnter);
+        assert_eq!(app.mode, Mode::Visual);
+        assert!(app.selection_range().is_some());
+        assert_eq!(
+            app.data_state()
+                .and_then(|state| state.selected_label.as_deref()),
+            Some("binary")
+        );
+    }
+
+    #[test]
+    fn refocusing_inspector_page_keeps_existing_state_without_rebuild() {
+        let mut app = app_with_inspector_field();
+        if let Some(inspector) = app.inspector_mut() {
+            inspector.selected_row = 1;
+            inspector.scroll_offset = 3;
+        }
+        app.show_side_panel = false;
+        app.mode = Mode::Normal;
+        app.handle_action(Action::ToggleSidePanel);
+
+        let inspector = app.inspector().expect("inspector state preserved");
+        assert_eq!(app.mode, Mode::SidePanel);
+        assert_eq!(inspector.selected_row, 1);
+        assert_eq!(inspector.scroll_offset, 3);
     }
 
     #[test]
@@ -961,19 +1007,18 @@ mod tests {
         }];
         let collapsed_nodes = std::collections::BTreeSet::new();
         let rows = crate::format::parse::flatten(&structs, &collapsed_nodes);
-        app.show_inspector = true;
-        app.side_panel = Some(crate::app::SidePanel::Inspector(
-            crate::app::InspectorState {
-                format_name: "TEST".to_owned(),
-                structs,
-                rows,
-                scroll_offset: 0,
-                selected_row: 0,
-                editing: None,
-                collapsed_nodes,
-            },
-        ));
-        app.mode = Mode::Inspector;
+        app.show_side_panel = true;
+        app.active_side_panel = crate::app::SidePanelKind::Inspector;
+        app.inspector_state = Some(crate::app::InspectorState {
+            format_name: "TEST".to_owned(),
+            structs,
+            rows,
+            scroll_offset: 0,
+            selected_row: 0,
+            editing: None,
+            collapsed_nodes,
+        });
+        app.mode = Mode::SidePanel;
         app
     }
 
@@ -985,7 +1030,7 @@ mod tests {
         assert_eq!(app.inspector().unwrap().selected_row, 0); // Parent header
 
         // Collapse Parent — fields AND child go away.
-        app.handle_action(Action::InspectorToggleCollapse);
+        app.handle_action(Action::SidePanelToggleCollapse);
         assert_eq!(app.inspector().unwrap().rows.len(), 1);
         assert!(matches!(
             app.inspector().unwrap().rows[0],
@@ -1001,25 +1046,25 @@ mod tests {
             .contains(&vec![("Parent".to_owned(), 0)]));
 
         // Toggle twice restores original rows
-        app.handle_action(Action::InspectorToggleCollapse);
+        app.handle_action(Action::SidePanelToggleCollapse);
         assert_eq!(app.inspector().unwrap().rows.len(), 4);
         assert!(app.inspector().unwrap().collapsed_nodes.is_empty());
 
         // Header Enter toggles collapse when not editing
-        app.handle_action(Action::InspectorEnter);
+        app.handle_action(Action::SidePanelEnter);
         assert!(app
             .inspector()
             .unwrap()
             .collapsed_nodes
             .contains(&vec![("Parent".to_owned(), 0)]));
-        assert_eq!(app.mode, Mode::Inspector);
+        assert_eq!(app.mode, Mode::SidePanel);
 
         // Navigation stops on collapsible header
         let mut app2 = app_with_nested_inspector();
         assert_eq!(app2.inspector().unwrap().selected_row, 0);
-        app2.handle_action(Action::InspectorDown);
+        app2.handle_action(Action::SidePanelDown);
         assert_eq!(app2.inspector().unwrap().selected_row, 1);
-        app2.handle_action(Action::InspectorDown);
+        app2.handle_action(Action::SidePanelDown);
         assert_eq!(app2.inspector().unwrap().selected_row, 2);
         assert!(matches!(
             app2.inspector().unwrap().rows[2],
@@ -1028,13 +1073,13 @@ mod tests {
 
         // Space during edit inserts into buffer instead of toggling
         let mut app3 = app_with_inspector_field();
-        app3.handle_action(Action::InspectorEnter);
+        app3.handle_action(Action::SidePanelEnter);
         let before_buf = app3
             .inspector()
             .and_then(|i| i.editing.as_ref())
             .map(|e| e.buffer.clone())
             .unwrap();
-        app3.handle_action(Action::InspectorToggleCollapse);
+        app3.handle_action(Action::SidePanelToggleCollapse);
         let after = app3
             .inspector()
             .and_then(|i| i.editing.as_ref())
@@ -1045,9 +1090,9 @@ mod tests {
 
         // Toggle on non-header row is noop
         let mut app4 = app_with_nested_inspector();
-        app4.handle_action(Action::InspectorDown);
+        app4.handle_action(Action::SidePanelDown);
         assert_eq!(app4.inspector().unwrap().selected_row, 1);
-        app4.handle_action(Action::InspectorToggleCollapse);
+        app4.handle_action(Action::SidePanelToggleCollapse);
         assert!(app4.inspector().unwrap().collapsed_nodes.is_empty());
     }
 }

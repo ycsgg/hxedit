@@ -30,8 +30,8 @@ pub enum Mode {
     },
     Visual,
     Command,
-    /// Inspector panel has focus. Arrow keys navigate fields, Enter edits.
-    Inspector,
+    /// Side panel has focus. Arrow keys navigate the active panel page.
+    SidePanel,
     /// Inspector field is being edited inline.
     InspectorEdit,
     /// Disassembly instruction text is being edited inline.
@@ -39,8 +39,8 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub fn is_inspector(self) -> bool {
-        matches!(self, Self::Inspector | Self::InspectorEdit)
+    pub fn is_side_panel(self) -> bool {
+        matches!(self, Self::SidePanel | Self::InspectorEdit)
     }
 
     pub fn is_normal(self) -> bool {
@@ -54,7 +54,7 @@ impl Mode {
             Self::InsertHex { .. } => "INSERT",
             Self::Visual => "VISUAL",
             Self::Command => "COMMAND",
-            Self::Inspector => "INSPECT",
+            Self::SidePanel => "PANEL",
             Self::InspectorEdit => "INSPEDIT",
             Self::DisasmEdit => "ASMEDIT",
         }

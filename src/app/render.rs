@@ -4,7 +4,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::app::{App, MainView, SidePanel};
+use crate::app::{App, MainView, SidePanelKind};
 use crate::commands::hints;
 use crate::core::document::ByteSlot;
 use crate::disasm::DisasmRow;
@@ -108,12 +108,12 @@ impl App {
             &block,
             area,
             gutter_width,
-            self.show_inspector,
+            self.show_side_panel,
             main_pane_kind,
         );
         self.last_columns = Some(columns);
         self.last_main_pane_kind = columns.main_pane_kind;
-        self.ensure_inspector_mode_visible();
+        self.ensure_side_panel_focus_visible();
         frame.render_widget(block, area);
 
         self.view_rows = columns.gutter.height.max(1) as usize;
@@ -139,7 +139,7 @@ impl App {
 
         let widget_draw_start = profiling.then(Instant::now);
         self.render_main_grids(frame, columns, main_lines);
-        self.render_inspector_panel(frame, columns);
+        self.render_side_panel(frame, columns);
 
         if let Some(start) = widget_draw_start {
             stats.widget_draw = start.elapsed();
@@ -492,35 +492,43 @@ impl App {
         }
     }
 
-    fn render_inspector_panel(&self, frame: &mut ratatui::Frame<'_>, columns: layout::MainColumns) {
-        let (Some(sep3), Some(inspector_area)) = (columns.sep3, columns.inspector) else {
+    fn render_side_panel(&self, frame: &mut ratatui::Frame<'_>, columns: layout::MainColumns) {
+        let (Some(side_panel_sep), Some(side_panel_area)) =
+            (columns.side_panel_sep, columns.side_panel)
+        else {
             return;
         };
 
-        frame.render_widget(separator_widget(columns.gutter.height, &self.palette), sep3);
+        frame.render_widget(
+            separator_widget(columns.gutter.height, &self.palette),
+            side_panel_sep,
+        );
 
-        match &self.side_panel {
-            Some(SidePanel::Inspector(inspector)) => {
-                self.render_visible_inspector(frame, inspector_area, inspector);
-            }
-            Some(SidePanel::Symbol(state)) => {
-                self.render_symbol_panel(frame, inspector_area, state);
-            }
-            Some(SidePanel::Data(state)) => {
-                self.render_data_panel(frame, inspector_area, state);
-            }
-            None => {
-                if let Some(error) = &self.inspector_error {
+        match self.active_side_panel {
+            SidePanelKind::Inspector => {
+                if let Some(inspector) = self.inspector() {
+                    self.render_visible_inspector(frame, side_panel_area, inspector);
+                } else if let Some(error) = &self.inspector_error {
                     frame.render_widget(
                         Paragraph::new(error.clone()).wrap(Wrap { trim: false }),
-                        inspector_area,
+                        side_panel_area,
                     );
                 } else {
                     frame.render_widget(
                         Paragraph::new(self.inspector_empty_panel_message())
                             .wrap(Wrap { trim: false }),
-                        inspector_area,
+                        side_panel_area,
                     );
+                }
+            }
+            SidePanelKind::Symbol => {
+                if let Some(state) = self.symbol_state() {
+                    self.render_symbol_panel(frame, side_panel_area, state);
+                }
+            }
+            SidePanelKind::Data => {
+                if let Some(state) = self.data_state() {
+                    self.render_data_panel(frame, side_panel_area, state);
                 }
             }
         }
@@ -622,7 +630,7 @@ impl App {
             return;
         };
 
-        if visible_row < self.inspector_visible_rows() {
+        if visible_row < self.side_panel_visible_rows() {
             frame.set_cursor_position((
                 inspector_area.x + cursor_col,
                 inspector_area.y + 1 + visible_row as u16,
