@@ -1,6 +1,8 @@
-use crate::app::{App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState};
 #[cfg(feature = "symbols")]
-use crate::app::{SidePanelKind, SymbolState};
+use crate::app::SymbolState;
+use crate::app::{
+    App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState, SidePanelKind,
+};
 use crate::commands::parser::parse_command;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 #[cfg(feature = "disasm")]

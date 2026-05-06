@@ -1,10 +1,16 @@
 # hxedit
 
-A terminal hex editor for large files, written in Rust.
+中文说明在前，English section follows below.
 
-hxedit provides non-destructive byte-level editing with full undo/redo support, built-in format inspection, and search across files of any size.
+---
 
-## Quick Start
+## 中文
+
+`hxedit` 是一个面向大文件的终端十六进制编辑器，使用 Rust 编写。
+
+它优先保证 byte 级编辑语义正确，支持非破坏式编辑、完整 undo/redo、格式检查器、搜索，以及可选的可执行文件反汇编浏览。
+
+### 快速开始
 
 ```bash
 cargo run -- <file>
@@ -14,265 +20,274 @@ cargo run -- <file>
 hxedit --readonly --offset 0x100 --inspector some.bin
 ```
 
-## Build Profiles
+### 构建档位
+
+| 档位 | 构建命令 | 包含能力 |
+|------|------|------|
+| `core` | `cargo build --release --no-default-features` | 核心 hex editor、inspector、search、hash、copy/paste、export |
+| `default` | `cargo build --release` | `core` + `:dis` 反汇编浏览、指令搜索、symbol side panel |
+| `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone 驱动的反汇编内联 patch |
+
+`full` 会启用 `asm` 特性并 vendor `keystone-engine`。当前没有单独的 `:asm` 命令，汇编 patch 直接发生在 `:dis` 视图内。
+
+### 核心特性
+
+- 非破坏式编辑：overwrite、insert、tombstone delete 全部可撤销
+- Visual 选区与 inspector 字段选区
+- Undo / Redo
+- ASCII / hex 搜索，支持前后向、自动 wrap-around、同屏命中高亮
+- 内置格式检查器：ELF、PE/COFF、Mach-O、PNG、ZIP、GZIP、GIF、BMP、WAV、TAR、JPEG
+- 哈希：MD5、SHA1、SHA256、SHA512、CRC32
+- 剪贴板复制 / 粘贴、导出、批量 fill / zero / replace
+- 可选 executable browsing：`default` / `full` 档位提供 `:dis`、`:si`、`:symbol`、`:sym`
+- 大文件分页读取与缓存
+- 自动只读回退
+- 终端颜色能力自动检测
+
+### CLI 参数
+
+| 参数 | 说明 |
+|------|------|
+| `--readonly` | 只读打开；如果文件不可写也会自动退回只读 |
+| `--offset <n\|0xhex>` | 从指定偏移开始 |
+| `--inspector` | 启动时显示 side panel 的 inspector 页 |
+| `--bytes-per-line <n>` | 每行显示字节数，默认 `16` |
+| `--page-size <n>` | 页缓存读取大小，默认 `16384` |
+| `--cache-pages <n>` | 页缓存容量，默认 `128` |
+| `--profile` | 退出时向 stderr 输出诊断信息 |
+| `--no-color` | 禁用颜色；`NO_COLOR` 环境变量同样生效 |
+
+### 模式
+
+| 模式 | 说明 |
+|------|------|
+| `NORMAL` | 导航、删除、选区、进入命令 |
+| `EDIT` | nibble 级 overwrite |
+| `INSERT` | nibble 级 insert |
+| `VISUAL` | 字节范围选区 |
+| `COMMAND` | `:` 命令输入 |
+| `PANEL` | 聚焦当前 side panel 页 |
+| `INSPEDIT` | inspector 字段内联编辑 |
+| `ASMEDIT` | 反汇编单条指令内联编辑 |
+
+### 常用按键
+
+- `h j k l` / 方向键：移动光标
+- `PageUp` / `PageDown`：翻页
+- `r`：进入 overwrite
+- `i`：进入 insert
+- `x`：删除当前字节或 visual 选区
+- `0-9 a-f`：编辑十六进制 nibble
+- `Ctrl+Z` / `Ctrl+Y`：undo / redo
+- `v`：切换 visual
+- `:`：进入命令模式
+- `t` / `Tab`：切换 side panel
+
+### 反汇编相关
+
+`default` / `full` 档位支持：
+
+- `:dis [arch]`：进入已识别 ELF / PE / Mach-O 的只读反汇编视图
+- `:dis! <arch> <offset>`：强制从 display offset 开始做 raw disassembly
+- `:dis off`：退出反汇编视图
+- `:si` / `:si!`：按指令文本搜索
+- `:symbol` / `:symbol!`：按 symbol 名搜索
+- `:sym` / `:sym off`：显示 / 关闭 symbol panel
+- `:data` / `:data off`：显示 / 关闭 cursor-relative data panel
+
+`full` 档位额外支持：
+
+- 在 `:dis` 里按 `Enter` 进入当前指令的单行编辑
+- 提交后使用 Keystone 组装并做 overwrite patch
+- 当前仍保持 overwrite-only；layout-changing 编辑不会在反汇编视图里开放
+
+### 常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `:w` / `:w <path>` / `:wq` | 保存 / 另存 / 保存退出 |
+| `:u [n]` / `:redo [n]` | undo / redo |
+| `:g <offset>` / `:g end` / `:g +n` / `:g -n` | 跳转 |
+| `:s <text>` / `:s! <text>` | ASCII 搜索 |
+| `:S <hex>` / `:S! <hex>` | hex 搜索 |
+| `:p` / `:pi` / `:p?` / `:pi?` | overwrite / insert paste 及预览 |
+| `:c [fmt] [disp]` | 复制当前 active selection |
+| `:export <path>` / `:export c` / `:export py` | 导出逻辑字节 |
+| `:fill <pattern> <len>` / `:zero <len>` | overwrite 批量写入 |
+| `:re ...` / `:re! ...` | 等长替换 / 允许长度变化的替换 |
+| `:hash md5|sha1|sha256|sha512|crc32` | 哈希 |
+| `:insp` / `:insp more` | 打开 inspector / 加载更多分页项 |
+| `:format ...` | 强制格式 |
+
+### 编辑模型
+
+- `x` 是 tombstone delete：保留 display slot，save 时跳过
+- `i` 是 real insert：后续 display offset 右移
+- `r` 是 replacement：只覆盖现有字节显示值，不改布局
+
+### 限制
+
+- 保存当前仍是 rewrite-save
+- overwrite paste 到 EOF 会截断，不会自动 append
+- 剪贴板 copy 目前仍以文本表示为主，不直接写 raw binary clipboard
+
+### CI / Release
+
+- Rust 固定为 `1.94.1`
+- GitHub Actions 在 Ubuntu / Windows 跑 `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test --all-targets`
+- CI 会覆盖 `core` / `default` / `full` 三个 feature 档位
+- 打 `v0.2.0` 这类 tag 时，release 产物按 `OS * arch * feature` 矩阵打包并发布
+- 当前发布矩阵：
+  - `linux` / `x86_64` / `core|default|full`
+  - `linux` / `aarch64` / `core|default|full`
+  - `macos` / `aarch64` / `core|default|full`
+  - `windows` / `x86_64` / `core|default|full`
+
+### 许可证
+
+`hxedit` 以 `GPL-2.0-only` 发布。`full` 档位中 vendor 的 `keystone-engine` 位于同一许可边界内。
+
+---
+
+## English
+
+`hxedit` is a terminal hex editor for large files, written in Rust.
+
+It prioritizes correct byte-level editing semantics, with non-destructive editing, full undo/redo, built-in format inspection, search, and optional executable/disassembly browsing.
+
+### Quick Start
+
+```bash
+cargo run -- <file>
+```
+
+```bash
+hxedit --readonly --offset 0x100 --inspector some.bin
+```
+
+### Build Profiles
 
 | Profile | Build command | Includes |
 |------|------|------|
-| `simple` | `cargo build --release --no-default-features` | Core hex editor, inspector, search, hash, copy/paste, export |
-| `default` | `cargo build --release` | `simple` + disassembly view / instruction search / symbol side panel |
-| `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching in disassembly view |
+| `core` | `cargo build --release --no-default-features` | Core hex editor, inspector, search, hash, copy/paste, export |
+| `default` | `cargo build --release` | `core` + disassembly view, instruction search, symbol side panel |
+| `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching |
 
-`full` enables the `asm` feature and vendors `keystone-engine` for inline instruction patching. There is still no separate `:asm` command; patching happens directly inside `:dis`.
+`full` enables the `asm` feature and vendors `keystone-engine`. There is still no separate `:asm` command; patching happens directly inside `:dis`.
 
-## Features
+### Features
 
-- **Non-destructive editing** — overwrite bytes, insert new bytes, or mark bytes as deleted; all changes are undoable
-- **Visual / inspector selection** — operate on a byte range from visual mode or the selected inspector field
-- **Undo / Redo** — full multi-step undo and redo with `Ctrl+Z` / `Ctrl+Y` or `:undo` / `:redo`
-- **Search** — search by ASCII text or hex bytes, forward and backward, with automatic wrap-around and visible-hit highlighting in the hex grid
-- **Format inspector** — built-in parsing for ELF, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG structures with field-level editing
-- **Hash computation** — compute MD5, SHA1, SHA256, SHA512, or CRC32 of a selection or the entire file
-- **Clipboard integration** — copy selections as hex, binary, numeric, or base64 text; paste from clipboard as hex or base64
-- **Batch transforms** — fill repeated patterns, replace matching byte/text sequences, and export selections as raw bytes or C/Python literals
-- **Optional executable browsing** — default builds include `:dis`, `:si`, `:symbol`, and `:sym`; simple builds omit the disassembly / symbol stack entirely
-- **Large file support** — paged I/O with configurable cache for responsive editing of files much larger than memory
-- **Read-only mode** — automatically falls back to read-only when the file cannot be opened for writing
-- **Adaptive colors** — auto-detects terminal color support (true-color / 256-color / 16-color / no color)
+- Non-destructive editing: overwrite, insert, and tombstone delete with full undo
+- Visual selection and inspector-field selection
+- Undo / Redo
+- ASCII / hex search with forward/backward traversal, wrap-around, and visible-hit highlighting
+- Built-in inspectors for ELF, PE/COFF, Mach-O, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG
+- Hashing: MD5, SHA1, SHA256, SHA512, CRC32
+- Clipboard copy/paste, export, fill/zero/replace transforms
+- Optional executable browsing: `default` / `full` builds provide `:dis`, `:si`, `:symbol`, and `:sym`
+- Paged I/O and cache for files much larger than memory
+- Automatic read-only fallback
+- Adaptive terminal color support
 
-## CLI Flags
+### CLI Flags
 
 | Flag | Description |
 |------|-------------|
-| `--readonly` | Open without write access; auto-detected if the file lacks write permission |
+| `--readonly` | Open without write access; automatically falls back to read-only when needed |
 | `--offset <n\|0xhex>` | Start at a specific byte offset |
 | `--inspector` | Open with the side panel visible on the inspector page |
-| `--bytes-per-line <n>` | Bytes shown per row (default 16) |
-| `--page-size <n>` | Page cache read size (default 16384) |
-| `--cache-pages <n>` | Page cache capacity (default 128) |
+| `--bytes-per-line <n>` | Bytes shown per row, default `16` |
+| `--page-size <n>` | Page-cache read size, default `16384` |
+| `--cache-pages <n>` | Page-cache capacity, default `128` |
 | `--profile` | Print diagnostics to stderr on exit |
-| `--no-color` | Disable color styling; also disabled by `NO_COLOR` env var |
+| `--no-color` | Disable colors; `NO_COLOR` also disables styling |
 
-## Modes
+### Modes
 
 | Mode | Description |
 |------|-------------|
-| NORMAL | Navigate, delete, select, enter commands |
-| EDIT | Overwrite bytes nibble-by-nibble |
-| INSERT | Insert new bytes nibble-by-nibble |
-| VISUAL | Select a byte range for operations |
-| COMMAND | Enter `:` commands with live hints |
-| PANEL | Focus the active side-panel page |
-| INSPEDIT | Edit an inspector field inline |
-| ASMEDIT | Edit one disassembly instruction inline before assemble-patch submission |
+| `NORMAL` | Navigate, delete, select, enter commands |
+| `EDIT` | Nibble-by-nibble overwrite |
+| `INSERT` | Nibble-by-nibble insert |
+| `VISUAL` | Byte-range selection |
+| `COMMAND` | `:` command entry |
+| `PANEL` | Focus the active side-panel page |
+| `INSPEDIT` | Inline inspector-field editing |
+| `ASMEDIT` | Inline single-instruction disassembly editing |
 
-## Keybindings
+### Common Keys
 
-### Navigation
+- `h j k l` / arrow keys: move cursor
+- `PageUp` / `PageDown`: page scroll
+- `r`: enter overwrite
+- `i`: enter insert
+- `x`: delete current byte or visual selection
+- `0-9 a-f`: enter hex nibbles
+- `Ctrl+Z` / `Ctrl+Y`: undo / redo
+- `v`: toggle visual mode
+- `:`: command mode
+- `t` / `Tab`: toggle side panel
 
-- `h` `j` `k` `l` / arrow keys — move cursor
-- `PageUp` `PageDown` — scroll by page
-- `Home` `End` — jump to row start / end
+### Disassembly
 
-### Editing
+Available in `default` / `full` builds:
 
-- `r` — enter overwrite mode
-- `i` — enter insert mode
-- `x` — delete current byte (or visual selection)
-- `0-9 a-f` — enter hex nibbles in edit/insert mode
-- `Backspace` — delete in edit/insert mode
-- `Ctrl+Z` / `Ctrl+Y` — undo / redo
+- `:dis [arch]`: enter read-only disassembly view for recognized ELF / PE / Mach-O executables
+- `:dis! <arch> <offset>`: force raw disassembly from a display offset
+- `:dis off`: leave disassembly view
+- `:si` / `:si!`: search decoded instruction text
+- `:symbol` / `:symbol!`: search by symbol name
+- `:sym` / `:sym off`: open / close the symbol panel
+- `:data` / `:data off`: open / close the cursor-relative data panel
 
-### Disassembly Patch (`full` only)
+Extra in `full` builds:
 
-- `Enter` in `:dis` — edit the current instruction row inline
-- `Esc` — cancel inline assembly edit
-- `Enter` while editing — assemble and overwrite in place
-- Inline assembly edit accepts exactly one statement; v1 keeps the raw instruction text in the edit buffer, but direct branch/call operands can now resolve exact symbol/import names such as `call strcmp`
+- Press `Enter` in `:dis` to edit the current instruction inline
+- Submission uses Keystone to assemble and overwrite-patch bytes in place
+- Disassembly mode remains overwrite-only; layout-changing edits stay blocked there
 
-### Selection & Search
-
-- `v` — toggle visual selection
-- `n` / `p` — repeat search forward / backward
-- `:` — enter command mode
-
-### Side Panel
-
-- `t` / `Tab` — toggle the current side panel; after `:sym` or `:data`, reopening restores that page rather than resetting to inspector
-- `j` `k` / `Up` `Down` — move between inspector fields/headers or symbol rows
-- `PageUp` / `PageDown` / mouse wheel — scroll the focused symbol/data panel or main view
-- `Space` / `Enter` on an inspector header — collapse or expand the section (`▶` collapsed, `▼` expanded)
-- `Enter` on a field — start or submit field edit; `Enter` on a symbol jumps to its file offset
-- Mouse click on a symbol row — select and jump to that symbol's mapped file offset; the bottom detail area shows `symbol / meta / offset / file` and can be mouse-wheel scrolled for very long names
-- Mouse click on a data row — select the bytes that row decodes and sync the hex grid selection
-- `Esc` — leave edit or side-panel focus
-
-## Commands
-
-### File
+### Common Commands
 
 | Command | Description |
 |---------|-------------|
-| `:q` | Quit (refuses if unsaved) |
-| `:q!` | Force quit |
-| `:w` | Save |
-| `:w <path>` | Save as |
-| `:wq` | Save and quit |
-| `:u [n]` | Undo n changes (default 1) |
-| `:redo [n]` | Redo n changes (default 1) |
-
-### Navigation
-
-| Command | Description |
-|---------|-------------|
-| `:g <offset>` | Go to absolute offset (decimal or `0x` hex) |
-| `:g end` | Go to last byte |
-| `:g +<delta>` | Go forward by delta |
-| `:g -<delta>` | Go backward by delta |
-| `:s <text>` | Search ASCII downward |
-| `:s! <text>` | Search ASCII upward |
-| `:S <hex>` | Search hex bytes downward |
-| `:S! <hex>` | Search hex bytes upward |
-| `:si <text>` | Search decoded instruction text downward in disassembly view (`default` / `full`) |
-| `:si! <text>` | Search decoded instruction text upward in disassembly view (`default` / `full`) |
-| `:symbol <name>` | Search symbolized disassembly rows downward by symbol name (`default` / `full`) |
-| `:symbol! <name>` | Search symbolized disassembly rows upward by symbol name (`default` / `full`) |
-
-Search wraps around automatically — forward search continues from the start after EOF, backward search continues from the end after BOF. The current search also highlights all visible hits in the hex grid.
-
-In disassembly view, byte search results now jump to the containing instruction row, `:si` / `:si!` search decoded instruction text directly, and `:symbol` / `:symbol!` search symbol labels, symbolized operands, and direct-target symbol hints by name.
-
-Successful `:g` commands report how many display bytes were moved, e.g. `moved +0x1000 → 0x1234`.
-
-### Clipboard
-
-| Command | Description |
-|---------|-------------|
-| `:p [!] [n]` | Overwrite-paste at cursor; `!` = raw bytes; `n` = byte limit |
-| `:p? [!] [n]` | Preview overwrite-paste |
-| `:pi [!] [n]` | Insert-paste at cursor |
-| `:pi? [!] [n]` | Preview insert-paste |
+| `:w` / `:w <path>` / `:wq` | Save / save as / save and quit |
+| `:u [n]` / `:redo [n]` | Undo / redo |
+| `:g <offset>` / `:g end` / `:g +n` / `:g -n` | Goto |
+| `:s <text>` / `:s! <text>` | ASCII search |
+| `:S <hex>` / `:S! <hex>` | Hex search |
+| `:p` / `:pi` / `:p?` / `:pi?` | Overwrite / insert paste and previews |
 | `:c [fmt] [disp]` | Copy the active selection |
-| `:export <path>` | Export the active selection as raw bytes to a new file |
-| `:export c [name]` | Copy the active selection as a C array literal |
-| `:export py [name]` | Copy the active selection as a Python bytes literal |
+| `:export <path>` / `:export c` / `:export py` | Export logical bytes |
+| `:fill <pattern> <len>` / `:zero <len>` | Overwrite transforms |
+| `:re ...` / `:re! ...` | Equal-length replace / length-changing replace |
+| `:hash md5|sha1|sha256|sha512|crc32` | Hash |
+| `:insp` / `:insp more` | Open inspector / reveal more paginated entries |
+| `:format ...` | Force format |
 
-Copy format options: `bin` (binary text), `b` (byte groups, default), `db` (2-byte), `qb` (4-byte)
+### Editing Model
 
-Copy display options: `r` (raw, default), `nb` (big-endian numeric), `nl` (little-endian numeric), `b64` (base64)
+- `x` is tombstone delete: the display slot remains, but save skips it
+- `i` is real insert: following display offsets shift right
+- `r` is replacement: overwrite visible bytes in place without changing layout
 
-### Transform
+### Limitations
 
-| Command | Description |
-|---------|-------------|
-| `:fill <hex-pattern> <len>` | Overwrite bytes from cursor with a repeated hex pattern |
-| `:zero <len>` | Overwrite bytes from cursor with `00` |
-| `:re [hex\|ascii] <needle> -> <replacement>` | Replace all non-overlapping equal-length matches in the active selection or entire file |
-| `:re! [hex\|ascii] <needle> -> <replacement>` | Replace with length changes allowed (uses real delete/insert) |
+- Save is currently rewrite-save only
+- Overwrite paste truncates at EOF instead of auto-appending
+- Clipboard copy is still text-oriented rather than raw binary clipboard output
 
-### Hash
+### CI / Release
 
-| Command | Description |
-|---------|-------------|
-| `:hash md5` | Compute MD5 |
-| `:hash sha1` | Compute SHA-1 |
-| `:hash sha256` | Compute SHA-256 |
-| `:hash sha512` | Compute SHA-512 |
-| `:hash crc32` | Compute CRC32 |
-| `:dis [arch]` | Enter the current read-only disassembly view for recognized ELF / PE / Mach-O executables (`default` / `full`) |
-| `:dis! <arch> <offset>` | Force raw disassembly from a display offset even without executable-container detect (`default` / `full`) |
-| `:dis off` | Return from disassembly view to the normal hex/ascii view (`default` / `full`) |
-| `:sym` | Show executable symbols/import targets in the side panel (`default` / `full`) |
-| `:sym off` | Close the symbol page and restore the inspector when available (`default` / `full`) |
-| `:data` | Show cursor-relative primitive data decoding in the side panel |
-| `:data off` | Close the data page |
+- Rust is pinned to `1.94.1`
+- GitHub Actions runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets` on Ubuntu and Windows
+- CI covers all three feature bundles: `core`, `default`, and `full`
+- A tag such as `v0.2.0` publishes release archives using an explicit `OS * arch * feature` matrix
+- Current release matrix:
+  - `linux` / `x86_64` / `core|default|full`
+  - `linux` / `aarch64` / `core|default|full`
+  - `macos` / `aarch64` / `core|default|full`
+  - `windows` / `x86_64` / `core|default|full`
 
-Hashes the active selection (visual or selected inspector field) if active, otherwise the entire file.
+### License
 
-### Inspector
-
-| Command | Description |
-|---------|-------------|
-| `:insp` | Show/focus the inspector page in the side panel; run again to hide it when already focused |
-| `:insp more` | Reveal the next batch of paginated entries beyond the current cap |
-| `:format` | Reset to auto-detected format |
-| `:format elf\|png\|zip\|gzip\|gif\|bmp\|wav\|tar\|jpeg` | Force a specific format |
-
-## Disassembly (`default` / `full` builds)
-
-- `:dis` now delivers a real read-only disassembly pane: executable container detect, arch resolution, backend resolve, and decoded instruction rows in the left main view
-- `:dis! arch offset` can force a raw disassembly view on arbitrary bytes; current forced mode assumes little-endian decoding for the chosen arch
-- 默认 backend 已抽象为 registry + `CapstoneBackend`，并开启 `capstone/full`；当前实际 decode 支持 `x86` / `x86_64` / `aarch64`
-- 左侧 gutter 现在显示 `段名:offset`，非 executable sections / spans 也会以原始字节行显示，右侧用 `.db ...` 占位
-- `j` / `k`、PageUp / PageDown、以及主视图滚轮滚动在 `:dis` 下已改为按 instruction row 前后移动，不再沿用 hex row 步长
-- 鼠标点击 / 拖拽在 `:dis` 下已按 disassembly rows 命中，不再复用 hex grid 的 offset 换算
-- disassembly viewport 现在带有 row cache/checkpoints；重复滚动、搜索定位与重绘不再每次从当前 span 起点重新解码
-- `:sym` opens a symbol side panel with a compact `Address / Name` list plus a fixed, scrollable detail area ordered as `symbol`, `meta`, `offset`, `file`; keyboard navigation, PageUp/PageDown, mouse wheel, Enter, and row clicks navigate to mapped file offsets
-- disassembly rows 现在会显示基于 `object` baseline symbols 的 `<symbol> @virtual_address` 行尾标签；当操作数字面量精确命中已知 symbol address 时，也会做最小 symbol 名替换
-- 对 `x86` / `x86_64` / `aarch64` 的 direct call/jump，当前会额外保留结构化 target metadata；当目标命中已知 symbol 时，行尾会追加轻量 `→` target hint，避免只靠原始立即数阅读
-- ELF 下的 direct call target 现在还会补最小 PLT/import 名映射：即使目标地址本身没有 exact symbol，只要能从动态重定位顺序推出对应 PLT slot，也会显示成导入名（例如 `puts`）
-- symbol display name 现在会额外清理常见平台修饰，例如 ELF 的 `@@GLIBC_*` / `@plt`、Mach-O/C 的前导 `_`、以及 PE import / stdcall 装饰，降低行尾标签和操作数替换噪音
-- symbolized operands、行尾 `<symbol>` 标签与 direct-target symbol hint 现在共用更醒目的 symbol accent color，避免在反汇编文本里和普通 operand 混在一起
-- 进入 `:dis` 时状态栏会附带当前已收集的 symbol / import 计数（若存在）
-- 当前 dis 主视图仍保持更宽的 instruction text 区域和较窄的 bytes 列，便于 review 指令文本可读性
-- Disassembly view remains overwrite-only for layout-changing edits such as insert/delete/paste-insert
-- `full` build 额外开放 inline assemble patch：`Enter` 进入当前 instruction 的单行编辑，提交后使用 `KeystoneBackend` 把输入汇编翻译成字节码
-- assemble patch 长度策略：
-  - `new_len < old_len`：剩余字节统一补 `NOP`
-  - `new_len == old_len`：普通原地 overwrite
-  - `new_len > old_len`：允许向下覆盖并给出 warning；如果截断后续指令，则把被截断指令剩余尾部补成 `NOP`
-- v1 的 inline assemble 仍保持单行 raw-text 编辑缓冲区，但提交前会额外解析 direct branch/call 的单 token symbol/import 名（例如 `call strcmp` / `jmp entry` / `bl memcpy`）并改写成目标地址后交给 Keystone；更复杂的 relocation / expression / memory-operand symbol 仍留在后续阶段
-- `hxedit` 的目标仍是 byte-level editor + executable browsing，不会把 `:dis` 扩成重度 binary analysis 工具；CFG、function graph、decompiler、自动函数恢复都不在近期目标内
-- 后续会优先补“方便查看”的轻量能力，例如 direct call/jump target 提示、symbol/import 名字映射、以及 PLT / GOT 一类可浏览元数据，而不是引入完整分析框架
-- 更深入的 import thunk / PLT / GOT / symbol target 解析，以及更细粒度的 patch-triggered cache invalidation 仍在后续阶段
-
-## Status Bar
-
-- `len` — display length including deleted slots
-- `vis` — bytes that will be written on save
-- `sel(span)` — selected display-slot span
-- `sel(logical)` — selected logical byte count (skipping deleted)
-- `[RO]` — read-only indicator
-- `[+]` — unsaved changes indicator
-
-## Editing Model
-
-- **Delete** (`x` in normal mode) marks a byte as deleted — it still occupies a display slot but is skipped on save
-- **Insert** (`i` mode) adds new bytes, shifting subsequent content right
-- **Overwrite** (`r` mode) replaces bytes in-place without changing the layout
-- Deleted bytes display as `XX` in hex and `x` in ASCII
-
-## Inspector Notes
-
-- Supports ELF, PE/COFF, Mach-O, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG formats
-- Works best on a wide terminal; shows a warning if the terminal is too narrow
-- ELF currently covers headers, program/section tables, dynamic tags, notes/GNU properties, symbols, relocations, hash tables, and version metadata
-- PE/COFF currently covers DOS header, COFF header, optional header (PE32/PE32+), and section table with data ranges
-- Mach-O currently covers Mach header, load commands, segments/sections with data ranges, and Fat (universal) binaries
-- GZIP currently covers fixed/optional header fields, compressed payload range, and trailer metadata
-- GIF currently covers the logical screen descriptor, global/local color tables, image blocks, extensions, and trailer
-- BMP currently covers the bitmap file header, DIB header variants, optional bit masks / palette ranges, and pixel data
-- WAV currently covers the RIFF/WAVE header, paginated top-level chunks, `fmt ` metadata, data ranges, and padding bytes
-- TAR currently covers USTAR entry headers, paginated entry lists, and file data ranges
-- JPEG currently covers segment markers, APP/SOF/SOS metadata, entropy-coded scan data ranges, and EOI
-- Nested sections (e.g. ELF Program Headers / Section Header Table children) are collapsed by default; use `Space` / `Enter` on a header to expand
-- Deeply nested field names / long values now use hanging-wrap continuation, so wrapped text keeps its indent / value column instead of jumping back to the far left
-- The currently selected inspector field highlights its byte range in the hex grid
-- Editable fields can be modified, but PNG/ZIP/GZIP/TAR/JPEG edits show warnings since structure consistency is not automatically repaired
-- Read-only fields report that they are view-only
-
-## Limitations
-
-- Save is rewrite-only (writes a temporary file and renames)
-- Overwrite paste stops at EOF; excess bytes are dropped
-- Copy is text-only; raw binary clipboard copy is not yet supported
-
-## CI / Release
-
-- The repository pins Rust to `1.94.1` via `rust-toolchain.toml`, and GitHub Actions installs the same toolchain explicitly
-- Every push / pull request runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets` across the supported `simple` / `default` / `full` feature combinations on Ubuntu / Windows
-- Pushing a tag like `v0.1.0` also builds release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, then publishes a GitHub Release with `SHA256SUMS.txt`
-- Intel macOS release artifacts are no longer produced; GitHub-hosted CI only relies on Ubuntu / Windows for regular verification
-
-## License
-
-`hxedit` is distributed under `GPL-2.0-only`. The `asm` / `full` build vendors `keystone-engine` under the same licensing boundary for inline assemble patch support.
+`hxedit` is distributed under `GPL-2.0-only`. The vendored `keystone-engine` used by the `full` bundle lives under the same release boundary.

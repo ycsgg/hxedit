@@ -38,7 +38,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --check
 
-      - name: cargo clippy --all-targets (simple)
+      - name: cargo clippy --all-targets (core)
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
 
@@ -50,7 +50,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --all-targets --locked --no-default-features --features full -- -D warnings
 
-      - name: cargo test --all-targets (simple)
+      - name: cargo test --all-targets (core)
         run: cargo test --all-targets --locked --no-default-features
 
       - name: cargo test --all-targets (default)
@@ -60,60 +60,84 @@ jobs:
         run: cargo test --all-targets --locked --no-default-features --features full
 
   package:
-    name: Package (${{ matrix.target }} / ${{ matrix.variant }})
+    name: Package (${{ matrix.os_name }} / ${{ matrix.arch }} / ${{ matrix.feature }})
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - variant: simple
-            os: ubuntu-latest
+          - feature: core
+            os_name: linux
+            arch: x86_64
+            runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive_format: tar.gz
-          - variant: default
-            os: ubuntu-latest
+          - feature: default
+            os_name: linux
+            arch: x86_64
+            runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive_format: tar.gz
-          - variant: full
-            os: ubuntu-latest
+          - feature: full
+            os_name: linux
+            arch: x86_64
+            runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive_format: tar.gz
-          - variant: simple
-            os: ubuntu-24.04-arm
+          - feature: core
+            os_name: linux
+            arch: aarch64
+            runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive_format: tar.gz
-          - variant: default
-            os: ubuntu-24.04-arm
+          - feature: default
+            os_name: linux
+            arch: aarch64
+            runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive_format: tar.gz
-          - variant: full
-            os: ubuntu-24.04-arm
+          - feature: full
+            os_name: linux
+            arch: aarch64
+            runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive_format: tar.gz
-          - variant: simple
-            os: macos-14
+          - feature: core
+            os_name: macos
+            arch: aarch64
+            runner: macos-14
             target: aarch64-apple-darwin
             archive_format: tar.gz
-          - variant: default
-            os: macos-14
+          - feature: default
+            os_name: macos
+            arch: aarch64
+            runner: macos-14
             target: aarch64-apple-darwin
             archive_format: tar.gz
-          - variant: full
-            os: macos-14
+          - feature: full
+            os_name: macos
+            arch: aarch64
+            runner: macos-14
             target: aarch64-apple-darwin
             archive_format: tar.gz
-          - variant: simple
-            os: windows-latest
+          - feature: core
+            os_name: windows
+            arch: x86_64
+            runner: windows-latest
             target: x86_64-pc-windows-msvc
             archive_format: zip
-          - variant: default
-            os: windows-latest
+          - feature: default
+            os_name: windows
+            arch: x86_64
+            runner: windows-latest
             target: x86_64-pc-windows-msvc
             archive_format: zip
-          - variant: full
-            os: windows-latest
+          - feature: full
+            os_name: windows
+            arch: x86_64
+            runner: windows-latest
             target: x86_64-pc-windows-msvc
             archive_format: zip
 
@@ -129,12 +153,12 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Resolve build flavor args
-        id: flavor
+      - name: Resolve feature args
+        id: feature
         shell: bash
         run: |
-          case "${{ matrix.variant }}" in
-            simple)
+          case "${{ matrix.feature }}" in
+            core)
               echo "args=--no-default-features" >> "$GITHUB_OUTPUT"
               ;;
             default)
@@ -147,19 +171,20 @@ jobs:
 
       - name: cargo build --release
         shell: bash
-        run: cargo build --release --locked --target ${{ matrix.target }} ${{ steps.flavor.outputs.args }}
+        run: cargo build --release --locked --target ${{ matrix.target }} ${{ steps.feature.outputs.args }}
 
       - name: Create release archive
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}"
-          $artifact = "hxedit-$version-${{ matrix.variant }}-${{ matrix.target }}"
+          $artifact = "hxedit-$version-${{ matrix.os_name }}-${{ matrix.arch }}-${{ matrix.feature }}"
           $stage = Join-Path $env:RUNNER_TEMP $artifact
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
           $binary = if ("${{ runner.os }}" -eq "Windows") { "hxedit.exe" } else { "hxedit" }
           Copy-Item "target/${{ matrix.target }}/release/$binary" -Destination (Join-Path $stage $binary)
           Copy-Item "README.md" -Destination (Join-Path $stage "README.md")
+          Copy-Item "LICENSE" -Destination (Join-Path $stage "LICENSE")
 
           New-Item -ItemType Directory -Path dist -Force | Out-Null
 
@@ -172,7 +197,7 @@ jobs:
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.variant }}-${{ matrix.target }}
+          name: ${{ matrix.os_name }}-${{ matrix.arch }}-${{ matrix.feature }}
           path: dist/*
           if-no-files-found: error
 

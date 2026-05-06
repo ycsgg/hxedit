@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-06
+
+### Added
+
+- Read-only disassembly view for recognized ELF, PE/COFF, and Mach-O executables via `:dis`, plus forced raw decode via `:dis!`
+- Instruction-text search (`:si` / `:si!`), symbol search (`:symbol` / `:symbol!`), symbol side panel (`:sym`), and cursor-relative data side panel (`:data`)
+- Symbol-aware disassembly rendering with direct-target hints, PLT/import name resolution, and symbol-name cleanup for common platform decorations
+- Inline assemble patching in `full` builds through Keystone-backed single-instruction overwrite edits
+- Release artifacts are now published as an explicit `OS * arch * feature` matrix across `core`, `default`, and `full` bundles
+
+### Changed
+
+- The side panel is no longer inspector-only; inspector, symbol, and data pages now share one panel model and focus mode
+- The repository license is now `GPL-2.0-only`, and release archives include the license file alongside the binary and README
+- README was reorganized into separate Chinese and English sections and updated for the disassembly / feature-bundle release model
+
 ## [0.1.1] - 2026-04-23
 
 ### Added
@@ -61,6 +77,7 @@ Initial release.
 - CI on Ubuntu and Windows (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --all-targets`)
 - Release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, published with `SHA256SUMS.txt`
 
-[Unreleased]: https://github.com/ycsgg/hxedit/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ycsgg/hxedit/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ycsgg/hxedit/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ycsgg/hxedit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ycsgg/hxedit/releases/tag/v0.1.0
