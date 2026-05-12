@@ -80,20 +80,18 @@ impl App {
             _ => return Ok(()),
         };
 
-        let previous = if offset < self.document.len() {
+        let len_before = self.document.len();
+        let is_eof_append = offset == len_before;
+        let previous = if offset < len_before {
             self.document
                 .cell_id_at(offset)
-                .map(|id| (id, self.document.replacement_state(id)))
+                .and_then(|id| self.document.replacement_state(id))
         } else {
             None
         };
         let id = self.document.replace_nibble(offset, phase, value)?;
 
         let after = self.document.replacement_state(id);
-        let previous = previous
-            .map(|(_, state)| state)
-            .or_else(|| (offset < self.document.len()).then_some(None))
-            .flatten();
         let cursor_before = self.cursor;
         let mode_before = self.mode;
         self.set_info_status(format!("edited 0x{:x}", offset));
@@ -122,7 +120,7 @@ impl App {
                 self.cursor,
                 self.mode,
             );
-        } else if offset == self.document.len().saturating_sub(1) && previous.is_none() {
+        } else if is_eof_append {
             self.push_undo_step(
                 vec![EditOp::Insert {
                     offset,

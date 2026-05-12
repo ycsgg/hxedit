@@ -585,6 +585,27 @@ fn edit_mode_nibble_undo_redo_and_eof_append() {
     assert_eq!(app5.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
 }
 
+#[test]
+fn edit_mode_noop_on_last_byte_does_not_push_insert_undo() {
+    let mut app = app_with_bytes(&[0xa1]);
+    app.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+
+    app.edit_nibble(0xa).unwrap();
+    app.undo(1, true).unwrap();
+
+    assert_eq!(app.document.len(), 1);
+    assert_eq!(app.cursor, 0);
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0xa1));
+    assert_eq!(
+        app.mode,
+        Mode::EditHex {
+            phase: NibblePhase::Low
+        }
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Visual mode: toggle, selection tracking, delete
 // ═══════════════════════════════════════════════════════════════════════════
