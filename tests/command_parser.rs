@@ -132,6 +132,20 @@ fn parses_basic_commands() {
         }
     );
     assert_eq!(
+        parse_command("xor 0xaa").unwrap(),
+        Command::Xor {
+            key: 0xaa,
+            in_place: false,
+        }
+    );
+    assert_eq!(
+        parse_command("xor! 15").unwrap(),
+        Command::Xor {
+            key: 0x0f,
+            in_place: true,
+        }
+    );
+    assert_eq!(
         parse_command("re de ad -> be ef").unwrap(),
         Command::Replace {
             needle: vec![0xde, 0xad],
@@ -241,6 +255,10 @@ fn rejects_invalid_commands() {
     assert!(parse_command("paste nope").is_err());
     assert!(parse_command("export").is_err());
     assert!(parse_command("copy nope").is_err());
+    assert!(parse_command("xor").is_err());
+    assert!(parse_command("xor 0x123").is_err());
+    assert!(parse_command("xor aa").is_err());
+    assert!(parse_command("xor 256").is_err());
     assert!(parse_command("S 0xz1").is_err());
     assert!(parse_command("si").is_err());
     assert!(parse_command("hash").is_err());

@@ -16,7 +16,7 @@ A terminal hex editor for large files, written in Rust.
 - ASCII and hex search with forward/backward traversal, wrap-around, and visible-hit highlighting
 - Built-in format inspectors for ELF, PE/COFF, Mach-O, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG
 - Hashing for MD5, SHA1, SHA256, SHA512, and CRC32
-- Clipboard copy/paste, export, fill/zero/replace transforms
+- Clipboard copy/paste, export, fill/zero/xor/replace transforms
 - Large-file support through paged I/O and cache
 - Optional disassembly browsing, symbol search, and inline assemble patching
 
@@ -81,6 +81,7 @@ Notes:
 | `:p` / `:pi` / `:p?` / `:pi?` | Overwrite / insert paste and previews |
 | `:c [fmt] [disp]` | Copy the active selection |
 | `:export <path>` / `:export c` / `:export py` | Export logical bytes |
+| `:xor <key>` / `:xor! <key>` | XOR active selection to clipboard / XOR in place (`key`: decimal `0..255` or hex `0x00..0xff`) |
 | `:fill <pattern> <len>` / `:zero <len>` | Overwrite transforms |
 | `:re ...` / `:re! ...` | Equal-length replace / length-changing replace |
 | `:hash md5|sha1|sha256|sha512|crc32` | Hash |

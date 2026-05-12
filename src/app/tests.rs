@@ -10,6 +10,7 @@ use tempfile::tempdir;
 use crate::action::Action;
 use crate::app::{App, SearchDirection, StatusLevel};
 use crate::cli::Cli;
+use crate::clipboard::test_clipboard_text;
 use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::core::document::ByteSlot;
 use crate::format::parse::{FieldValue, StructValue};
@@ -916,6 +917,69 @@ fn replace_command_variants() {
     .unwrap();
     assert_eq!(app3.document.logical_bytes(0, 5).unwrap(), b"xyxxab");
     assert_eq!(app3.mode, Mode::Normal);
+}
+
+#[test]
+fn xor_command_copies_xored_logical_selection() {
+    let mut app = app_with_bytes(&[0x0f, 0xf0, 0xaa, 0x55]);
+    app.cursor = 1;
+    app.delete_current().unwrap();
+    app.cursor = 0;
+    app.toggle_visual();
+    app.move_horizontal(2);
+
+    app.execute_command(Command::Xor {
+        key: 0xff,
+        in_place: false,
+    })
+    .unwrap();
+
+    assert_eq!(test_clipboard_text(), "f0 55");
+    assert_eq!(app.document.logical_bytes(0, 2).unwrap(), vec![0x0f, 0xaa]);
+    assert!(app.status_message.contains("copied 2 logical bytes"));
+    assert!(app.status_message.contains("display span 3"));
+}
+
+#[test]
+fn xor_bang_replaces_selection_in_place_with_undo() {
+    let mut app = app_with_bytes(&[0x0f, 0xf0, 0xaa, 0x55]);
+    app.toggle_visual();
+    app.move_horizontal(2);
+
+    app.execute_command(Command::Xor {
+        key: 0xff,
+        in_place: true,
+    })
+    .unwrap();
+
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0xf0, 0x0f, 0x55, 0x55]
+    );
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(app.selection_range(), None);
+    assert!(app.status_message.contains("replaced 3 logical bytes"));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0x0f, 0xf0, 0xaa, 0x55]
+    );
+}
+
+#[test]
+fn xor_bang_uses_inspector_field_selection() {
+    let mut app = app_with_inspector_field(b"hello world", 6, 5);
+
+    app.execute_command(Command::Xor {
+        key: 0x20,
+        in_place: true,
+    })
+    .unwrap();
+
+    assert_eq!(app.document.logical_bytes(6, 10).unwrap(), b"WORLD");
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app.status_message.contains("replaced 5 logical bytes"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

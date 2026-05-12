@@ -22,6 +22,8 @@ pub enum HxError {
     InvalidPasteCount(String),
     #[error("invalid paste data: {0}")]
     InvalidPasteData(String),
+    #[error("invalid xor key: {0}; use decimal 0..255 or 0x00..0xff")]
+    InvalidXorKey(String),
     #[error("invalid copy format: {0}")]
     InvalidCopyFormat(String),
     #[error("invalid copy display: {0}")]

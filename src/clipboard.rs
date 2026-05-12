@@ -6,17 +6,24 @@ use crate::error::{HxError, HxResult};
 use crate::util::parse::decode_base64;
 
 pub fn copy_text(text: &str) -> HxResult<()> {
-    #[cfg(target_os = "macos")]
+    #[cfg(test)]
+    {
+        TEST_CLIPBOARD.with(|clipboard| {
+            *clipboard.borrow_mut() = text.to_owned();
+        });
+    }
+
+    #[cfg(all(not(test), target_os = "macos"))]
     {
         pipe_to_command("pbcopy", &[], text)
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(not(test), target_os = "windows"))]
     {
         pipe_to_command("clip", &[], text)
     }
 
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(all(not(test), unix, not(target_os = "macos")))]
     {
         for (cmd, args) in [
             ("wl-copy", Vec::<&str>::new()),
@@ -31,6 +38,19 @@ pub fn copy_text(text: &str) -> HxResult<()> {
             "no clipboard tool found (tried wl-copy, xclip, xsel)".to_owned(),
         ))
     }
+
+    #[cfg(test)]
+    Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CLIPBOARD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+#[cfg(test)]
+pub(crate) fn test_clipboard_text() -> String {
+    TEST_CLIPBOARD.with(|clipboard| clipboard.borrow().clone())
 }
 
 pub fn read_text() -> HxResult<String> {
@@ -106,6 +126,7 @@ pub fn read_raw_bytes() -> HxResult<Vec<u8>> {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))]
 fn pipe_to_command(command: &str, args: &[&str], text: &str) -> HxResult<()> {
     let mut child = Command::new(command)
         .args(args)

@@ -133,6 +133,16 @@ pub fn hint_for(input: &str) -> CommandHint {
                 "export the active selection (visual or selected inspector field) as raw bytes to a file, or copy a C/Python literal to the clipboard"
                     .to_owned(),
         },
+        "xor" | "xor!" => CommandHint {
+            syntax: format!("{name} <0x??|0..255>"),
+            details: if name.ends_with('!') {
+                "xor each logical byte in the active selection with a one-byte key, then overwrite the same display cells in place; bare keys are decimal, 0x-prefixed keys are hex"
+                    .to_owned()
+            } else {
+                "xor the active selection with a one-byte key and copy the resulting hex bytes to the clipboard without editing the file; bare keys are decimal, 0x-prefixed keys are hex"
+                    .to_owned()
+            },
+        },
         "hash" => CommandHint {
             syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
             details: "compute hash of the current selection (visual or selected inspector field), or the entire file if no selection is active".to_owned(),
@@ -314,6 +324,8 @@ fn known_commands() -> Vec<&'static str> {
         "c",
         "copy",
         "export",
+        "xor",
+        "xor!",
         "hash",
         "data",
         "p",
@@ -449,6 +461,18 @@ mod tests {
         assert!(hint.syntax.contains("sha256"));
         assert!(hint.syntax.contains("crc32"));
         assert!(hint.details.contains("selection"));
+    }
+
+    #[test]
+    fn xor_hint_mentions_copy_and_in_place_modes() {
+        let hint = hint_for("xor");
+        assert!(hint.syntax.contains("0x??"));
+        assert!(hint.syntax.contains("0..255"));
+        assert!(hint.details.contains("decimal"));
+        assert!(hint.details.contains("clipboard"));
+
+        let in_place = hint_for("xor!");
+        assert!(in_place.details.contains("in place"));
     }
 
     #[test]

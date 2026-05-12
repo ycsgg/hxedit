@@ -16,7 +16,7 @@
 - ASCII / hex 搜索，支持前后向、自动 wrap-around、同屏命中高亮
 - 内置格式检查器：ELF、PE/COFF、Mach-O、PNG、ZIP、GZIP、GIF、BMP、WAV、TAR、JPEG
 - 哈希：MD5、SHA1、SHA256、SHA512、CRC32
-- 剪贴板复制 / 粘贴、导出、fill / zero / replace
+- 剪贴板复制 / 粘贴、导出、fill / zero / xor / replace
 - 分页 I/O 和缓存，适合大文件
 - 可选的反汇编浏览、symbol 搜索、内联汇编 patch
 
@@ -81,6 +81,7 @@ hxedit some.bin
 | `:p` / `:pi` / `:p?` / `:pi?` | overwrite / insert paste 与预览 |
 | `:c [fmt] [disp]` | 复制当前选区 |
 | `:export <path>` / `:export c` / `:export py` | 导出逻辑字节 |
+| `:xor <key>` / `:xor! <key>` | 当前选区 XOR 后复制 / 原地 XOR 替换（`key`：十进制 `0..255` 或十六进制 `0x00..0xff`） |
 | `:fill <pattern> <len>` / `:zero <len>` | overwrite 批量写入 |
 | `:re ...` / `:re! ...` | 等长替换 / 允许长度变化的替换 |
 | `:hash md5|sha1|sha256|sha512|crc32` | 哈希 |

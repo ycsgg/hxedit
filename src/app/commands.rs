@@ -66,6 +66,7 @@ impl App {
             } => self.execute_paste_command(raw, preview, limit, true),
             Command::Copy { format, display } => self.copy_selection(format, display),
             Command::Export { format } => self.execute_export_command(format),
+            Command::Xor { key, in_place } => self.execute_xor_command(key, in_place),
             Command::Replace {
                 needle,
                 replacement,
@@ -282,6 +283,149 @@ impl App {
             }
         }
 
+        Ok(())
+    }
+
+    fn execute_xor_command(&mut self, key: u8, in_place: bool) -> HxResult<()> {
+        let Some((start, end)) = self.active_selection_range() else {
+            return Err(HxError::MissingSelection);
+        };
+
+        let display_span = end - start + 1;
+        let mut bytes = self.document.logical_bytes(start, end)?;
+        if bytes.is_empty() {
+            self.set_info_status("xor: no logical bytes in selection");
+            return Ok(());
+        }
+        for byte in &mut bytes {
+            *byte ^= key;
+        }
+
+        if in_place {
+            self.apply_xor_in_place(start, end, key, &bytes)
+        } else {
+            self.copy_xor_result(key, display_span, &bytes)
+        }
+    }
+
+    fn copy_xor_result(&mut self, key: u8, display_span: u64, bytes: &[u8]) -> HxResult<()> {
+        let text = bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        crate::clipboard::copy_text(&text)?;
+
+        if display_span as usize != bytes.len() {
+            self.set_info_status(format!(
+                "xor 0x{key:02x}: copied {} logical bytes (display span {}) [hex]",
+                bytes.len(),
+                display_span
+            ));
+        } else {
+            self.set_info_status(format!(
+                "xor 0x{key:02x}: copied {} bytes [hex]",
+                bytes.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn apply_xor_in_place(
+        &mut self,
+        start: u64,
+        end: u64,
+        key: u8,
+        xored_bytes: &[u8],
+    ) -> HxResult<()> {
+        if self.document.is_readonly() {
+            return Err(HxError::ReadOnly);
+        }
+        if xored_bytes.is_empty() {
+            self.set_info_status("xor!: no logical bytes in selection");
+            return Ok(());
+        }
+
+        let cursor_before = self.cursor;
+        let mode_before = self.mode;
+        let span = end - start + 1;
+        let ids = self.document.cell_ids_range(start, span);
+        let mut changes = Vec::with_capacity(xored_bytes.len());
+        let mut xored = xored_bytes.iter().copied();
+
+        for id in ids {
+            if self.document.is_tombstone(id) {
+                continue;
+            }
+            let Some(byte) = xored.next() else {
+                break;
+            };
+            let before = self.document.replacement_state(id);
+            self.document.replace_display_byte_by_id(id, byte)?;
+            let after = self.document.replacement_state(id);
+            if after != before {
+                changes.push(ReplacementChange { id, before, after });
+            }
+        }
+
+        debug_assert!(xored.next().is_none());
+
+        let visual_selection = self.selection_range();
+        let inspector_selection = visual_selection.is_none()
+            && self.active_side_panel == SidePanelKind::Inspector
+            && (self.mode.is_side_panel()
+                || self
+                    .command_return_mode
+                    .is_some_and(|mode| mode.is_side_panel()));
+        if visual_selection.is_some() {
+            self.selection_anchor = None;
+            self.mode = Mode::Normal;
+        }
+        let mode_after = if matches!(self.mode, Mode::Command) {
+            self.normalize_mode(self.command_return_mode.unwrap_or(Mode::Normal))
+        } else {
+            self.mode
+        };
+        let mode_after = if inspector_selection && matches!(mode_after, Mode::Normal) {
+            Mode::SidePanel
+        } else {
+            mode_after
+        };
+        let cursor_after = self.clamp_cursor_for_mode(start, mode_after);
+        self.cursor = cursor_after;
+
+        let changed_count = changes.len();
+
+        if changed_count > 0 {
+            self.invalidate_disassembly_cache();
+        }
+        self.refresh_inspector();
+        if inspector_selection && self.inspector().is_some() {
+            self.mode = mode_after;
+            self.sync_cursor_to_inspector();
+        }
+        let cursor_after = self.cursor;
+        if changed_count > 0 {
+            self.push_undo_step(
+                vec![EditOp::ReplaceBytes { changes }],
+                cursor_before,
+                mode_before,
+                cursor_after,
+                mode_after,
+            );
+        }
+
+        if changed_count == 0 {
+            self.set_info_status(format!(
+                "xor! 0x{key:02x}: {} logical bytes unchanged",
+                xored_bytes.len()
+            ));
+        } else {
+            self.set_info_status(format!(
+                "xor! 0x{key:02x}: replaced {} logical bytes in place",
+                xored_bytes.len()
+            ));
+        }
         Ok(())
     }
 

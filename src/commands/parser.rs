@@ -42,6 +42,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         | "pi?!" | "paste-insert!?" | "paste-insert?!" => parse_paste(name, rest, true),
         "c" | "copy" => parse_copy(rest),
         "export" => parse_export(rest),
+        "xor" | "xor!" => parse_xor(name, rest),
         "u" | "undo" => Ok(Command::Undo {
             steps: parse_undo_steps(rest)?,
         }),
@@ -328,6 +329,34 @@ fn parse_export(input: Option<&str>) -> HxResult<Command> {
     Ok(Command::Export { format })
 }
 
+fn parse_xor(name: &str, input: Option<&str>) -> HxResult<Command> {
+    let raw = input
+        .map(str::trim)
+        .filter(|arg| !arg.is_empty())
+        .ok_or(HxError::MissingArgument("xor key"))?;
+    let key = parse_xor_key(raw)?;
+    Ok(Command::Xor {
+        key,
+        in_place: name.ends_with('!'),
+    })
+}
+
+fn parse_xor_key(input: &str) -> HxResult<u8> {
+    if let Some(hex) = input
+        .strip_prefix("0x")
+        .or_else(|| input.strip_prefix("0X"))
+    {
+        if hex.is_empty() || hex.len() > 2 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(HxError::InvalidXorKey(input.to_owned()));
+        }
+        return u8::from_str_radix(hex, 16).map_err(|_| HxError::InvalidXorKey(input.to_owned()));
+    }
+
+    input
+        .parse::<u8>()
+        .map_err(|_| HxError::InvalidXorKey(input.to_owned()))
+}
+
 fn parse_replace(name: &str, input: Option<&str>) -> HxResult<Command> {
     let allow_resize = name.ends_with('!');
     let rest = input.ok_or(HxError::MissingArgument("replace arguments"))?;
@@ -491,6 +520,47 @@ mod tests {
     fn hash_command_requires_algorithm_argument() {
         let err = parse_command("hash").unwrap_err();
         assert!(err.to_string().contains("hash algorithm"));
+    }
+
+    #[test]
+    fn xor_command_parses_copy_and_in_place_variants() {
+        assert_eq!(
+            parse_command("xor 0xaa").unwrap(),
+            Command::Xor {
+                key: 0xaa,
+                in_place: false,
+            }
+        );
+        assert_eq!(
+            parse_command("xor! 170").unwrap(),
+            Command::Xor {
+                key: 0xaa,
+                in_place: true,
+            }
+        );
+        assert_eq!(
+            parse_command("xor 15").unwrap(),
+            Command::Xor {
+                key: 0x0f,
+                in_place: false,
+            }
+        );
+    }
+
+    #[test]
+    fn xor_command_rejects_non_byte_keys() {
+        assert!(matches!(
+            parse_command("xor 0x123"),
+            Err(HxError::InvalidXorKey(_))
+        ));
+        assert!(matches!(
+            parse_command("xor zz"),
+            Err(HxError::InvalidXorKey(_))
+        ));
+        assert!(matches!(
+            parse_command("xor 256"),
+            Err(HxError::InvalidXorKey(_))
+        ));
     }
 
     #[cfg(feature = "disasm")]

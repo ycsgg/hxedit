@@ -93,6 +93,10 @@ pub enum Command {
     Export {
         format: ExportFormat,
     },
+    Xor {
+        key: u8,
+        in_place: bool,
+    },
     Replace {
         needle: Vec<u8>,
         replacement: Vec<u8>,
