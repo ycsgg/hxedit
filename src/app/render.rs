@@ -368,7 +368,9 @@ pub(crate) struct DiffCellHit {
 
 enum MainPaneLines {
     Hex {
+        hex_header: Line<'static>,
         hex: Vec<Line<'static>>,
+        ascii_header: Line<'static>,
         ascii: Vec<Line<'static>>,
     },
     Disassembly {
@@ -387,6 +389,21 @@ fn separator_widget(height: u16, palette: &crate::view::palette::Palette) -> Par
         .map(|_| Line::styled("│", palette.separator))
         .collect::<Vec<_>>();
     Paragraph::new(lines)
+}
+
+fn top_header_area(area: Rect) -> Rect {
+    Rect {
+        height: area.height.min(1),
+        ..area
+    }
+}
+
+fn scrolled_body_area(area: Rect) -> Rect {
+    Rect {
+        y: area.y.saturating_add(1),
+        height: area.height.saturating_sub(1),
+        ..area
+    }
 }
 
 impl App {
@@ -468,22 +485,23 @@ impl App {
         self.ensure_side_panel_focus_visible();
         frame.render_widget(block, area);
 
-        self.view_rows = columns.gutter.height.max(1) as usize;
+        self.view_rows = match main_pane_kind {
+            layout::MainPaneKind::Hex => columns.gutter.height.saturating_sub(1).max(1) as usize,
+            layout::MainPaneKind::Disassembly => columns.gutter.height.max(1) as usize,
+        };
         stats.rows = self.view_rows;
 
         let line_build_start = profiling.then(Instant::now);
         let main_lines = match &self.main_view {
             crate::app::MainView::Hex => {
                 let row_collect_start = profiling.then(Instant::now);
-                let visible_rows = self.collect_visible_rows(columns.gutter.height as usize);
+                let visible_rows = self.collect_visible_rows(self.view_rows);
                 if let Some(start) = row_collect_start {
                     stats.row_collect = start.elapsed();
                 }
                 self.build_hex_main_lines(&visible_rows)
             }
-            crate::app::MainView::Disassembly(_) => {
-                self.build_disassembly_lines(columns.gutter.height as usize)
-            }
+            crate::app::MainView::Disassembly(_) => self.build_disassembly_lines(self.view_rows),
         };
         if let Some(start) = line_build_start {
             stats.line_build = start.elapsed();
@@ -598,7 +616,9 @@ impl App {
             return MainLines {
                 gutter: vec![Line::raw("No data")],
                 pane: MainPaneLines::Hex {
+                    hex_header: hex_grid::column_header(self.config.bytes_per_line, &self.palette),
                     hex: vec![Line::raw("No content")],
+                    ascii_header: Line::raw(""),
                     ascii: vec![Line::raw("")],
                 },
             };
@@ -671,7 +691,12 @@ impl App {
         };
         MainLines {
             gutter: gutter_lines,
-            pane: MainPaneLines::Hex { hex, ascii },
+            pane: MainPaneLines::Hex {
+                hex_header: hex_grid::column_header(self.config.bytes_per_line, &self.palette),
+                hex,
+                ascii_header: Line::raw("ASCII"),
+                ascii,
+            },
         }
     }
 
@@ -1228,33 +1253,51 @@ impl App {
         columns: layout::MainColumns,
         lines: MainLines,
     ) {
-        frame.render_widget(Paragraph::new(lines.gutter), columns.gutter);
+        let is_hex = matches!(&lines.pane, MainPaneLines::Hex { .. });
+        let (gutter_area, hex_area, ascii_area) = if is_hex {
+            (
+                scrolled_body_area(columns.gutter),
+                scrolled_body_area(columns.hex),
+                scrolled_body_area(columns.ascii),
+            )
+        } else {
+            (columns.gutter, columns.hex, columns.ascii)
+        };
+
+        frame.render_widget(Paragraph::new(lines.gutter), gutter_area);
         frame.render_widget(
-            separator_widget(columns.gutter.height, &self.palette),
+            separator_widget(columns.sep1.height, &self.palette),
             columns.sep1,
         );
         match lines.pane {
-            MainPaneLines::Hex { hex, ascii } => {
-                frame.render_widget(Paragraph::new(hex).wrap(Wrap { trim: false }), columns.hex);
+            MainPaneLines::Hex {
+                hex_header,
+                hex,
+                ascii_header,
+                ascii,
+            } => {
+                let header_area = top_header_area(columns.hex);
+                if header_area.height > 0 {
+                    frame.render_widget(Paragraph::new(hex_header), header_area);
+                }
+                frame.render_widget(Paragraph::new(hex).wrap(Wrap { trim: false }), hex_area);
+                let ascii_header_area = top_header_area(columns.ascii);
+                if ascii_header_area.height > 0 {
+                    frame.render_widget(Paragraph::new(ascii_header), ascii_header_area);
+                }
                 frame.render_widget(
-                    separator_widget(columns.gutter.height, &self.palette),
+                    separator_widget(columns.sep2.height, &self.palette),
                     columns.sep2,
                 );
-                frame.render_widget(Paragraph::new(ascii), columns.ascii);
+                frame.render_widget(Paragraph::new(ascii), ascii_area);
             }
             MainPaneLines::Disassembly { bytes, text } => {
+                frame.render_widget(Paragraph::new(bytes).wrap(Wrap { trim: false }), hex_area);
                 frame.render_widget(
-                    Paragraph::new(bytes).wrap(Wrap { trim: false }),
-                    columns.hex,
-                );
-                frame.render_widget(
-                    separator_widget(columns.gutter.height, &self.palette),
+                    separator_widget(columns.sep2.height, &self.palette),
                     columns.sep2,
                 );
-                frame.render_widget(
-                    Paragraph::new(text).wrap(Wrap { trim: false }),
-                    columns.ascii,
-                );
+                frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), ascii_area);
                 self.render_disassembly_edit_cursor(frame, columns);
             }
         }
@@ -1316,15 +1359,35 @@ impl App {
                 if let Some(inspector) = self.inspector() {
                     self.render_visible_inspector(frame, side_panel_area, inspector);
                 } else if let Some(error) = &self.inspector_error {
+                    let header_area = top_header_area(side_panel_area);
+                    if header_area.height > 0 {
+                        frame.render_widget(
+                            Paragraph::new(Line::styled(
+                                "Inspector",
+                                self.palette.inspector_header,
+                            )),
+                            header_area,
+                        );
+                    }
                     frame.render_widget(
                         Paragraph::new(error.clone()).wrap(Wrap { trim: false }),
-                        side_panel_area,
+                        scrolled_body_area(side_panel_area),
                     );
                 } else {
+                    let header_area = top_header_area(side_panel_area);
+                    if header_area.height > 0 {
+                        frame.render_widget(
+                            Paragraph::new(Line::styled(
+                                "Inspector",
+                                self.palette.inspector_header,
+                            )),
+                            header_area,
+                        );
+                    }
                     frame.render_widget(
                         Paragraph::new(self.inspector_empty_panel_message())
                             .wrap(Wrap { trim: false }),
-                        side_panel_area,
+                        scrolled_body_area(side_panel_area),
                     );
                 }
             }
@@ -1348,20 +1411,30 @@ impl App {
         if !self.diff_projection_active() {
             return;
         }
-        let visible_rows = self.collect_visible_rows(area.height as usize);
+        let body_area = scrolled_body_area(area);
+        let visible_rows = self.collect_visible_rows(body_area.height as usize);
         let page = self.visible_diff_page(&visible_rows).unwrap_or_else(|err| {
             self.report_render_error(format!("diff panel render failed: {err}"));
             VisibleDiffPage::default()
         });
+        let header = diff_panel::header_line(
+            offset_width(self.document.len()),
+            self.config.bytes_per_line,
+            &self.palette,
+        );
+        let header_area = top_header_area(area);
+        if header_area.height > 0 {
+            frame.render_widget(Paragraph::new(header), header_area);
+        }
         let lines = diff_panel::build_lines(
             &page.rows,
             offset_width(self.document.len()),
             self.config.bytes_per_line,
             &self.palette,
         );
-        let visible_height = area.height as usize;
+        let visible_height = body_area.height as usize;
         let visible_end = visible_height.min(lines.len());
-        frame.render_widget(Paragraph::new(lines[..visible_end].to_vec()), area);
+        frame.render_widget(Paragraph::new(lines[..visible_end].to_vec()), body_area);
     }
 
     fn render_data_panel(
@@ -1427,16 +1500,23 @@ impl App {
         let visible_height = inspector_area.height.saturating_sub(1) as usize;
         let visible_start = inspector.scroll_offset.min(all_lines.len());
         let visible_end = (visible_start + visible_height).min(all_lines.len());
-        let mut lines = vec![Line::styled(
-            format!("Format: {}", inspector.format_name),
-            self.palette.inspector_header,
-        )];
+        let header_area = top_header_area(inspector_area);
+        if header_area.height > 0 {
+            frame.render_widget(
+                Paragraph::new(Line::styled(
+                    format!("Format: {}", inspector.format_name),
+                    self.palette.inspector_header,
+                )),
+                header_area,
+            );
+        }
+        let mut lines = Vec::new();
         lines.extend(
             all_lines[visible_start..visible_end]
                 .iter()
                 .map(|line| line.line.clone()),
         );
-        frame.render_widget(Paragraph::new(lines), inspector_area);
+        frame.render_widget(Paragraph::new(lines), scrolled_body_area(inspector_area));
         self.render_inspector_edit_cursor(frame, inspector_area, &all_lines, visible_start);
     }
 

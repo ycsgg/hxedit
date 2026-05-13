@@ -2,6 +2,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::util::format::{ascii_char, hex_pair};
+use crate::view::hex_grid;
 use crate::view::palette::Palette;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +39,22 @@ pub(crate) fn build_lines(
     rows.iter()
         .map(|row| build_row(row, offset_width, bytes_per_line, palette))
         .collect()
+}
+
+pub(crate) fn header_line(
+    offset_width: usize,
+    bytes_per_line: usize,
+    palette: &Palette,
+) -> Line<'static> {
+    let mut spans = Vec::with_capacity(bytes_per_line.saturating_mul(2).saturating_add(4));
+    spans.push(Span::styled(
+        format!("{:1$} ", "", offset_width),
+        palette.gutter,
+    ));
+    spans.extend(hex_grid::column_header_spans(bytes_per_line, palette));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled("ASCII", palette.gutter));
+    Line::from(spans)
 }
 
 pub(crate) fn byte_col_from_x(x: u16, offset_width: usize, bytes_per_line: usize) -> Option<usize> {

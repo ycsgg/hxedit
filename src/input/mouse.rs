@@ -78,17 +78,18 @@ pub fn hit_test(
         }
     }
 
-    let row = row_from_point(columns.gutter, x, y)
-        .or_else(|| row_from_point(columns.hex, x, y))
-        .or_else(|| row_from_point(columns.ascii, x, y))?;
+    let body = hex_body_columns(columns);
+    let row = row_from_point(body.gutter, x, y)
+        .or_else(|| row_from_point(body.hex, x, y))
+        .or_else(|| row_from_point(body.ascii, x, y))?;
     let row_offset = viewport_top + row as u64 * bytes_per_line as u64;
 
-    let (col, phase) = if rect_contains(columns.gutter, x, y) {
+    let (col, phase) = if rect_contains(body.gutter, x, y) {
         (0, None)
-    } else if rect_contains(columns.hex, x, y) {
-        hex_col_from_x(x - columns.hex.x, bytes_per_line)?
-    } else if rect_contains(columns.ascii, x, y) {
-        (ascii_col_from_x(x - columns.ascii.x, bytes_per_line)?, None)
+    } else if rect_contains(body.hex, x, y) {
+        hex_col_from_x(x - body.hex.x, bytes_per_line)?
+    } else if rect_contains(body.ascii, x, y) {
+        (ascii_col_from_x(x - body.ascii.x, bytes_per_line)?, None)
     } else {
         return None;
     };
@@ -125,15 +126,16 @@ pub fn hit_test_diff_projected(
         }
     }
 
-    let (row, col, phase, diff_side) = if let Some(row) = row_from_point(columns.gutter, x, y) {
+    let body = hex_body_columns(columns);
+    let (row, col, phase, diff_side) = if let Some(row) = row_from_point(body.gutter, x, y) {
         (row, 0, None, Some(DiffCellSide::Current))
-    } else if let Some(row) = row_from_point(columns.hex, x, y) {
-        let (col, phase) = hex_col_from_x(x - columns.hex.x, bytes_per_line)?;
+    } else if let Some(row) = row_from_point(body.hex, x, y) {
+        let (col, phase) = hex_col_from_x(x - body.hex.x, bytes_per_line)?;
         (row, col, phase, Some(DiffCellSide::Current))
-    } else if let Some(row) = row_from_point(columns.ascii, x, y) {
+    } else if let Some(row) = row_from_point(body.ascii, x, y) {
         (
             row,
-            ascii_col_from_x(x - columns.ascii.x, bytes_per_line)?,
+            ascii_col_from_x(x - body.ascii.x, bytes_per_line)?,
             None,
             Some(DiffCellSide::Current),
         )
@@ -163,6 +165,23 @@ fn side_panel_hit(side_panel: Rect, y: u16) -> Option<MouseHit> {
         side_panel_row: Some(line - 1),
         diff_side: Some(DiffCellSide::Other),
     })
+}
+
+fn hex_body_columns(mut columns: MainColumns) -> MainColumns {
+    columns.gutter = hex_body_rect(columns.gutter);
+    columns.sep1 = hex_body_rect(columns.sep1);
+    columns.hex = hex_body_rect(columns.hex);
+    columns.sep2 = hex_body_rect(columns.sep2);
+    columns.ascii = hex_body_rect(columns.ascii);
+    columns
+}
+
+fn hex_body_rect(rect: Rect) -> Rect {
+    Rect {
+        y: rect.y.saturating_add(1),
+        height: rect.height.saturating_sub(1),
+        ..rect
+    }
 }
 
 fn row_from_point(rect: Rect, x: u16, y: u16) -> Option<usize> {
@@ -304,7 +323,7 @@ mod tests {
 
     #[test]
     fn gutter_click_selects_first_byte_of_row() {
-        let hit = hit_test(columns(), 1, 2, 0x20, 16, 256).unwrap();
+        let hit = hit_test(columns(), 1, 3, 0x20, 16, 256).unwrap();
         assert_eq!(
             hit,
             MouseHit {
@@ -318,7 +337,7 @@ mod tests {
 
     #[test]
     fn hex_click_selects_byte_and_nibble() {
-        let hit = hit_test(columns(), 10, 1, 0, 16, 256).unwrap();
+        let hit = hit_test(columns(), 10, 2, 0, 16, 256).unwrap();
         assert_eq!(
             hit,
             MouseHit {
@@ -332,7 +351,7 @@ mod tests {
 
     #[test]
     fn ascii_click_selects_right_half_byte() {
-        let hit = hit_test(columns(), 68, 0, 0, 16, 256).unwrap();
+        let hit = hit_test(columns(), 68, 1, 0, 16, 256).unwrap();
         assert_eq!(
             hit,
             MouseHit {
@@ -369,10 +388,15 @@ mod tests {
 
     #[test]
     fn diff_projected_hit_test_counts_projected_cells() {
-        let hit = hit_test_diff_projected(columns(), 18, 0, 0xb0, 16, 0xc0).unwrap();
+        let hit = hit_test_diff_projected(columns(), 18, 1, 0xb0, 16, 0xc0).unwrap();
         assert_eq!(hit.offset, 0xb3);
         assert_eq!(hit.phase, Some(NibblePhase::High));
         assert_eq!(hit.diff_side, Some(DiffCellSide::Current));
+    }
+
+    #[test]
+    fn hex_column_header_is_not_a_clickable_data_row() {
+        assert_eq!(hit_test(columns(), 10, 0, 0, 16, 256), None);
     }
 
     #[test]

@@ -46,6 +46,25 @@ pub struct HexGridCell {
     pub other_offset: Option<u64>,
 }
 
+pub(crate) fn column_header(bytes_per_line: usize, palette: &Palette) -> Line<'static> {
+    Line::from(column_header_spans(bytes_per_line, palette))
+}
+
+pub(crate) fn column_header_spans(bytes_per_line: usize, palette: &Palette) -> Vec<Span<'static>> {
+    let mut spans = Vec::with_capacity(bytes_per_line.saturating_mul(2));
+    for col in 0..bytes_per_line {
+        spans.push(Span::styled(format!("{col:02X}"), palette.gutter));
+        if col + 1 != bytes_per_line {
+            if bytes_per_line >= 8 && col + 1 == bytes_per_line / 2 {
+                spans.push(Span::styled(" │ ", palette.separator));
+            } else {
+                spans.push(Span::raw(" "));
+            }
+        }
+    }
+    spans
+}
+
 pub fn build(
     rows: &[Vec<ByteSlot>],
     row_offsets: &[u64],
@@ -422,5 +441,20 @@ mod tests {
         assert_eq!(line.spans[1].content.as_ref(), "_");
         assert_eq!(line.spans[0].style.bg, Some(Color::Red));
         assert_eq!(line.spans[1].style.bg, Some(Color::Red));
+    }
+
+    #[test]
+    fn column_header_labels_bytes_with_midpoint_separator() {
+        let line = super::column_header(16, &Palette::new(ColorLevel::Basic));
+        let rendered = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(
+            rendered,
+            "00 01 02 03 04 05 06 07 │ 08 09 0A 0B 0C 0D 0E 0F"
+        );
     }
 }

@@ -807,7 +807,7 @@ fn diff_mouse_selection_counts_projected_placeholders_and_right_side() {
     app.handle_mouse(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
         column: 9 + 32,
-        row: 0,
+        row: 1,
         modifiers: crossterm::event::KeyModifiers::empty(),
     });
     assert_eq!(app.cursor, 0xba);
@@ -823,7 +823,7 @@ fn diff_mouse_selection_counts_projected_placeholders_and_right_side() {
     app.handle_mouse(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
         column: 77 + 41,
-        row: 0,
+        row: 1,
         modifiers: crossterm::event::KeyModifiers::empty(),
     });
     assert_eq!(app.cursor, 0xba);

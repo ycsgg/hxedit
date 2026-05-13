@@ -92,7 +92,12 @@ impl App {
                     self.mode = Mode::SidePanel;
                     if self.show_side_panel && self.active_side_panel == SidePanelKind::Diff {
                         if let Some(area) = columns.side_panel {
-                            let visible_row = mouse_event.row.saturating_sub(area.y) as usize;
+                            let Some(visible_row) =
+                                mouse_event.row.checked_sub(area.y.saturating_add(1))
+                            else {
+                                return;
+                            };
+                            let visible_row = visible_row as usize;
                             let panel_x = mouse_event.column.saturating_sub(area.x);
                             let col = crate::view::diff_panel::byte_col_from_x(
                                 panel_x,
@@ -159,6 +164,7 @@ impl App {
                             return;
                         }
                         if self.show_side_panel && self.active_side_panel == SidePanelKind::Diff {
+                            self.select_diff_panel_row(visible_row);
                             return;
                         }
                         if self.show_side_panel

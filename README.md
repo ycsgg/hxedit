@@ -8,6 +8,7 @@ A terminal hex editor for large files, written in Rust.
 
 ## Features
 
+- Fixed byte-column header (`00 01 02 ... 0F` by default) for quick column lookup while scrolling
 - Non-destructive byte editing with three distinct operations:
   - overwrite in place
   - real insert
