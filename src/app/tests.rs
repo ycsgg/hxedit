@@ -480,6 +480,26 @@ fn scroll_viewport_operations() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
+fn inspector_field_highlight_only_when_inspector_panel_is_active() {
+    let mut app = app_with_inspector_field(b"hello world", 6, 5);
+
+    assert_eq!(app.inspector_highlight_range(), Some((6, 10)));
+
+    app.show_side_panel = false;
+    assert_eq!(app.inspector_highlight_range(), None);
+
+    app.show_side_panel = true;
+    app.active_side_panel = crate::app::SidePanelKind::Data;
+    assert_eq!(app.inspector_highlight_range(), None);
+
+    app.active_side_panel = crate::app::SidePanelKind::Diff;
+    assert_eq!(app.inspector_highlight_range(), None);
+
+    app.active_side_panel = crate::app::SidePanelKind::Inspector;
+    assert_eq!(app.inspector_highlight_range(), Some((6, 10)));
+}
+
+#[test]
 fn inspector_sync_and_pagination() {
     // Jump centers target row in hex view
     let bytes = vec![0_u8; 256];

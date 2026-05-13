@@ -275,34 +275,21 @@ impl App {
                     self.focus_inspector_page_or_warn_with_toggle(false);
                 }
             }
-        } else if !self.mode.is_side_panel() {
-            match self.active_side_panel {
-                SidePanelKind::Symbol if self.symbol_state().is_some() => {
-                    self.focus_symbol_panel();
-                }
-                SidePanelKind::Data if self.data_state().is_some() => {
-                    self.focus_data_panel();
-                }
-                SidePanelKind::Diff if self.diff_state().is_some() => {
-                    self.mode = Mode::SidePanel;
-                    self.ensure_diff_selection_visible();
-                }
-                _ => {
-                    self.ensure_inspector_page_state(true);
-                    self.focus_inspector_page_or_warn_with_toggle(true);
-                }
-            }
         } else {
-            if let Some(inspector) = self.inspector_mut() {
-                inspector.editing = None;
-            }
-            if self.active_side_panel == SidePanelKind::Diff {
-                self.diff_state = None;
-                self.restore_inspector_after_side_panel_close();
-            }
-            self.mode = Mode::Normal;
-            self.show_side_panel = false;
+            self.hide_side_panel_from_toggle();
         }
+    }
+
+    fn hide_side_panel_from_toggle(&mut self) {
+        if let Some(inspector) = self.inspector_mut() {
+            inspector.editing = None;
+        }
+        if self.active_side_panel == SidePanelKind::Diff {
+            self.diff_state = None;
+            self.restore_inspector_after_side_panel_close();
+        }
+        self.mode = Mode::Normal;
+        self.show_side_panel = false;
     }
 
     pub(crate) fn side_panel_visible_rows(&self) -> usize {
@@ -337,6 +324,9 @@ impl App {
     }
 
     pub(crate) fn inspector_highlight_range(&self) -> Option<(u64, u64)> {
+        if !self.show_side_panel || self.active_side_panel != SidePanelKind::Inspector {
+            return None;
+        }
         let inspector = self.inspector()?;
         match inspector.rows.get(inspector.selected_row)? {
             InspectorRow::Field {
