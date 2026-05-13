@@ -97,7 +97,20 @@ impl App {
     }
 
     pub(crate) fn activate_inspector_page(&mut self) {
+        if self.active_side_panel == SidePanelKind::Diff {
+            self.clear_diff_cell_selection();
+        }
         self.active_side_panel = SidePanelKind::Inspector;
+    }
+
+    pub(crate) fn restore_inspector_after_side_panel_close(&mut self) {
+        if self.active_side_panel == SidePanelKind::Diff {
+            self.clear_diff_cell_selection();
+        }
+        self.active_side_panel = SidePanelKind::Inspector;
+        if self.inspector_state.is_none() && self.inspector_error.is_none() {
+            self.rebuild_inspector_state(false);
+        }
     }
 
     pub(crate) fn ensure_inspector_page_state(&mut self, surface_feedback: bool) {
@@ -184,6 +197,7 @@ impl App {
     }
 
     fn focus_inspector_page_or_warn_with_toggle(&mut self, is_toggle_attempt: bool) -> bool {
+        self.clear_diff_cell_selection();
         if !self.side_panel_layout_visible() {
             if let Some(inspector) = self.inspector_mut() {
                 inspector.editing = None;
@@ -210,7 +224,7 @@ impl App {
             self.set_warning_status(self.no_format_detected_message());
             return false;
         }
-        self.active_side_panel = SidePanelKind::Inspector;
+        self.activate_inspector_page();
         self.mode = Mode::SidePanel;
         self.sync_inspector_to_cursor();
         if !self.inspector_has_editable_fields() {
@@ -251,6 +265,11 @@ impl App {
                 SidePanelKind::Data if self.data_state().is_some() => {
                     self.focus_data_panel();
                 }
+                SidePanelKind::Diff if self.diff_state().is_some() => {
+                    self.active_side_panel = SidePanelKind::Diff;
+                    self.mode = Mode::SidePanel;
+                    self.ensure_diff_selection_visible();
+                }
                 _ => {
                     self.ensure_inspector_page_state(true);
                     self.focus_inspector_page_or_warn_with_toggle(false);
@@ -264,6 +283,10 @@ impl App {
                 SidePanelKind::Data if self.data_state().is_some() => {
                     self.focus_data_panel();
                 }
+                SidePanelKind::Diff if self.diff_state().is_some() => {
+                    self.mode = Mode::SidePanel;
+                    self.ensure_diff_selection_visible();
+                }
                 _ => {
                     self.ensure_inspector_page_state(true);
                     self.focus_inspector_page_or_warn_with_toggle(true);
@@ -272,6 +295,10 @@ impl App {
         } else {
             if let Some(inspector) = self.inspector_mut() {
                 inspector.editing = None;
+            }
+            if self.active_side_panel == SidePanelKind::Diff {
+                self.diff_state = None;
+                self.restore_inspector_after_side_panel_close();
             }
             self.mode = Mode::Normal;
             self.show_side_panel = false;

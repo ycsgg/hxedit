@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::commands::{
     split_command,
-    types::{Command, ExportFormat, GotoTarget, HashAlgorithm},
+    types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm},
 };
 use crate::copy::{CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
@@ -113,6 +113,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 .ok_or_else(|| HxError::InvalidHashAlgorithm(arg.to_owned()))?;
             Ok(Command::Hash { algorithm: algo })
         }
+        "diff" => parse_diff(rest),
         #[cfg(feature = "disasm")]
         "dis" | "disassemble" => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Disassemble { arch: None }),
@@ -175,6 +176,44 @@ fn parse_goto_target(input: &str) -> HxResult<GotoTarget> {
 
 fn opt_path(input: Option<&str>) -> Option<PathBuf> {
     input.filter(|s| !s.is_empty()).map(PathBuf::from)
+}
+
+fn parse_diff(input: Option<&str>) -> HxResult<Command> {
+    let rest = input
+        .map(str::trim)
+        .filter(|arg| !arg.is_empty())
+        .ok_or(HxError::MissingArgument("diff path|refresh|next|prev|off"))?;
+
+    match rest {
+        "refresh" => return Ok(Command::Diff(DiffCommand::Refresh)),
+        "next" => return Ok(Command::Diff(DiffCommand::Next)),
+        "prev" => return Ok(Command::Diff(DiffCommand::Prev)),
+        "off" => return Ok(Command::Diff(DiffCommand::Off)),
+        _ => {}
+    }
+
+    if let Some(after_flag) = rest.strip_prefix("-n") {
+        let after_flag = after_flag.trim_start();
+        let (raw_n, path) = split_command(after_flag);
+        if raw_n.is_empty() {
+            return Err(HxError::MissingArgument("diff max shift"));
+        }
+        let max_shift = usize::try_from(parse_offset(raw_n)?)
+            .map_err(|_| HxError::InvalidOffset(raw_n.to_owned()))?;
+        let path = path
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .ok_or(HxError::MissingArgument("diff path"))?;
+        return Ok(Command::Diff(DiffCommand::Open {
+            path: PathBuf::from(path),
+            max_shift: Some(max_shift),
+        }));
+    }
+
+    Ok(Command::Diff(DiffCommand::Open {
+        path: PathBuf::from(rest),
+        max_shift: None,
+    }))
 }
 
 fn parse_undo_steps(input: Option<&str>) -> HxResult<usize> {
@@ -432,6 +471,40 @@ mod tests {
     fn data_command_parses() {
         assert_eq!(parse_command("data").unwrap(), Command::Data);
         assert_eq!(parse_command("data off").unwrap(), Command::DataOff);
+    }
+
+    #[test]
+    fn diff_command_parses_paths_and_subcommands() {
+        assert_eq!(
+            parse_command("diff other file.bin").unwrap(),
+            Command::Diff(DiffCommand::Open {
+                path: PathBuf::from("other file.bin"),
+                max_shift: None,
+            })
+        );
+        assert_eq!(
+            parse_command("diff -n 0x80 other.bin").unwrap(),
+            Command::Diff(DiffCommand::Open {
+                path: PathBuf::from("other.bin"),
+                max_shift: Some(0x80),
+            })
+        );
+        assert_eq!(
+            parse_command("diff refresh").unwrap(),
+            Command::Diff(DiffCommand::Refresh)
+        );
+        assert_eq!(
+            parse_command("diff next").unwrap(),
+            Command::Diff(DiffCommand::Next)
+        );
+        assert_eq!(
+            parse_command("diff prev").unwrap(),
+            Command::Diff(DiffCommand::Prev)
+        );
+        assert_eq!(
+            parse_command("diff off").unwrap(),
+            Command::Diff(DiffCommand::Off)
+        );
     }
 
     #[test]

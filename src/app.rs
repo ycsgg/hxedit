@@ -6,6 +6,7 @@ mod clipboard_ops;
 mod command_input;
 mod commands;
 mod data_state;
+mod diff_state;
 mod disasm_editing;
 mod editing_state;
 mod events;
@@ -43,6 +44,7 @@ use crate::mode::Mode;
 use crate::profile::{Profiler, StartupStats};
 use crate::view::layout::MainPaneKind;
 use crate::view::{layout, palette::Palette};
+pub(crate) use diff_state::DiffState;
 use navigation::align_offset;
 
 /// Owns the editor runtime: document state, viewport state, and the TUI loop.
@@ -60,6 +62,7 @@ pub(crate) enum SidePanelKind {
     Inspector,
     Symbol,
     Data,
+    Diff,
 }
 
 /// Data inspector state for cursor-relative primitive decoding.
@@ -128,6 +131,10 @@ pub struct App {
     symbol_state: Option<SymbolState>,
     /// Cached cursor-relative data panel state.
     data_state: Option<DataState>,
+    /// Cached diff side panel state.
+    diff_state: Option<DiffState>,
+    /// Monotonic logical-content revision used to mark diff results stale.
+    document_revision: u64,
     /// Distinguishes “no detected format” from “detected but failed to parse”.
     inspector_error: Option<String>,
     /// Last non-fatal render read error already surfaced to stderr.
@@ -443,6 +450,8 @@ impl App {
             inspector_state: None,
             symbol_state: None,
             data_state: None,
+            diff_state: None,
+            document_revision: 0,
             inspector_error: None,
             last_render_error: None,
         };

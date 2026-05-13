@@ -147,6 +147,23 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
             details: "compute hash of the current selection (visual or selected inspector field), or the entire file if no selection is active".to_owned(),
         },
+        "diff" => {
+            let syntax = match rest.map(str::trim) {
+                Some("off") => "diff off".to_owned(),
+                Some("refresh") => "diff refresh".to_owned(),
+                Some("next") => "diff next".to_owned(),
+                Some("prev") => "diff prev".to_owned(),
+                Some(arg) if arg.starts_with("-n") => "diff -n <N> <path>".to_owned(),
+                _ => "diff <path> | diff -n <N> <path> | diff refresh|next|prev|off"
+                    .to_owned(),
+            };
+            CommandHint {
+                syntax,
+                details:
+                    "show a read-only synchronized page comparing current logical bytes with another file; visible pages realign inserted/deleted bytes within N before coloring"
+                        .to_owned(),
+            }
+        }
         #[cfg(feature = "disasm")]
         "dis" | "disassemble" => {
             let syntax = match rest.map(str::trim) {
@@ -327,6 +344,7 @@ fn known_commands() -> Vec<&'static str> {
         "xor",
         "xor!",
         "hash",
+        "diff",
         "data",
         "p",
         "paste",

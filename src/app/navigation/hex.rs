@@ -5,6 +5,7 @@ use super::align_offset;
 
 impl App {
     pub(crate) fn move_horizontal(&mut self, delta: i64) {
+        self.clear_diff_cell_selection();
         self.ensure_insert_pending_committed();
         self.cursor = self.offset_with_delta(self.cursor, delta);
         if let Mode::EditHex { ref mut phase } = self.mode {
@@ -13,6 +14,7 @@ impl App {
     }
 
     pub(crate) fn move_vertical(&mut self, rows: i64) {
+        self.clear_diff_cell_selection();
         self.ensure_insert_pending_committed();
         if matches!(self.main_view, MainView::Disassembly(_)) {
             self.move_vertical_disassembly(rows);

@@ -6,6 +6,7 @@ pub mod commands;
 pub mod config;
 pub mod copy;
 pub mod core;
+pub mod diff;
 pub mod disasm;
 pub mod error;
 pub mod executable;

@@ -31,6 +31,7 @@ impl App {
         }
 
         if undone > 0 {
+            self.mark_document_changed();
             self.invalidate_disassembly_cache();
         }
         self.refresh_inspector();
@@ -64,6 +65,7 @@ impl App {
         }
 
         if redone > 0 {
+            self.mark_document_changed();
             self.invalidate_disassembly_cache();
         }
         self.refresh_inspector();
@@ -144,6 +146,9 @@ impl App {
         if ops.is_empty() {
             return;
         }
+        if !ops.iter().any(edit_op_has_effect) {
+            return;
+        }
         self.undo_stack.push(UndoStep {
             cursor_before,
             mode_before,
@@ -152,5 +157,16 @@ impl App {
             ops,
         });
         self.redo_stack.clear();
+        self.mark_document_changed();
+    }
+}
+
+fn edit_op_has_effect(op: &EditOp) -> bool {
+    match op {
+        EditOp::Insert { cells, .. } | EditOp::RealDelete { cells, .. } => !cells.is_empty(),
+        EditOp::TombstoneDelete { ids } => !ids.is_empty(),
+        EditOp::ReplaceBytes { changes } => {
+            changes.iter().any(|change| change.before != change.after)
+        }
     }
 }

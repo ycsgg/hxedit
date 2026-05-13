@@ -17,6 +17,7 @@ A terminal hex editor for large files, written in Rust.
 - Built-in format inspectors for ELF, PE/COFF, Mach-O, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG
 - Hashing for MD5, SHA1, SHA256, SHA512, and CRC32
 - Clipboard copy/paste, export, fill/zero/xor/replace transforms
+- Read-only synchronized diff page against another file (`:diff`)
 - Large-file support through paged I/O and cache
 - Optional disassembly browsing, symbol search, and inline assemble patching
 
@@ -46,7 +47,7 @@ hxedit some.bin
 
 | Bundle | Build command | Includes |
 |------|------|------|
-| `core` | `cargo build --release --no-default-features` | Hex editor, inspector, search, hash, copy/paste, export |
+| `core` | `cargo build --release --no-default-features` | Hex editor, inspector, search, diff, hash, copy/paste, export |
 | `default` | `cargo build --release` | `core` + disassembly view, instruction search, symbol panel |
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching |
 
@@ -85,6 +86,7 @@ Notes:
 | `:fill <pattern> <len>` / `:zero <len>` | Overwrite transforms |
 | `:re ...` / `:re! ...` | Equal-length replace / length-changing replace |
 | `:hash md5|sha1|sha256|sha512|crc32` | Hash |
+| `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh|next|prev|off` | Show a synchronized page comparing current logical bytes with another file; visible pages realign inserted/deleted bytes within `N`, equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__` |
 | `:insp` / `:insp more` | Open inspector / reveal more paginated entries |
 | `:format ...` | Force format |
 

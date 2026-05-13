@@ -33,6 +33,8 @@ impl App {
                         }
                     } else if self.active_side_panel == SidePanelKind::Data {
                         self.scroll_data_panel(-3);
+                    } else if self.active_side_panel == SidePanelKind::Diff {
+                        self.scroll_diff_panel(-3);
                     } else {
                         self.scroll_inspector(-3);
                     }
@@ -65,6 +67,8 @@ impl App {
                         }
                     } else if self.active_side_panel == SidePanelKind::Data {
                         self.scroll_data_panel(3);
+                    } else if self.active_side_panel == SidePanelKind::Diff {
+                        self.scroll_diff_panel(3);
                     } else {
                         self.scroll_inspector(3);
                     }
@@ -86,6 +90,43 @@ impl App {
                         self.leave_mode();
                     }
                     self.mode = Mode::SidePanel;
+                    if self.show_side_panel && self.active_side_panel == SidePanelKind::Diff {
+                        if let Some(area) = columns.side_panel {
+                            let visible_row = mouse_event.row.saturating_sub(area.y) as usize;
+                            let panel_x = mouse_event.column.saturating_sub(area.x);
+                            let col = crate::view::diff_panel::byte_col_from_x(
+                                panel_x,
+                                crate::util::format::offset_width(self.document.len()),
+                                self.config.bytes_per_line,
+                            )
+                            .unwrap_or(0);
+                            if let Some(hit) = self.visible_diff_cell_hit(
+                                visible_row,
+                                col,
+                                crate::input::mouse::DiffCellSide::Other,
+                            ) {
+                                let anchor = hit
+                                    .current_display_offset
+                                    .or_else(|| {
+                                        self.document
+                                            .display_offset_for_logical_offset(hit.visual_offset)
+                                    })
+                                    .unwrap_or_else(|| self.clamp_offset(hit.visual_offset));
+                                self.cursor = self.clamp_offset(anchor);
+                                if let Some(other_offset) = hit.other_offset {
+                                    self.select_diff_other_cell(other_offset, self.cursor);
+                                } else {
+                                    self.clear_diff_cell_selection();
+                                }
+                                self.ensure_cursor_visible();
+                                self.sync_inspector_to_cursor();
+                                self.refresh_data_panel();
+                            } else {
+                                self.select_diff_panel_row(visible_row);
+                            }
+                        }
+                        return;
+                    }
                 }
 
                 if let Some(hit) =
@@ -115,6 +156,9 @@ impl App {
                                 .map(|state| state.scroll_offset + visible_row + 1)
                                 .unwrap_or(visible_row + 1);
                             self.select_data_panel_row(actual_row);
+                            return;
+                        }
+                        if self.show_side_panel && self.active_side_panel == SidePanelKind::Diff {
                             return;
                         }
                         if self.show_side_panel
@@ -166,8 +210,11 @@ impl App {
                     if matches!(self.mode, Mode::InsertHex { .. }) {
                         self.commit_pending_insert();
                     }
-                    self.mouse_selection_anchor = Some(hit.offset);
-                    self.cursor = hit.offset;
+                    let Some(selection_offset) = self.resolve_mouse_hit_offset(hit) else {
+                        return;
+                    };
+                    self.mouse_selection_anchor = Some(selection_offset);
+                    self.cursor = selection_offset;
                     match self.mode {
                         Mode::EditHex { .. } => {
                             self.mode = Mode::EditHex {
@@ -206,9 +253,12 @@ impl App {
                     return;
                 };
 
-                let anchor = self.mouse_selection_anchor.unwrap_or(hit.offset);
+                let Some(selection_offset) = self.resolve_mouse_hit_offset(hit) else {
+                    return;
+                };
+                let anchor = self.mouse_selection_anchor.unwrap_or(selection_offset);
                 self.selection_anchor = Some(anchor);
-                self.cursor = hit.offset;
+                self.cursor = selection_offset;
                 self.mode = Mode::Visual;
                 self.ensure_cursor_visible();
                 self.sync_inspector_to_cursor();
@@ -228,14 +278,32 @@ impl App {
         y: u16,
     ) -> Option<crate::input::mouse::MouseHit> {
         match &self.main_view {
-            crate::app::MainView::Hex => crate::input::mouse::hit_test(
-                columns,
-                x,
-                y,
-                self.viewport_top,
-                self.config.bytes_per_line,
-                self.document.len(),
-            ),
+            crate::app::MainView::Hex => {
+                if self.diff_projection_active() {
+                    crate::input::mouse::hit_test_diff_projected(
+                        columns,
+                        x,
+                        y,
+                        self.viewport_top,
+                        self.config.bytes_per_line,
+                        self.document.len().max(
+                            self.viewport_top.saturating_add(
+                                self.visible_rows()
+                                    .saturating_mul(self.config.bytes_per_line as u64),
+                            ),
+                        ),
+                    )
+                } else {
+                    crate::input::mouse::hit_test(
+                        columns,
+                        x,
+                        y,
+                        self.viewport_top,
+                        self.config.bytes_per_line,
+                        self.document.len(),
+                    )
+                }
+            }
             crate::app::MainView::Disassembly(state) => {
                 let state = state.clone();
                 let rows = self
@@ -246,6 +314,51 @@ impl App {
                     )
                     .ok()?;
                 crate::input::mouse::disassembly_hit_test(columns, x, y, &rows)
+            }
+        }
+    }
+
+    fn resolve_mouse_hit_offset(&mut self, hit: crate::input::mouse::MouseHit) -> Option<u64> {
+        let Some(side) = hit.diff_side else {
+            self.clear_diff_cell_selection();
+            return Some(hit.offset);
+        };
+        let visible_row = hit
+            .offset
+            .saturating_sub(self.viewport_top)
+            .checked_div(self.config.bytes_per_line as u64)
+            .unwrap_or(0) as usize;
+        let col = hit
+            .offset
+            .saturating_sub(self.viewport_top)
+            .checked_rem(self.config.bytes_per_line as u64)
+            .unwrap_or(0) as usize;
+        let Some(diff_hit) = self.visible_diff_cell_hit(visible_row, col, side) else {
+            self.clear_diff_cell_selection();
+            return None;
+        };
+        match diff_hit.side {
+            crate::input::mouse::DiffCellSide::Current => {
+                self.clear_diff_cell_selection();
+                let target = diff_hit
+                    .current_display_offset
+                    .unwrap_or(diff_hit.visual_offset);
+                Some(self.clamp_offset(target))
+            }
+            crate::input::mouse::DiffCellSide::Other => {
+                let anchor = diff_hit
+                    .current_display_offset
+                    .or_else(|| {
+                        self.document
+                            .display_offset_for_logical_offset(diff_hit.visual_offset)
+                    })
+                    .unwrap_or_else(|| self.clamp_offset(diff_hit.visual_offset));
+                if let Some(other_offset) = diff_hit.other_offset {
+                    self.select_diff_other_cell(other_offset, anchor);
+                } else {
+                    self.clear_diff_cell_selection();
+                }
+                Some(self.clamp_offset(anchor))
             }
         }
     }

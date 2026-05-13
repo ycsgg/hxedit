@@ -31,6 +31,7 @@ impl App {
     }
 
     pub(crate) fn open_data_panel(&mut self) {
+        self.clear_diff_cell_selection();
         self.show_side_panel = true;
         self.data_state = Some(DataState {
             base_offset: self.cursor_anchor_offset(),
@@ -45,7 +46,7 @@ impl App {
     pub(crate) fn close_data_panel(&mut self) {
         if self.data_state.is_some() {
             self.data_state = None;
-            self.active_side_panel = SidePanelKind::Inspector;
+            self.restore_inspector_after_side_panel_close();
             self.show_side_panel = false;
             if self.mode.is_side_panel() {
                 self.mode = Mode::Normal;

@@ -11,7 +11,7 @@ use crate::action::Action;
 use crate::app::{App, SearchDirection, StatusLevel};
 use crate::cli::Cli;
 use crate::clipboard::test_clipboard_text;
-use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
+use crate::commands::types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::core::document::ByteSlot;
 use crate::format::parse::{FieldValue, StructValue};
 use crate::format::types::{FieldDef, FieldType};
@@ -676,6 +676,161 @@ fn data_panel_syncs_cursor_and_mouse_selection() {
     assert_eq!(
         app.data_state().unwrap().selected_label.as_deref(),
         Some("uint16")
+    );
+}
+
+#[test]
+fn diff_command_opens_synced_page_without_full_scan() {
+    let dir = tempdir().unwrap();
+    let other = dir.path().join("other.bin");
+    fs::write(&other, b"abXYcd").unwrap();
+    let mut app = app_with_bytes(b"abcd");
+
+    app.execute_command(Command::Diff(DiffCommand::Open {
+        path: other.clone(),
+        max_shift: Some(2),
+    }))
+    .unwrap();
+
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Diff);
+    assert!(app.show_side_panel);
+    assert_eq!(app.mode, Mode::SidePanel);
+    let diff = app.diff_state().unwrap();
+    assert_eq!(diff.options.max_shift, 2);
+    assert_eq!(diff.other_len, 6);
+    assert!(!diff.stale);
+    assert!(app.status_message.contains("logical bytes"));
+
+    app.mode = Mode::Normal;
+    app.handle_action(Action::DeleteByte);
+    assert!(!app.diff_state().unwrap().stale);
+
+    app.execute_command(Command::Diff(DiffCommand::Refresh))
+        .unwrap();
+    assert!(!app.diff_state().unwrap().stale);
+}
+
+#[test]
+fn diff_navigation_and_off_behaviour() {
+    let dir = tempdir().unwrap();
+    let other = dir.path().join("other.bin");
+    fs::write(&other, b"axcd").unwrap();
+    let mut app = app_with_bytes(b"abcd");
+    app.execute_command(Command::Diff(DiffCommand::Open {
+        path: other,
+        max_shift: Some(0),
+    }))
+    .unwrap();
+
+    app.execute_command(Command::Diff(DiffCommand::Next))
+        .unwrap();
+    assert_eq!(app.cursor, 1);
+
+    app.execute_command(Command::Diff(DiffCommand::Off))
+        .unwrap();
+    assert!(app.diff_state().is_none());
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Inspector);
+    assert!(!app.show_side_panel);
+}
+
+#[test]
+fn diff_closes_when_switching_or_hiding_side_panel() {
+    let dir = tempdir().unwrap();
+    let other = dir.path().join("other.bin");
+    fs::write(&other, b"abXc").unwrap();
+
+    let mut app = app_with_bytes(b"abc");
+    app.execute_command(Command::Diff(DiffCommand::Open {
+        path: other.clone(),
+        max_shift: None,
+    }))
+    .unwrap();
+    app.handle_action(Action::ToggleSidePanel);
+    assert!(app.diff_state().is_none());
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Inspector);
+    assert!(!app.show_side_panel);
+
+    let mut app2 = app_with_bytes(b"abc");
+    app2.execute_command(Command::Diff(DiffCommand::Open {
+        path: other.clone(),
+        max_shift: None,
+    }))
+    .unwrap();
+    app2.execute_command(Command::Data).unwrap();
+    assert!(app2.diff_state().is_none());
+    assert_eq!(app2.active_side_panel, crate::app::SidePanelKind::Data);
+    assert!(app2.data_state().is_some());
+
+    let mut app3 = app_with_bytes(b"abc");
+    app3.inspector_error = Some("manual inspector placeholder".to_owned());
+    app3.execute_command(Command::Diff(DiffCommand::Open {
+        path: other,
+        max_shift: None,
+    }))
+    .unwrap();
+    app3.execute_command(Command::Inspector).unwrap();
+    assert!(app3.diff_state().is_none());
+    assert_eq!(app3.active_side_panel, crate::app::SidePanelKind::Inspector);
+}
+
+#[test]
+fn diff_mouse_selection_counts_projected_placeholders_and_right_side() {
+    let dir = tempdir().unwrap();
+    let other = dir.path().join("other.bin");
+    let base = (0..0x140)
+        .map(|idx| (idx as u8).wrapping_mul(37).wrapping_add(11))
+        .collect::<Vec<_>>();
+    let mut other_bytes = base.clone();
+    other_bytes.insert(0xba, 0xab);
+    fs::write(&other, &other_bytes).unwrap();
+
+    let mut app = app_with_bytes(&base);
+    app.viewport_top = 0xb0;
+    app.view_rows = 4;
+    app.execute_command(Command::Diff(DiffCommand::Open {
+        path: other,
+        max_shift: None,
+    }))
+    .unwrap();
+    app.last_columns = Some(crate::view::layout::MainColumns {
+        main_pane_kind: crate::view::layout::MainPaneKind::Hex,
+        gutter: ratatui::layout::Rect::new(0, 0, 8, 4),
+        sep1: ratatui::layout::Rect::new(8, 0, 1, 4),
+        hex: ratatui::layout::Rect::new(9, 0, 49, 4),
+        sep2: ratatui::layout::Rect::new(58, 0, 1, 4),
+        ascii: ratatui::layout::Rect::new(59, 0, 17, 4),
+        side_panel_sep: Some(ratatui::layout::Rect::new(76, 0, 1, 4)),
+        side_panel: Some(ratatui::layout::Rect::new(77, 0, 80, 4)),
+    });
+
+    // Left-side projected `__` occupies the visual cell at row 0 / col 0x0a.
+    app.handle_mouse(crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: 9 + 32,
+        row: 0,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    });
+    assert_eq!(app.cursor, 0xba);
+    assert_eq!(
+        app.diff_state().unwrap().selected_other_offset,
+        None,
+        "left current-side click should not leave a right-side selection"
+    );
+
+    // Right-side panel click on the corresponding other-only byte synchronizes
+    // the left cursor and records the selected other raw offset for highlighting.
+    app.cursor = 0xb0;
+    app.handle_mouse(crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: 77 + 41,
+        row: 0,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    });
+    assert_eq!(app.cursor, 0xba);
+    assert_eq!(app.diff_state().unwrap().selected_other_offset, Some(0xba));
+    assert_eq!(
+        app.diff_state().unwrap().selected_other_anchor_display,
+        Some(0xba)
     );
 }
 

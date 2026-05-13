@@ -54,6 +54,9 @@ impl App {
                 } else if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Data
                 {
                     self.scroll_data_panel(-(self.side_panel_visible_rows() as i64));
+                } else if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Diff
+                {
+                    self.move_diff_selection(-(self.side_panel_visible_rows() as i64));
                 } else {
                     self.move_vertical(-(self.view_rows as i64));
                 }
@@ -65,6 +68,9 @@ impl App {
                 } else if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Data
                 {
                     self.scroll_data_panel(self.side_panel_visible_rows() as i64);
+                } else if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Diff
+                {
+                    self.move_diff_selection(self.side_panel_visible_rows() as i64);
                 } else {
                     self.move_vertical(self.view_rows as i64);
                 }
@@ -217,6 +223,7 @@ impl App {
                     SidePanelKind::Inspector => self.move_inspector_selection(true),
                     SidePanelKind::Symbol => self.move_symbol_selection(-1),
                     SidePanelKind::Data => self.move_data_panel_selection(-1),
+                    SidePanelKind::Diff => self.move_diff_selection(-1),
                 }
                 Ok(true)
             }
@@ -225,6 +232,7 @@ impl App {
                     SidePanelKind::Inspector => self.move_inspector_selection(false),
                     SidePanelKind::Symbol => self.move_symbol_selection(1),
                     SidePanelKind::Data => self.move_data_panel_selection(1),
+                    SidePanelKind::Diff => self.move_diff_selection(1),
                 }
                 Ok(true)
             }
@@ -233,6 +241,7 @@ impl App {
                     SidePanelKind::Inspector => self.handle_inspector_enter()?,
                     SidePanelKind::Symbol => self.navigate_to_selected_symbol()?,
                     SidePanelKind::Data => self.move_data_panel_selection(0),
+                    SidePanelKind::Diff => self.navigate_to_selected_diff_hunk()?,
                 }
                 Ok(true)
             }
@@ -308,6 +317,9 @@ impl App {
                 self.refresh_data_panel();
                 if !is_command_edit_action(action) {
                     self.clear_error_if_command_done();
+                }
+                if self.diff_state().is_some_and(|state| state.stale) {
+                    self.set_notice_status("diff stale; run :diff refresh");
                 }
             }
             Err(err) => {

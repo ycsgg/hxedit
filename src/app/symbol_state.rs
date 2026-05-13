@@ -56,6 +56,7 @@ impl App {
     }
 
     pub(crate) fn focus_symbol_panel(&mut self) {
+        self.clear_diff_cell_selection();
         self.active_side_panel = SidePanelKind::Symbol;
         self.mode = Mode::SidePanel;
         self.ensure_symbol_selection_visible();

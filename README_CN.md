@@ -17,6 +17,7 @@
 - 内置格式检查器：ELF、PE/COFF、Mach-O、PNG、ZIP、GZIP、GIF、BMP、WAV、TAR、JPEG
 - 哈希：MD5、SHA1、SHA256、SHA512、CRC32
 - 剪贴板复制 / 粘贴、导出、fill / zero / xor / replace
+- 只读同步滚动 diff 页面，可用 `:diff` 对比另一个文件
 - 分页 I/O 和缓存，适合大文件
 - 可选的反汇编浏览、symbol 搜索、内联汇编 patch
 
@@ -46,7 +47,7 @@ hxedit some.bin
 
 | 档位 | 构建命令 | 包含内容 |
 |------|------|------|
-| `core` | `cargo build --release --no-default-features` | Hex editor、inspector、search、hash、copy/paste、export |
+| `core` | `cargo build --release --no-default-features` | Hex editor、inspector、search、diff、hash、copy/paste、export |
 | `default` | `cargo build --release` | `core` + 反汇编视图、指令搜索、symbol panel |
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone 驱动的内联汇编 patch |
 
@@ -85,6 +86,7 @@ hxedit some.bin
 | `:fill <pattern> <len>` / `:zero <len>` | overwrite 批量写入 |
 | `:re ...` / `:re! ...` | 等长替换 / 允许长度变化的替换 |
 | `:hash md5|sha1|sha256|sha512|crc32` | 哈希 |
+| `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh|next|prev|off` | 同步滚动显示 current logical bytes 与另一个文件；可见页会在 `N` 范围内重对齐插入/删除字节，右侧相同字节为灰色，不同字节左右亮黄，缺失字节以红色 `__` 占位 |
 | `:insp` / `:insp more` | 打开 inspector / 加载更多分页项 |
 | `:format ...` | 强制格式 |
 

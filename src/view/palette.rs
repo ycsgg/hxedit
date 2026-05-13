@@ -69,6 +69,11 @@ pub struct Palette {
     pub inspector_active: Style,
     pub inspector_edit: Style,
     pub inspector_highlight: Style,
+    pub diff_only_current: Style,
+    pub diff_only_other: Style,
+    pub diff_replace: Style,
+    pub diff_unresolved: Style,
+    pub diff_active: Style,
     pub disasm_label: Style,
     pub disasm_bytes: Style,
     pub disasm_mnemonic: Style,
@@ -155,6 +160,25 @@ impl Palette {
                 .bg(Color::Rgb(80, 80, 80))
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
+            diff_only_current: Style::default()
+                .bg(Color::Rgb(200, 50, 50))
+                .fg(Color::Rgb(255, 255, 255))
+                .add_modifier(Modifier::BOLD),
+            diff_only_other: Style::default()
+                .bg(Color::Rgb(200, 50, 50))
+                .fg(Color::Rgb(255, 255, 255))
+                .add_modifier(Modifier::BOLD),
+            diff_replace: Style::default()
+                .bg(Color::Rgb(220, 180, 0))
+                .fg(Color::Rgb(30, 30, 30))
+                .add_modifier(Modifier::BOLD),
+            diff_unresolved: Style::default()
+                .fg(Color::Rgb(255, 140, 140))
+                .add_modifier(Modifier::UNDERLINED),
+            diff_active: Style::default()
+                .bg(Color::Rgb(70, 70, 90))
+                .fg(Color::Rgb(255, 255, 255))
+                .add_modifier(Modifier::BOLD),
             disasm_label: Style::default()
                 .fg(Color::Rgb(196, 176, 122))
                 .add_modifier(Modifier::BOLD),
@@ -235,6 +259,25 @@ impl Palette {
                 .fg(Color::Indexed(222))
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
+            diff_only_current: Style::default()
+                .bg(Color::Indexed(160))
+                .fg(Color::Indexed(231))
+                .add_modifier(Modifier::BOLD),
+            diff_only_other: Style::default()
+                .bg(Color::Indexed(160))
+                .fg(Color::Indexed(231))
+                .add_modifier(Modifier::BOLD),
+            diff_replace: Style::default()
+                .bg(Color::Indexed(220))
+                .fg(Color::Indexed(235))
+                .add_modifier(Modifier::BOLD),
+            diff_unresolved: Style::default()
+                .fg(Color::Indexed(203))
+                .add_modifier(Modifier::UNDERLINED),
+            diff_active: Style::default()
+                .bg(Color::Indexed(240))
+                .fg(Color::Indexed(231))
+                .add_modifier(Modifier::BOLD),
             disasm_label: Style::default()
                 .fg(Color::Indexed(180))
                 .add_modifier(Modifier::BOLD),
@@ -313,6 +356,25 @@ impl Palette {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
+            diff_only_current: Style::default()
+                .bg(Color::Red)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+            diff_only_other: Style::default()
+                .bg(Color::Red)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+            diff_replace: Style::default()
+                .bg(Color::Yellow)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+            diff_unresolved: Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::UNDERLINED),
+            diff_active: Style::default()
+                .bg(Color::DarkGray)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
             disasm_label: Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -370,6 +432,19 @@ impl Palette {
             inspector_highlight: base
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::UNDERLINED),
+            diff_only_current: base
+                .add_modifier(Modifier::REVERSED)
+                .add_modifier(Modifier::BOLD),
+            diff_only_other: base
+                .add_modifier(Modifier::REVERSED)
+                .add_modifier(Modifier::BOLD),
+            diff_replace: base
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
+            diff_unresolved: base.add_modifier(Modifier::REVERSED),
+            diff_active: base
+                .add_modifier(Modifier::REVERSED)
+                .add_modifier(Modifier::BOLD),
             disasm_label: base.add_modifier(Modifier::BOLD),
             disasm_bytes: base,
             disasm_mnemonic: base.add_modifier(Modifier::BOLD),

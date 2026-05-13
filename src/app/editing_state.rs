@@ -155,6 +155,7 @@ impl App {
                 let offset = self.cursor;
                 self.redo_stack.clear();
                 self.document.insert_byte(offset, value << 4)?;
+                self.mark_document_changed();
                 self.cursor = offset;
                 self.mode = Mode::InsertHex {
                     pending: Some(PendingInsert {
@@ -187,6 +188,7 @@ impl App {
                 if let Some(pending) = pending {
                     self.redo_stack.clear();
                     self.document.delete_range_real(pending.offset, 1)?;
+                    self.mark_document_changed();
                     self.cursor = pending.offset;
                     self.mode = Mode::InsertHex { pending: None };
                     self.invalidate_disassembly_cache();
@@ -264,6 +266,7 @@ impl App {
         };
 
         self.document.delete_range_real(pending.offset, 1)?;
+        self.mark_document_changed();
         self.cursor = pending.offset;
         self.mode = Mode::InsertHex { pending: None };
         self.set_info_status("undid 1 action");

@@ -11,6 +11,13 @@ pub struct MouseHit {
     pub offset: u64,
     pub phase: Option<NibblePhase>,
     pub side_panel_row: Option<usize>,
+    pub diff_side: Option<DiffCellSide>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffCellSide {
+    Current,
+    Other,
 }
 
 pub fn disassembly_hit_test(
@@ -44,6 +51,7 @@ pub fn disassembly_hit_test(
         offset,
         phase,
         side_panel_row: None,
+        diff_side: None,
     })
 }
 
@@ -90,6 +98,57 @@ pub fn hit_test(
         offset,
         phase,
         side_panel_row: None,
+        diff_side: None,
+    })
+}
+
+pub fn hit_test_diff_projected(
+    columns: MainColumns,
+    x: u16,
+    y: u16,
+    viewport_top: u64,
+    bytes_per_line: usize,
+    visual_len: u64,
+) -> Option<MouseHit> {
+    if visual_len == 0 || bytes_per_line == 0 {
+        if let Some(side_panel) = columns.side_panel {
+            if rect_contains(side_panel, x, y) {
+                return side_panel_hit(side_panel, y);
+            }
+        }
+        return None;
+    }
+
+    if let Some(side_panel) = columns.side_panel {
+        if rect_contains(side_panel, x, y) {
+            return side_panel_hit(side_panel, y);
+        }
+    }
+
+    let (row, col, phase, diff_side) = if let Some(row) = row_from_point(columns.gutter, x, y) {
+        (row, 0, None, Some(DiffCellSide::Current))
+    } else if let Some(row) = row_from_point(columns.hex, x, y) {
+        let (col, phase) = hex_col_from_x(x - columns.hex.x, bytes_per_line)?;
+        (row, col, phase, Some(DiffCellSide::Current))
+    } else if let Some(row) = row_from_point(columns.ascii, x, y) {
+        (
+            row,
+            ascii_col_from_x(x - columns.ascii.x, bytes_per_line)?,
+            None,
+            Some(DiffCellSide::Current),
+        )
+    } else {
+        return None;
+    };
+
+    let offset = viewport_top
+        .saturating_add(row as u64 * bytes_per_line as u64)
+        .saturating_add(col as u64);
+    (offset < visual_len).then_some(MouseHit {
+        offset,
+        phase,
+        side_panel_row: None,
+        diff_side,
     })
 }
 
@@ -102,6 +161,7 @@ fn side_panel_hit(side_panel: Rect, y: u16) -> Option<MouseHit> {
         offset: 0,
         phase: None,
         side_panel_row: Some(line - 1),
+        diff_side: Some(DiffCellSide::Other),
     })
 }
 
@@ -251,6 +311,7 @@ mod tests {
                 offset: 0x20 + 32,
                 phase: None,
                 side_panel_row: None,
+                diff_side: None,
             }
         );
     }
@@ -264,6 +325,7 @@ mod tests {
                 offset: 0x10,
                 phase: Some(NibblePhase::Low),
                 side_panel_row: None,
+                diff_side: None,
             }
         );
     }
@@ -277,6 +339,7 @@ mod tests {
                 offset: 8,
                 phase: None,
                 side_panel_row: None,
+                diff_side: None,
             }
         );
     }
@@ -292,6 +355,7 @@ mod tests {
                 offset: 0,
                 phase: None,
                 side_panel_row: Some(2),
+                diff_side: Some(DiffCellSide::Other),
             }
         );
     }
@@ -301,6 +365,14 @@ mod tests {
         let mut columns = columns();
         columns.side_panel = Some(Rect::new(76, 0, 16, 5));
         assert_eq!(hit_test(columns, 80, 0, 0, 16, 256), None);
+    }
+
+    #[test]
+    fn diff_projected_hit_test_counts_projected_cells() {
+        let hit = hit_test_diff_projected(columns(), 18, 0, 0xb0, 16, 0xc0).unwrap();
+        assert_eq!(hit.offset, 0xb3);
+        assert_eq!(hit.phase, Some(NibblePhase::High));
+        assert_eq!(hit.diff_side, Some(DiffCellSide::Current));
     }
 
     #[test]

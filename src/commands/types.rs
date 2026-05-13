@@ -49,6 +49,18 @@ impl HashAlgorithm {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffCommand {
+    Open {
+        path: PathBuf,
+        max_shift: Option<usize>,
+    },
+    Refresh,
+    Next,
+    Prev,
+    Off,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Quit {
         force: bool,
@@ -131,6 +143,7 @@ pub enum Command {
     Hash {
         algorithm: HashAlgorithm,
     },
+    Diff(DiffCommand),
     #[cfg(feature = "disasm")]
     Disassemble {
         arch: Option<String>,

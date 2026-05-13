@@ -204,6 +204,77 @@ impl Document {
             .is_some()
     }
 
+    /// Map a display offset to the corresponding logical byte offset.
+    ///
+    /// Tombstoned display slots have no logical byte and return `None`.
+    /// Without tombstones this is the identity mapping.
+    pub fn logical_offset_for_display_offset(&self, display_offset: u64) -> Option<u64> {
+        if display_offset >= self.len() {
+            return None;
+        }
+        let id = self.cell_id_at(display_offset)?;
+        if self.is_tombstone(id) {
+            return None;
+        }
+        if !self.has_tombstones() {
+            return Some(display_offset);
+        }
+
+        let mut display_cursor = 0_u64;
+        let mut logical_cursor = 0_u64;
+        for piece in self.pieces.pieces() {
+            let piece_end = display_cursor + piece.len;
+            if piece_end <= display_offset {
+                logical_cursor += piece
+                    .len
+                    .saturating_sub(self.tombstone_count_in_piece(*piece));
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let local_len = display_offset - display_cursor;
+            logical_cursor +=
+                local_len.saturating_sub(self.tombstone_count_in_piece_prefix(*piece, local_len));
+            return Some(logical_cursor);
+        }
+        None
+    }
+
+    /// Map a logical byte offset back to a display offset.
+    pub fn display_offset_for_logical_offset(&self, logical_offset: u64) -> Option<u64> {
+        if logical_offset >= self.visible_len() {
+            return None;
+        }
+        if !self.has_tombstones() {
+            return (logical_offset < self.len()).then_some(logical_offset);
+        }
+
+        let mut display_cursor = 0_u64;
+        let mut logical_cursor = 0_u64;
+        for piece in self.pieces.pieces() {
+            let visible_in_piece = piece
+                .len
+                .saturating_sub(self.tombstone_count_in_piece(*piece));
+            if logical_cursor + visible_in_piece <= logical_offset {
+                logical_cursor += visible_in_piece;
+                display_cursor += piece.len;
+                continue;
+            }
+
+            let mut display_local = logical_offset - logical_cursor;
+            for tombstone_source_offset in self.tombstone_source_offsets_in_piece(*piece) {
+                let tombstone_local = tombstone_source_offset.saturating_sub(piece.start);
+                if tombstone_local <= display_local {
+                    display_local += 1;
+                } else {
+                    break;
+                }
+            }
+            return (display_local < piece.len).then_some(display_cursor + display_local);
+        }
+        None
+    }
+
     /// Return the replacement value for a cell, if any.
     pub fn replacement_for(&self, id: CellId) -> Option<u8> {
         self.replacements.get(&id).copied()
@@ -212,6 +283,40 @@ impl Document {
     /// Borrow a slice of the add-buffer.
     pub fn add_slice(&self, start: u64, len: u64) -> &[u8] {
         self.pieces.add_buffer_slice(start, len)
+    }
+
+    fn tombstone_count_in_piece(&self, piece: Piece) -> u64 {
+        self.tombstone_count_in_piece_prefix(piece, piece.len)
+    }
+
+    fn tombstone_count_in_piece_prefix(&self, piece: Piece, len: u64) -> u64 {
+        if len == 0 || !self.has_tombstones() {
+            return 0;
+        }
+        let clamped = len.min(piece.len);
+        let lo = CellId::from_source(piece.source, piece.start);
+        let hi = CellId::from_source(piece.source, piece.start + clamped - 1);
+        use std::ops::Bound;
+        self.tombstones
+            .range((Bound::Included(lo), Bound::Included(hi)))
+            .count() as u64
+    }
+
+    fn tombstone_source_offsets_in_piece(&self, piece: Piece) -> Vec<u64> {
+        if piece.len == 0 || !self.has_tombstones() {
+            return Vec::new();
+        }
+        let lo = CellId::from_source(piece.source, piece.start);
+        let hi = CellId::from_source(piece.source, piece.start + piece.len - 1);
+        use std::ops::Bound;
+        self.tombstones
+            .range((Bound::Included(lo), Bound::Included(hi)))
+            .filter_map(|id| match (piece.source, *id) {
+                (PieceSource::Original, CellId::Original(offset))
+                | (PieceSource::Add, CellId::Add(offset)) => Some(offset),
+                _ => None,
+            })
+            .collect()
     }
 }
 

@@ -4,7 +4,7 @@ use crate::app::{
     App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState, SidePanelKind,
 };
 use crate::commands::parser::parse_command;
-use crate::commands::types::{Command, ExportFormat, GotoTarget, HashAlgorithm};
+use crate::commands::types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm};
 #[cfg(feature = "disasm")]
 use crate::disasm::backend::resolve_backend_kind;
 #[cfg(feature = "disasm")]
@@ -73,6 +73,7 @@ impl App {
                 allow_resize,
             } => self.execute_replace_command(&needle, &replacement, allow_resize),
             Command::Inspector => {
+                self.close_diff_projection_for_side_panel_switch();
                 self.execute_inspector_command();
                 Ok(())
             }
@@ -81,6 +82,7 @@ impl App {
                 Ok(())
             }
             Command::Format { name } => {
+                self.close_diff_projection_for_side_panel_switch();
                 self.execute_format_command(name);
                 Ok(())
             }
@@ -99,6 +101,7 @@ impl App {
                 self.execute_symbol_search_command(pattern, backward)
             }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
+            Command::Diff(diff) => self.execute_diff_command(diff),
             #[cfg(feature = "disasm")]
             Command::Disassemble { arch } => self.execute_disassemble_command(arch.as_deref()),
             #[cfg(feature = "disasm")]
@@ -111,13 +114,17 @@ impl App {
                 Ok(())
             }
             #[cfg(feature = "symbols")]
-            Command::Symbols => self.execute_symbols_command(),
+            Command::Symbols => {
+                self.close_diff_projection_for_side_panel_switch();
+                self.execute_symbols_command()
+            }
             #[cfg(feature = "symbols")]
             Command::SymbolsOff => {
                 self.execute_symbols_off_command();
                 Ok(())
             }
             Command::Data => {
+                self.close_diff_projection_for_side_panel_switch();
                 self.open_data_panel();
                 Ok(())
             }
@@ -144,6 +151,7 @@ impl App {
         let (saved, profile) = self.document.save(path)?;
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.mark_document_changed();
         self.cursor = self.clamp_offset(self.cursor);
         self.invalidate_disassembly_cache();
         self.refresh_inspector();
@@ -865,6 +873,26 @@ impl App {
         Ok(())
     }
 
+    fn execute_diff_command(&mut self, command: DiffCommand) -> HxResult<()> {
+        match command {
+            DiffCommand::Open { path, max_shift } => self.open_diff_panel(path, max_shift),
+            DiffCommand::Refresh => self.refresh_diff_panel(),
+            DiffCommand::Next => self.jump_to_next_diff_mismatch(),
+            DiffCommand::Prev => self.jump_to_prev_diff_mismatch(),
+            DiffCommand::Off => {
+                self.close_diff_panel();
+                Ok(())
+            }
+        }
+    }
+
+    fn close_diff_projection_for_side_panel_switch(&mut self) {
+        if self.diff_state().is_some() {
+            self.diff_state = None;
+            self.clear_diff_cell_selection();
+        }
+    }
+
     #[cfg(feature = "symbols")]
     fn execute_symbols_command(&mut self) -> HxResult<()> {
         // Need ExecutableInfo to display symbols
@@ -896,7 +924,7 @@ impl App {
     fn execute_symbols_off_command(&mut self) {
         self.symbol_state = None;
         // Try to restore inspector
-        self.ensure_inspector_page_state(false);
+        self.restore_inspector_after_side_panel_close();
         if self.inspector().is_some() || self.inspector_error.is_some() {
             self.show_side_panel = true;
             if self.mode.is_side_panel() {
