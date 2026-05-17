@@ -1,0 +1,3 @@
+This copy of Keystone Libraries may be distributed under the included
+FOSS License Exception. See the accompanying LICENSE.txt and
+EXCEPTIONS-CLIENT files for the governing terms and conditions.

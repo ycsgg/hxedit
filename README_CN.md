@@ -55,7 +55,7 @@ hxedit some.bin
 说明：
 
 - `default` 是常规构建档位。
-- `full` 会 vendor `keystone-engine`，并开启 `:dis` 内的 inline assembly patch。
+- `full` 会启用可选的 `hexpatch-keystone` 依赖（在本仓库里仍使用 `keystone-engine` 这个本地依赖别名），并开启 `:dis` 内的 inline assembly patch。
 - 当前没有单独的 `:asm` 命令。
 
 ## CLI 参数
@@ -124,4 +124,11 @@ tag release 会按明确的 `OS * arch * feature` 矩阵发布。
 
 ## 许可证
 
-`hxedit` 以 `GPL-2.0-only` 发布。
+本仓库中的 `hxedit` 源码以双许可发布，你可以任选其一：
+
+- MIT（[`licenses/LICENSE-MIT`](licenses/LICENSE-MIT)）
+- Apache-2.0（[`licenses/LICENSE-APACHE`](licenses/LICENSE-APACHE)）
+
+`core` 与 `default` 构建不会启用下面单独说明的可选 Keystone 汇编依赖。
+
+`full` 构建会启用可选的 Keystone 内联汇编依赖。再分发这个仓库产出的 `full` 源码包或二进制时，还应一并附带仓库内提供的第三方 notice，以及 Keystone 的 FOSS notice / license / exception 文件；见 [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt)。

@@ -186,6 +186,20 @@ jobs:
           Copy-Item "README.md" -Destination (Join-Path $stage "README.md")
           Copy-Item "LICENSE" -Destination (Join-Path $stage "LICENSE")
 
+          $licensesDir = Join-Path $stage "licenses"
+          New-Item -ItemType Directory -Path $licensesDir -Force | Out-Null
+          Copy-Item "licenses/LICENSE-MIT" -Destination (Join-Path $licensesDir "LICENSE-MIT")
+          Copy-Item "licenses/LICENSE-APACHE" -Destination (Join-Path $licensesDir "LICENSE-APACHE")
+          Copy-Item "licenses/THIRD_PARTY_NOTICES.txt" -Destination (Join-Path $licensesDir "THIRD_PARTY_NOTICES.txt")
+
+          if ("${{ matrix.feature }}" -eq "full") {
+            $keystoneDir = Join-Path $licensesDir "keystone"
+            New-Item -ItemType Directory -Path $keystoneDir -Force | Out-Null
+            Copy-Item "licenses/keystone/FOSS-NOTICE.txt" -Destination (Join-Path $keystoneDir "FOSS-NOTICE.txt")
+            Copy-Item "licenses/keystone/LICENSE.txt" -Destination (Join-Path $keystoneDir "LICENSE.txt")
+            Copy-Item "licenses/keystone/EXCEPTIONS-CLIENT" -Destination (Join-Path $keystoneDir "EXCEPTIONS-CLIENT")
+          }
+
           New-Item -ItemType Directory -Path dist -Force | Out-Null
 
           if ("${{ matrix.archive_format }}" -eq "zip") {

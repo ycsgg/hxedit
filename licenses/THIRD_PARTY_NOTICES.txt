@@ -1,0 +1,28 @@
+# Third-Party Notices
+
+`hxedit` source code in this repository is dual-licensed under `MIT OR Apache-2.0`.
+
+The `full` feature enables inline assembly patching through the optional
+third-party Keystone-assembler dependency. The normal `core` and `default`
+builds do not enable that dependency.
+
+## Keystone in `full` builds
+
+Included notice paths in this repository:
+
+- `licenses/keystone/FOSS-NOTICE.txt`
+- `licenses/keystone/LICENSE.txt`
+- `licenses/keystone/EXCEPTIONS-CLIENT`
+
+Practical redistribution rule for this repository:
+
+- Do not relabel `full` binaries or source bundles as `MIT/Apache-only`.
+- Ship the Keystone FOSS notice, license text, and bundled FOSS license
+  exception text alongside any redistributed `full` artifact.
+- Keep the main `hxedit` source-license notice (`LICENSE`) and the dual-license
+  texts (`licenses/LICENSE-MIT`, `licenses/LICENSE-APACHE`) with the artifact
+  as well.
+
+The bundled Keystone exception text explicitly lists both Apache 2.0 and MIT in
+its FOSS license list, subject to the conditions written in that exception
+file.

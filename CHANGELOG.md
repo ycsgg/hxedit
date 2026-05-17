@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The repository source code is now dual-licensed under `MIT OR Apache-2.0`; `full` builds continue to use Keystone and now ship explicit third-party / FOSS notice / license / exception files under a dedicated `licenses/` layout in release archives.
+
 ## [0.2.0] - 2026-05-06
 
 ### Added

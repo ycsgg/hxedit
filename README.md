@@ -55,7 +55,7 @@ hxedit some.bin
 Notes:
 
 - `default` is the normal build.
-- `full` vendors `keystone-engine` and enables inline assembly patching inside `:dis`.
+- `full` enables the optional `hexpatch-keystone` dependency (under the local crate alias `keystone-engine`) for inline assembly patching inside `:dis`.
 - There is no separate `:asm` command.
 
 ## CLI Flags
@@ -124,4 +124,13 @@ Current release matrix:
 
 ## License
 
-`hxedit` is distributed under `GPL-2.0-only`.
+The `hxedit` source code in this repository is dual-licensed under either:
+
+- MIT ([`licenses/LICENSE-MIT`](licenses/LICENSE-MIT))
+- Apache-2.0 ([`licenses/LICENSE-APACHE`](licenses/LICENSE-APACHE))
+
+at your option.
+
+`core` and `default` builds do not enable the optional Keystone-assembler dependency described below.
+
+`full` builds enable the optional Keystone-assembler dependency for inline assembly patching. When redistributing `full` source bundles or binaries from this repository, ship the included third-party notices and Keystone FOSS notice / license / exception files as well; see [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt).
