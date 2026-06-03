@@ -141,15 +141,18 @@ impl App {
                     format!("memory panel opened for {} ({})", process.name, process.pid)
                 },
             ),
-            MemoryCommand::List => match crate::memory::list_processes() {
-                Ok(processes) => processes
-                    .iter()
-                    .take(8)
-                    .map(|process| format!("{}:{}", process.pid, process.name))
-                    .collect::<Vec<_>>()
-                    .join("  "),
-                Err(err) => format!("memory process list unavailable: {err}"),
-            },
+            MemoryCommand::List => {
+                match crate::memory::list_processes() {
+                    Ok(processes) => {
+                        let message = format!("{} processes (Enter to attach)", processes.len());
+                        self.open_memory_process_list_panel(processes, message);
+                    }
+                    Err(err) => {
+                        self.open_memory_panel(format!("memory process list unavailable: {err}"));
+                    }
+                }
+                return Ok(());
+            }
             MemoryCommand::Refresh => {
                 let Some(runtime) = self.memory_runtime_mut() else {
                     self.open_memory_panel("memory maps refresh requires an active memory session");
@@ -170,7 +173,11 @@ impl App {
                 }
                 format!("refreshed {count} memory regions")
             }
-            MemoryCommand::Info => self.memory_info_text(),
+            MemoryCommand::Info => {
+                let text = self.memory_info_text();
+                self.open_memory_info_panel(text);
+                return Ok(());
+            }
             MemoryCommand::Freeze => return self.execute_memory_freeze_command(),
             MemoryCommand::Thaw => return self.execute_memory_thaw_command(),
             MemoryCommand::Commit => return self.commit_memory_document(false),

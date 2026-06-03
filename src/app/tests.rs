@@ -2383,7 +2383,9 @@ fn mem_info_aggregates_dirty_undo_freeze_and_access() {
     app.execute_command(Command::Memory(crate::commands::types::MemoryCommand::Info))
         .unwrap();
 
-    let info = &app.status_message;
+    // :mem info now opens a dedicated Info panel; the full report lives in the
+    // panel message (multi-line), the status line only shows the first line.
+    let info = &app.memory_state().unwrap().message;
     assert!(info.contains("fp=0x1"), "info missing fingerprint: {info}");
     assert!(info.contains("access rw"), "info missing access: {info}");
     assert!(info.contains("undo 2"), "info missing undo depth: {info}");
@@ -2480,6 +2482,88 @@ fn mem_search_repeat_without_query_reports_and_keeps_file_search_separate() {
     .unwrap();
     app.repeat_memory_search(false).unwrap();
     assert!(app.status_message.contains("no active memory search"));
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_process_list_panel_navigation_and_click_select_rows() {
+    use crate::memory::ProcessInfo;
+
+    let (mut app, _control) = app_with_fake_memory(vec![1, 2, 3, 4]);
+    let processes = vec![
+        ProcessInfo::new(11, "alpha"),
+        ProcessInfo::new(22, "beta"),
+        ProcessInfo::new(33, "gamma"),
+    ];
+    app.open_memory_process_list_panel(processes, "3 processes (Enter to attach)");
+
+    assert_eq!(
+        app.memory_state().unwrap().view,
+        super::memory_state::MemoryPanelView::ProcessList
+    );
+    assert_eq!(app.memory_state().unwrap().selected_row, 0);
+
+    app.move_memory_selection(2);
+    assert_eq!(app.memory_state().unwrap().selected_row, 2);
+    app.move_memory_selection(-1);
+    assert_eq!(app.memory_state().unwrap().selected_row, 1);
+
+    // Click maps a body row (no leading header rows in ProcessList view).
+    app.handle_memory_panel_click(0);
+    assert_eq!(app.memory_state().unwrap().selected_row, 0);
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_maps_click_changes_highlight_only_not_opened_region() {
+    let (mut app, _control) = app_with_two_fake_regions();
+    assert_eq!(
+        app.memory_state().unwrap().view,
+        super::memory_state::MemoryPanelView::Maps
+    );
+
+    // Region 1 is at body row MEMORY_MAPS_HEADER_ROWS + 1.
+    let row = super::memory_state::MEMORY_MAPS_HEADER_ROWS + 1;
+    app.handle_memory_panel_click(row);
+    assert_eq!(app.memory_runtime().unwrap().selected_region, 1);
+    // Clicking only highlights; the opened region / document is unchanged.
+    assert_eq!(app.memory_runtime().unwrap().opened_region, 0);
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_info_panel_scrolls_without_changing_selection() {
+    let (mut app, _control) = app_with_fake_memory(vec![1, 2, 3, 4]);
+    app.execute_command(Command::Memory(crate::commands::types::MemoryCommand::Info))
+        .unwrap();
+    assert_eq!(
+        app.memory_state().unwrap().view,
+        super::memory_state::MemoryPanelView::Info
+    );
+
+    app.scroll_memory_panel(3);
+    assert_eq!(app.memory_state().unwrap().scroll_offset, 3);
+    app.scroll_memory_panel(-10);
+    assert_eq!(app.memory_state().unwrap().scroll_offset, 0);
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_attach_blocked_when_current_session_dirty() {
+    let (mut app, _control) = app_with_two_fake_regions();
+    app.document.set_byte(0, 0x10).unwrap();
+
+    // Enter the process-list view with a candidate process.
+    app.open_memory_process_list_panel(
+        vec![crate::memory::ProcessInfo::new(4242, "fake")],
+        "1 process",
+    );
+    app.handle_memory_panel_enter().unwrap();
+
+    // Dirty guard refuses to switch; original session/document intact.
+    assert!(app.status_message.contains("commit or :q!"));
+    assert_eq!(app.memory_runtime().unwrap().opened_region, 0);
+    assert!(app.document.is_dirty());
 }
 
 #[cfg(feature = "disasm-capstone")]

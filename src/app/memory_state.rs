@@ -7,6 +7,25 @@ use crate::mode::Mode;
 #[cfg(feature = "memory")]
 type DirtyRegionSpans = Vec<(usize, Vec<(u64, Vec<u8>)>)>;
 
+/// Move `current` by `delta` within `[0, count)` with saturating bounds.
+#[cfg(feature = "memory")]
+fn step_index(current: usize, delta: isize, count: usize) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    if delta < 0 {
+        current.saturating_sub((-delta) as usize)
+    } else {
+        current.saturating_add(delta as usize).min(count - 1)
+    }
+}
+
+/// Number of non-region lines rendered above the maps-view region list
+/// ("Process memory" header, pid, state, base VA, blank). Mouse hit-testing
+/// maps a body row to a region index by subtracting this and adding scroll.
+#[cfg(feature = "memory")]
+pub(crate) const MEMORY_MAPS_HEADER_ROWS: usize = 5;
+
 #[cfg(feature = "memory")]
 pub(crate) struct MemoryRuntime {
     pub(crate) session: crate::memory::MemorySession,
@@ -36,11 +55,27 @@ impl RegionEditState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(feature = "memory"), allow(dead_code))]
+pub(crate) enum MemoryPanelView {
+    /// Process info + region maps for the active session.
+    Maps,
+    /// Process picker populated by `:mem list`.
+    ProcessList,
+    /// Aggregated `:mem info` report.
+    Info,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct MemoryPanelState {
+    pub(crate) view: MemoryPanelView,
     pub(crate) message: String,
     pub(crate) scroll_offset: usize,
     pub(crate) selected_row: usize,
+    /// Cached process list for the `ProcessList` view (avoids re-enumerating
+    /// every frame).
+    #[cfg(feature = "memory")]
+    pub(crate) processes: Vec<crate::memory::ProcessInfo>,
 }
 
 impl App {
@@ -61,14 +96,61 @@ impl App {
             .as_ref()
             .map_or(selected_row, |runtime| runtime.selected_region);
         self.memory_state = Some(MemoryPanelState {
+            view: MemoryPanelView::Maps,
             message: message.clone(),
             scroll_offset: 0,
             selected_row,
+            #[cfg(feature = "memory")]
+            processes: Vec::new(),
         });
         self.active_side_panel = SidePanelKind::Memory;
         self.show_side_panel = true;
         self.mode = Mode::SidePanel;
         self.set_status(StatusLevel::Notice, message);
+    }
+
+    /// Open the panel in process-list mode with the enumerated processes.
+    #[cfg(feature = "memory")]
+    pub(crate) fn open_memory_process_list_panel(
+        &mut self,
+        processes: Vec<crate::memory::ProcessInfo>,
+        message: impl Into<String>,
+    ) {
+        self.close_diff_projection_for_side_panel_switch();
+        let message = message.into();
+        self.memory_state = Some(MemoryPanelState {
+            view: MemoryPanelView::ProcessList,
+            message: message.clone(),
+            scroll_offset: 0,
+            selected_row: 0,
+            processes,
+        });
+        self.active_side_panel = SidePanelKind::Memory;
+        self.show_side_panel = true;
+        self.mode = Mode::SidePanel;
+        self.set_status(StatusLevel::Notice, message);
+    }
+
+    /// Open the panel in info mode showing the aggregated `:mem info` report.
+    #[cfg(feature = "memory")]
+    pub(crate) fn open_memory_info_panel(&mut self, text: impl Into<String>) {
+        self.close_diff_projection_for_side_panel_switch();
+        let text = text.into();
+        let selected_row = self
+            .memory_runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.selected_region);
+        self.memory_state = Some(MemoryPanelState {
+            view: MemoryPanelView::Info,
+            message: text.clone(),
+            scroll_offset: 0,
+            selected_row,
+            processes: Vec::new(),
+        });
+        self.active_side_panel = SidePanelKind::Memory;
+        self.show_side_panel = true;
+        self.mode = Mode::SidePanel;
+        self.set_status(StatusLevel::Notice, text.lines().next().unwrap_or_default());
     }
 
     #[cfg(feature = "memory")]
@@ -110,9 +192,11 @@ impl App {
         self.memory_runtime = Some(runtime);
         self.close_diff_projection_for_side_panel_switch();
         self.memory_state = Some(MemoryPanelState {
+            view: MemoryPanelView::Maps,
             message: message.clone(),
             scroll_offset: 0,
             selected_row,
+            processes: Vec::new(),
         });
         self.active_side_panel = SidePanelKind::Memory;
         self.show_side_panel = true;
@@ -120,33 +204,187 @@ impl App {
         self.set_status(StatusLevel::Notice, message);
     }
 
+    /// Attach to the process selected in the `ProcessList` view: open a new
+    /// session and switch to the maps view. Blocked when the current session
+    /// has uncommitted edits (dirty-switch guard).
+    #[cfg(feature = "memory")]
+    pub(crate) fn attach_selected_memory_process(&mut self) -> crate::error::HxResult<()> {
+        let Some(pid) = self.memory_state.as_ref().and_then(|state| {
+            state
+                .processes
+                .get(state.selected_row)
+                .map(|process| process.pid)
+        }) else {
+            self.set_error_status("no process is selected");
+            return Ok(());
+        };
+        if let Some((regions, bytes)) = self.memory_dirty_summary() {
+            self.set_error_status(format!(
+                "{regions} regions dirty, total {bytes} bytes; commit or :q! before switching process"
+            ));
+            return Ok(());
+        }
+        let config = self.config.clone();
+        let backend = crate::memory::open_backend_for_pid(pid)?;
+        let opened = Self::open_memory_cli_target(backend, &config)?;
+        self.document = opened.document;
+        self.cursor = 0;
+        self.viewport_top = 0;
+        self.selection_anchor = None;
+        self.mouse_selection_anchor = None;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.document_revision = self.document_revision.saturating_add(1);
+        self.invalidate_disassembly_cache();
+        self.refresh_inspector();
+        self.set_memory_runtime(opened.runtime, opened.message);
+        Ok(())
+    }
+
     #[cfg(feature = "memory")]
     pub(crate) fn move_memory_selection(&mut self, delta: isize) {
-        let Some(runtime) = self.memory_runtime.as_mut() else {
+        let Some(view) = self.memory_state.as_ref().map(|state| state.view) else {
             return;
         };
-        let count = runtime.session.regions().count();
-        if count == 0 {
-            runtime.selected_region = 0;
-            return;
-        }
-        let current = runtime.selected_region.min(count - 1);
-        let next = if delta < 0 {
-            current.saturating_sub((-delta) as usize)
-        } else {
-            current.saturating_add(delta as usize).min(count - 1)
-        };
-        runtime.selected_region = next;
-        if let Some(state) = self.memory_state.as_mut() {
-            state.selected_row = next;
-            let height = self.view_rows.max(1);
-            if next < state.scroll_offset {
-                state.scroll_offset = next;
-            } else if next >= state.scroll_offset + height {
-                state.scroll_offset = next.saturating_sub(height - 1);
+        match view {
+            MemoryPanelView::Maps => {
+                let Some(runtime) = self.memory_runtime.as_ref() else {
+                    return;
+                };
+                let count = runtime.session.regions().count();
+                if count == 0 {
+                    if let Some(runtime) = self.memory_runtime.as_mut() {
+                        runtime.selected_region = 0;
+                    }
+                    return;
+                }
+                let current = runtime.selected_region.min(count - 1);
+                let next = step_index(current, delta, count);
+                if let Some(runtime) = self.memory_runtime.as_mut() {
+                    runtime.selected_region = next;
+                }
+                self.sync_memory_panel_selection(next);
             }
+            MemoryPanelView::ProcessList => {
+                let count = self
+                    .memory_state
+                    .as_ref()
+                    .map_or(0, |state| state.processes.len());
+                if count == 0 {
+                    return;
+                }
+                let current = self
+                    .memory_state
+                    .as_ref()
+                    .map_or(0, |state| state.selected_row.min(count - 1));
+                self.set_memory_selected_row(step_index(current, delta, count));
+            }
+            MemoryPanelView::Info => self.scroll_memory_panel(delta),
         }
     }
+
+    /// Absolute selection set (used by mouse clicks). Clamps to the active
+    /// view's row count and keeps the scroll offset following the selection.
+    #[cfg(feature = "memory")]
+    pub(crate) fn set_memory_selected_row(&mut self, row: usize) {
+        let Some(view) = self.memory_state.as_ref().map(|state| state.view) else {
+            return;
+        };
+        let count = match view {
+            MemoryPanelView::Maps => self
+                .memory_runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.session.regions().count()),
+            MemoryPanelView::ProcessList => self
+                .memory_state
+                .as_ref()
+                .map_or(0, |state| state.processes.len()),
+            MemoryPanelView::Info => 0,
+        };
+        if count == 0 {
+            return;
+        }
+        let row = row.min(count - 1);
+        if view == MemoryPanelView::Maps {
+            if let Some(runtime) = self.memory_runtime.as_mut() {
+                runtime.selected_region = row;
+            }
+        }
+        self.sync_memory_panel_selection(row);
+    }
+
+    /// Scroll the panel body without changing the selection (wheel / Info view).
+    #[cfg(feature = "memory")]
+    pub(crate) fn scroll_memory_panel(&mut self, delta: isize) {
+        let Some(state) = self.memory_state.as_mut() else {
+            return;
+        };
+        if delta < 0 {
+            state.scroll_offset = state.scroll_offset.saturating_sub((-delta) as usize);
+        } else {
+            state.scroll_offset = state.scroll_offset.saturating_add(delta as usize);
+        }
+    }
+
+    /// Enter key in the memory panel: attach in process-list view, open the
+    /// selected region in maps view, no-op in info view.
+    #[cfg(feature = "memory")]
+    pub(crate) fn handle_memory_panel_enter(&mut self) -> crate::error::HxResult<()> {
+        match self.memory_state.as_ref().map(|state| state.view) {
+            Some(MemoryPanelView::ProcessList) => self.attach_selected_memory_process(),
+            Some(MemoryPanelView::Info) => Ok(()),
+            _ => self.open_selected_memory_region(),
+        }
+    }
+
+    /// Left-click on a memory panel body row at `visible_row` (0-based below the
+    /// panel header). Maps a row to a region/process index and only changes the
+    /// highlight — opening a region or attaching still requires Enter.
+    #[cfg(feature = "memory")]
+    pub(crate) fn handle_memory_panel_click(&mut self, visible_row: usize) {
+        let Some((view, scroll)) = self
+            .memory_state
+            .as_ref()
+            .map(|state| (state.view, state.scroll_offset))
+        else {
+            return;
+        };
+        let line = scroll + visible_row;
+        match view {
+            MemoryPanelView::Maps => {
+                let Some(index) = line.checked_sub(MEMORY_MAPS_HEADER_ROWS) else {
+                    return;
+                };
+                let region = self
+                    .memory_runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.session.region(index).cloned());
+                let Some(region) = region else {
+                    return;
+                };
+                self.set_memory_selected_row(index);
+                if !region.permissions.read {
+                    self.set_warning_status(format!(
+                        "region 0x{:x}-0x{:x} is not readable",
+                        region.start, region.end
+                    ));
+                }
+            }
+            MemoryPanelView::ProcessList => self.set_memory_selected_row(line),
+            MemoryPanelView::Info => {}
+        }
+    }
+
+    #[cfg(not(feature = "memory"))]
+    pub(crate) fn handle_memory_panel_enter(&mut self) -> crate::error::HxResult<()> {
+        self.open_selected_memory_region()
+    }
+
+    #[cfg(not(feature = "memory"))]
+    pub(crate) fn handle_memory_panel_click(&mut self, _visible_row: usize) {}
+
+    #[cfg(not(feature = "memory"))]
+    pub(crate) fn scroll_memory_panel(&mut self, _delta: isize) {}
 
     #[cfg(not(feature = "memory"))]
     pub(crate) fn move_memory_selection(&mut self, _delta: isize) {}

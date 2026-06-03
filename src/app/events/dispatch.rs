@@ -232,7 +232,7 @@ impl App {
                     SidePanelKind::Symbol => self.navigate_to_selected_symbol()?,
                     SidePanelKind::Data => self.move_data_panel_selection(0),
                     SidePanelKind::Diff => self.navigate_to_selected_diff_hunk()?,
-                    SidePanelKind::Memory => self.open_selected_memory_region()?,
+                    SidePanelKind::Memory => self.handle_memory_panel_enter()?,
                 }
                 Ok(true)
             }

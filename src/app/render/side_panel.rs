@@ -74,10 +74,19 @@ impl App {
     }
 
     fn render_memory_panel(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let view = self
+            .memory_state()
+            .map(|state| state.view)
+            .unwrap_or(crate::app::memory_state::MemoryPanelView::Maps);
+        let title = match view {
+            crate::app::memory_state::MemoryPanelView::Maps => "Memory",
+            crate::app::memory_state::MemoryPanelView::ProcessList => "Process list",
+            crate::app::memory_state::MemoryPanelView::Info => "Memory info",
+        };
         let header_area = top_header_area(area);
         if header_area.height > 0 {
             frame.render_widget(
-                Paragraph::new(Line::styled("Memory", self.palette.inspector_header)),
+                Paragraph::new(Line::styled(title, self.palette.inspector_header)),
                 header_area,
             );
         }
@@ -90,11 +99,43 @@ impl App {
             );
             return;
         };
-        let mut lines = vec![
-            Line::styled("Process memory", self.palette.inspector_header),
-            Line::raw(state.message.clone()),
-        ];
 
+        let lines = match view {
+            crate::app::memory_state::MemoryPanelView::Maps => self.memory_maps_lines(),
+            crate::app::memory_state::MemoryPanelView::ProcessList => {
+                self.memory_process_list_lines(state)
+            }
+            crate::app::memory_state::MemoryPanelView::Info => self
+                .memory_state()
+                .map(|state| {
+                    state
+                        .message
+                        .lines()
+                        .map(|line| Line::raw(line.to_owned()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        };
+
+        let height = body_area.height as usize;
+        let max_scroll = lines.len().saturating_sub(height);
+        let visible_start = state.scroll_offset.min(max_scroll);
+        let visible_end = (visible_start + height).min(lines.len());
+        frame.render_widget(
+            Paragraph::new(lines[visible_start..visible_end].to_vec()),
+            body_area,
+        );
+    }
+
+    /// Lines for the maps view: process info header rows followed by the region
+    /// list. The number of leading non-region rows is
+    /// [`crate::app::memory_state::MEMORY_MAPS_HEADER_ROWS`], which mouse
+    /// hit-testing relies on.
+    fn memory_maps_lines(&self) -> Vec<Line<'static>> {
+        let mut lines = vec![Line::styled(
+            "Process memory",
+            self.palette.inspector_header,
+        )];
         #[cfg(feature = "memory")]
         if let Some(runtime) = self.memory_runtime() {
             let process = runtime.session.process_info();
@@ -107,45 +148,115 @@ impl App {
             lines.push(Line::raw(format!("state {freeze_state}")));
             lines.push(Line::raw(format!("base VA 0x{:x}", runtime.base_va)));
             lines.push(Line::raw(""));
+
+            let selected = self.memory_state().map_or(0, |state| state.selected_row);
             for (index, region) in runtime.session.regions().enumerate() {
-                let marker = if index == state.selected_row {
-                    "▶"
-                } else {
-                    " "
-                };
-                let perms = region.permissions.label();
-                let label = region
-                    .label
-                    .as_deref()
-                    .or_else(|| region.path.as_ref().and_then(|path| path.to_str()))
-                    .unwrap_or("");
-                let dirty = runtime
-                    .session
-                    .region_dirty_bytes(index)
-                    .filter(|bytes| *bytes > 0)
-                    .map_or(String::new(), |bytes| format!(" dirty:{bytes}"));
-                lines.push(Line::raw(format!(
-                    "{marker} {:016x}-{:016x} {}{}{}{}  {label}",
-                    region.start, region.end, perms[0], perms[1], perms[2], dirty,
-                )));
+                lines.push(self.memory_region_line(runtime, index, region, selected));
             }
         }
+        #[cfg(not(feature = "memory"))]
+        {
+            lines.push(Line::raw("memory feature is not enabled"));
+        }
+        lines
+    }
 
-        lines.extend([
-            Line::raw(""),
-            Line::raw(":mem list      list processes"),
-            Line::raw(":mem refresh   refresh process maps"),
-            Line::raw(":mem info      show selected region info"),
-            Line::raw(":mem freeze    suspend target process"),
-            Line::raw(":mem thaw      resume target process"),
-            Line::raw(":mem commit    write active region replacements"),
-        ]);
-        let visible_start = state.scroll_offset.min(lines.len());
-        let visible_end = (visible_start + body_area.height as usize).min(lines.len());
-        frame.render_widget(
-            Paragraph::new(lines[visible_start..visible_end].to_vec()),
-            body_area,
+    /// One styled region row for the maps view. Distinguishes the selected
+    /// (cursor) row from the opened (loaded into the main view) region.
+    #[cfg(feature = "memory")]
+    fn memory_region_line(
+        &self,
+        runtime: &crate::app::memory_state::MemoryRuntime,
+        index: usize,
+        region: &crate::memory::MemoryRegion,
+        selected: usize,
+    ) -> Line<'static> {
+        use ratatui::text::Span;
+
+        let is_selected = index == selected;
+        let is_opened = index == runtime.opened_region;
+        let marker = match (is_selected, is_opened) {
+            (true, true) => "▶●",
+            (true, false) => "▶ ",
+            (false, true) => " ●",
+            (false, false) => "  ",
+        };
+        let perms = region.permissions.label();
+        let label = region
+            .label
+            .as_deref()
+            .or_else(|| region.path.as_ref().and_then(|path| path.to_str()))
+            .unwrap_or("");
+        let dirty = runtime
+            .session
+            .region_dirty_bytes(index)
+            .filter(|bytes| *bytes > 0)
+            .map_or(String::new(), |bytes| format!(" dirty:{bytes}"));
+        let stale = runtime.session.region_stale_base(index).unwrap_or(false);
+
+        let row_style = if is_selected {
+            self.palette.inspector_active
+        } else if !region.permissions.read {
+            self.palette.disasm_virtual
+        } else if stale {
+            self.palette.warning
+        } else if is_opened {
+            self.palette.dirty
+        } else {
+            self.palette.inspector_field
+        };
+        let text = format!(
+            "{marker} {:016x}-{:016x} {}{}{}{}{}  {label}",
+            region.start,
+            region.end,
+            perms[0],
+            perms[1],
+            perms[2],
+            dirty,
+            if stale { " stale" } else { "" },
         );
+        Line::from(Span::styled(text, row_style))
+    }
+
+    /// Lines for the process-list view; selected row highlighted.
+    #[cfg(feature = "memory")]
+    fn memory_process_list_lines(
+        &self,
+        state: &crate::app::memory_state::MemoryPanelState,
+    ) -> Vec<Line<'static>> {
+        use ratatui::text::Span;
+
+        if state.processes.is_empty() {
+            return vec![Line::raw("no processes found")];
+        }
+        state
+            .processes
+            .iter()
+            .enumerate()
+            .map(|(index, process)| {
+                let exe = process
+                    .executable
+                    .as_ref()
+                    .and_then(|path| path.to_str())
+                    .map(|path| format!("  {path}"))
+                    .unwrap_or_default();
+                let text = format!("{:>8}  {}{exe}", process.pid, process.name);
+                let style = if index == state.selected_row {
+                    self.palette.inspector_active
+                } else {
+                    self.palette.inspector_field
+                };
+                Line::from(Span::styled(text, style))
+            })
+            .collect()
+    }
+
+    #[cfg(not(feature = "memory"))]
+    fn memory_process_list_lines(
+        &self,
+        _state: &crate::app::memory_state::MemoryPanelState,
+    ) -> Vec<Line<'static>> {
+        vec![Line::raw("memory feature is not enabled")]
     }
 
     fn render_diff_panel(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {
