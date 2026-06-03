@@ -10,6 +10,7 @@ mod linux {
     use std::io;
     use std::os::unix::fs::FileExt;
     use std::path::{Path, PathBuf};
+    use std::process::Command;
 
     use crate::error::{HxError, HxResult};
 
@@ -63,6 +64,14 @@ mod linux {
                 len: data.len(),
                 message: err.to_string(),
             })
+        }
+
+        fn freeze(&mut self) -> HxResult<()> {
+            send_signal(self.pid, "-STOP")
+        }
+
+        fn thaw(&mut self) -> HxResult<()> {
+            send_signal(self.pid, "-CONT")
         }
     }
 
@@ -212,6 +221,26 @@ mod linux {
 
     fn proc_path(pid: u32, name: &str) -> PathBuf {
         Path::new("/proc").join(pid.to_string()).join(name)
+    }
+
+    fn send_signal(pid: u32, signal: &str) -> HxResult<()> {
+        let output = Command::new("kill")
+            .arg(signal)
+            .arg(pid.to_string())
+            .output()?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stderr.trim();
+        Err(HxError::MemoryUnavailable(format!(
+            "failed to send {signal} to pid {pid}: {}",
+            if message.is_empty() {
+                output.status.to_string()
+            } else {
+                message.to_owned()
+            }
+        )))
     }
 
     fn read_exact_at(file: &File, mut addr: u64, mut buf: &mut [u8]) -> io::Result<()> {

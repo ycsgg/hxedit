@@ -190,6 +190,8 @@ impl App {
                     )
                 },
             ),
+            MemoryCommand::Freeze => return self.execute_memory_freeze_command(),
+            MemoryCommand::Thaw => return self.execute_memory_thaw_command(),
             MemoryCommand::Commit => return self.commit_memory_document(false),
             MemoryCommand::CommitAll => return self.commit_memory_document(true),
         };

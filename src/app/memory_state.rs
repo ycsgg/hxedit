@@ -214,6 +214,51 @@ impl App {
     }
 
     #[cfg(feature = "memory")]
+    pub(crate) fn execute_memory_freeze_command(&mut self) -> crate::error::HxResult<()> {
+        let Some(runtime) = self.memory_runtime.as_mut() else {
+            self.open_memory_panel("memory freeze requires an active memory session");
+            return Ok(());
+        };
+        runtime.session.freeze()?;
+        let process = runtime.session.process_info();
+        let depth = runtime.session.freeze_depth();
+        let message = format!(
+            "froze memory target {} ({}) [depth {depth}]",
+            process.name, process.pid
+        );
+        if let Some(state) = self.memory_state.as_mut() {
+            state.message = message.clone();
+        }
+        self.open_memory_panel(message);
+        Ok(())
+    }
+
+    #[cfg(feature = "memory")]
+    pub(crate) fn execute_memory_thaw_command(&mut self) -> crate::error::HxResult<()> {
+        let Some(runtime) = self.memory_runtime.as_mut() else {
+            self.open_memory_panel("memory thaw requires an active memory session");
+            return Ok(());
+        };
+        runtime.session.thaw()?;
+        let process = runtime.session.process_info();
+        let message = if runtime.session.is_frozen() {
+            format!(
+                "decremented memory target freeze depth for {} ({}) [depth {}]",
+                process.name,
+                process.pid,
+                runtime.session.freeze_depth()
+            )
+        } else {
+            format!("thawed memory target {} ({})", process.name, process.pid)
+        };
+        if let Some(state) = self.memory_state.as_mut() {
+            state.message = message.clone();
+        }
+        self.open_memory_panel(message);
+        Ok(())
+    }
+
+    #[cfg(feature = "memory")]
     fn open_memory_region_at(
         &mut self,
         region_index: usize,
@@ -313,6 +358,7 @@ impl App {
         }
 
         let total_bytes = spans.iter().map(|(_, bytes)| bytes.len()).sum::<usize>();
+        let target_was_running = !runtime.session.is_frozen();
         {
             let runtime = self.memory_runtime.as_mut().expect("checked above");
             for (offset, bytes) in &spans {
@@ -343,7 +389,7 @@ impl App {
         self.refresh_inspector();
 
         let command_label = if commit_all { "commit-all" } else { "commit" };
-        let message = format!(
+        let mut message = format!(
             "memory {command_label} wrote {total_bytes} byte{} across {} span{} at 0x{:x}-0x{:x}",
             if total_bytes == 1 { "" } else { "s" },
             spans.len(),
@@ -351,6 +397,9 @@ impl App {
             region.start,
             region.end
         );
+        if target_was_running {
+            message.push_str(" [warning: target was running; use :mem freeze for safer edits]");
+        }
         if let Some(state) = self.memory_state.as_mut() {
             state.message = message.clone();
         }

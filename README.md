@@ -95,7 +95,7 @@ Memory-related commands in `memory` builds:
 
 | Command | Description |
 |---------|-------------|
-| `:mem` / `:mem list|refresh|info|commit|commit-all` | Open the process-memory side panel, inspect regions, refresh maps, or write active memory-document replacement spans back |
+| `:mem` / `:mem list|refresh|info|freeze|thaw|commit|commit-all` | Open the process-memory side panel, inspect regions, refresh maps, suspend/resume the target, or write active memory-document replacement spans back |
 | `:ms [mode]<delim><pattern><delim> [filter...]` / `:ms! ...` | Search readable process regions by virtual address; modes include text, `x/hex/`, `b/byte/`, `u32/u64`, and filters such as `in:rw-`, `in:heap`, `not:path:/usr/lib/*`, `in:va:start-end` |
 
 Disassembly-related commands in `default` / `full` builds:

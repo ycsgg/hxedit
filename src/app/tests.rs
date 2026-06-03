@@ -2011,6 +2011,7 @@ fn mem_commit_writes_replacement_spans_to_backend_and_clears_dirty_state() {
     assert_eq!(control.write_count(), 1);
     assert!(!app.document.is_dirty());
     assert!(app.status_message.contains("memory commit wrote 2 bytes"));
+    assert!(app.status_message.contains("target was running"));
     assert_eq!(
         app.memory_runtime()
             .unwrap()
@@ -2019,6 +2020,47 @@ fn mem_commit_writes_replacement_spans_to_backend_and_clears_dirty_state() {
             .unwrap(),
         0
     );
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_freeze_and_thaw_update_session_state() {
+    let (mut app, control) = app_with_fake_memory(vec![1, 2, 3, 4]);
+
+    app.execute_command(Command::Memory(
+        crate::commands::types::MemoryCommand::Freeze,
+    ))
+    .unwrap();
+    assert!(control.is_frozen());
+    assert_eq!(control.freeze_count(), 1);
+    assert!(app.memory_runtime().unwrap().session.is_frozen());
+    assert!(app.status_message.contains("froze memory target"));
+
+    app.execute_command(Command::Memory(crate::commands::types::MemoryCommand::Thaw))
+        .unwrap();
+    assert!(!control.is_frozen());
+    assert_eq!(control.thaw_count(), 1);
+    assert!(!app.memory_runtime().unwrap().session.is_frozen());
+    assert!(app.status_message.contains("thawed memory target"));
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_commit_while_frozen_omits_running_warning() {
+    let (mut app, _control) = app_with_fake_memory(vec![1, 2, 3, 4]);
+    app.execute_command(Command::Memory(
+        crate::commands::types::MemoryCommand::Freeze,
+    ))
+    .unwrap();
+    app.document.set_byte(1, 0xaa).unwrap();
+
+    app.execute_command(Command::Memory(
+        crate::commands::types::MemoryCommand::Commit,
+    ))
+    .unwrap();
+
+    assert!(app.status_message.contains("memory commit wrote 1 byte"));
+    assert!(!app.status_message.contains("target was running"));
 }
 
 #[cfg(feature = "memory")]

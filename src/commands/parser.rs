@@ -170,6 +170,8 @@ fn parse_memory(rest: Option<&str>) -> HxResult<Command> {
         Some("list") => MemoryCommand::List,
         Some("refresh") => MemoryCommand::Refresh,
         Some("info") => MemoryCommand::Info,
+        Some("freeze") => MemoryCommand::Freeze,
+        Some("thaw") => MemoryCommand::Thaw,
         Some("commit") => MemoryCommand::Commit,
         Some("commit-all") => MemoryCommand::CommitAll,
         Some(other) => return Err(HxError::UnknownCommand(format!("mem {other}"))),
@@ -521,6 +523,14 @@ mod tests {
             Command::Memory(MemoryCommand::Info)
         );
         assert_eq!(
+            parse_command("mem freeze").unwrap(),
+            Command::Memory(MemoryCommand::Freeze)
+        );
+        assert_eq!(
+            parse_command("mem thaw").unwrap(),
+            Command::Memory(MemoryCommand::Thaw)
+        );
+        assert_eq!(
             parse_command("mem commit").unwrap(),
             Command::Memory(MemoryCommand::Commit)
         );
@@ -528,10 +538,6 @@ mod tests {
             parse_command("mem commit-all").unwrap(),
             Command::Memory(MemoryCommand::CommitAll)
         );
-        assert!(matches!(
-            parse_command("mem freeze"),
-            Err(HxError::UnknownCommand(name)) if name == "mem freeze"
-        ));
         assert!(matches!(
             parse_command("mem unknown"),
             Err(HxError::UnknownCommand(name)) if name == "mem unknown"

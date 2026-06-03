@@ -67,6 +67,8 @@ pub enum MemoryCommand {
     List,
     Refresh,
     Info,
+    Freeze,
+    Thaw,
     Commit,
     CommitAll,
 }

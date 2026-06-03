@@ -14,6 +14,9 @@ struct FakeState {
     regions: Vec<FakeRegion>,
     read_count: usize,
     write_count: usize,
+    freeze_count: usize,
+    thaw_count: usize,
+    frozen: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +79,18 @@ impl FakeMemoryBackend {
 
     pub(crate) fn write_count(&self) -> usize {
         self.state.lock().unwrap().write_count
+    }
+
+    pub(crate) fn freeze_count(&self) -> usize {
+        self.state.lock().unwrap().freeze_count
+    }
+
+    pub(crate) fn thaw_count(&self) -> usize {
+        self.state.lock().unwrap().thaw_count
+    }
+
+    pub(crate) fn is_frozen(&self) -> bool {
+        self.state.lock().unwrap().frozen
     }
 
     pub(crate) fn region_bytes(&self, start: u64) -> Option<Vec<u8>> {
@@ -169,6 +184,20 @@ impl MemoryBackend for FakeMemoryBackend {
         let start = (addr - region.meta.start) as usize;
         region.bytes[start..start + data.len()].copy_from_slice(data);
         state.write_count += 1;
+        Ok(())
+    }
+
+    fn freeze(&mut self) -> HxResult<()> {
+        let mut state = self.state.lock().unwrap();
+        state.freeze_count += 1;
+        state.frozen = true;
+        Ok(())
+    }
+
+    fn thaw(&mut self) -> HxResult<()> {
+        let mut state = self.state.lock().unwrap();
+        state.thaw_count += 1;
+        state.frozen = false;
         Ok(())
     }
 }

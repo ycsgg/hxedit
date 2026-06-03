@@ -99,6 +99,12 @@ impl App {
         if let Some(runtime) = self.memory_runtime() {
             let process = runtime.session.process_info();
             lines.push(Line::raw(format!("pid {}  {}", process.pid, process.name)));
+            let freeze_state = if runtime.session.is_frozen() {
+                format!("FROZEN depth {}", runtime.session.freeze_depth())
+            } else {
+                "RUNNING".to_owned()
+            };
+            lines.push(Line::raw(format!("state {freeze_state}")));
             lines.push(Line::raw(format!("base VA 0x{:x}", runtime.base_va)));
             lines.push(Line::raw(""));
             for (index, region) in runtime.session.regions().enumerate() {
@@ -130,6 +136,8 @@ impl App {
             Line::raw(":mem list      list processes"),
             Line::raw(":mem refresh   refresh process maps"),
             Line::raw(":mem info      show selected region info"),
+            Line::raw(":mem freeze    suspend target process"),
+            Line::raw(":mem thaw      resume target process"),
             Line::raw(":mem commit    write active region replacements"),
         ]);
         let visible_start = state.scroll_offset.min(lines.len());

@@ -15,6 +15,7 @@ pub const PAGE_SIZE: u64 = 4096;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemorySessionState {
     Alive,
+    Frozen { depth: usize },
     Dead(String),
 }
 
@@ -82,6 +83,17 @@ impl MemorySession {
         matches!(self.state, MemorySessionState::Dead(_))
     }
 
+    pub fn is_frozen(&self) -> bool {
+        matches!(self.state, MemorySessionState::Frozen { .. })
+    }
+
+    pub fn freeze_depth(&self) -> usize {
+        match self.state {
+            MemorySessionState::Frozen { depth } => depth,
+            MemorySessionState::Alive | MemorySessionState::Dead(_) => 0,
+        }
+    }
+
     pub fn regions(&self) -> impl Iterator<Item = &MemoryRegion> {
         self.regions.iter().map(|state| &state.region)
     }
@@ -117,6 +129,39 @@ impl MemorySession {
         region.dirty_bytes = 0;
         region.stale_base = false;
         Ok(())
+    }
+
+    pub fn freeze(&mut self) -> HxResult<()> {
+        self.ensure_alive()?;
+        match &mut self.state {
+            MemorySessionState::Frozen { depth } => {
+                *depth = depth.saturating_add(1);
+                Ok(())
+            }
+            MemorySessionState::Alive => {
+                self.ensure_freeze_allowed()?;
+                self.backend.freeze()?;
+                self.state = MemorySessionState::Frozen { depth: 1 };
+                Ok(())
+            }
+            MemorySessionState::Dead(_) => unreachable!("ensure_alive returned for dead session"),
+        }
+    }
+
+    pub fn thaw(&mut self) -> HxResult<()> {
+        match self.state.clone() {
+            MemorySessionState::Dead(reason) => Err(HxError::ProcessDead(reason)),
+            MemorySessionState::Alive => Ok(()),
+            MemorySessionState::Frozen { depth } if depth > 1 => {
+                self.state = MemorySessionState::Frozen { depth: depth - 1 };
+                Ok(())
+            }
+            MemorySessionState::Frozen { .. } => {
+                self.backend.thaw()?;
+                self.state = MemorySessionState::Alive;
+                Ok(())
+            }
+        }
     }
 
     pub fn read_region_range(
@@ -334,6 +379,21 @@ impl MemorySession {
             let reason = "PID reuse or process exit detected".to_owned();
             self.state = MemorySessionState::Dead(reason.clone());
             return Err(HxError::ProcessDead(reason));
+        }
+        Ok(())
+    }
+
+    fn ensure_freeze_allowed(&self) -> HxResult<()> {
+        let pid = self.process_info.pid;
+        if pid == 1 {
+            return Err(HxError::MemoryUnavailable(
+                "refusing to freeze pid 1".to_owned(),
+            ));
+        }
+        if pid == std::process::id() {
+            return Err(HxError::MemoryUnavailable(
+                "refusing to freeze the current hxedit process".to_owned(),
+            ));
         }
         Ok(())
     }
@@ -594,6 +654,15 @@ impl MemorySession {
     }
 }
 
+impl Drop for MemorySession {
+    fn drop(&mut self) {
+        if self.is_frozen() {
+            let _ = self.backend.thaw();
+            self.state = MemorySessionState::Alive;
+        }
+    }
+}
+
 fn same_region_identity(a: &MemoryRegion, b: &MemoryRegion) -> bool {
     a.start == b.start && a.end == b.end
 }
@@ -764,5 +833,40 @@ mod tests {
             .search(&query, Some(0x1000), MemorySearchDirection::Forward)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn freeze_is_depth_counted_and_thaw_resumes_once() {
+        let (mut session, control) = session_with_region(vec![1, 2, 3, 4]);
+
+        session.freeze().unwrap();
+        session.freeze().unwrap();
+        assert!(session.is_frozen());
+        assert_eq!(session.freeze_depth(), 2);
+        assert!(control.is_frozen());
+        assert_eq!(control.freeze_count(), 1);
+
+        session.thaw().unwrap();
+        assert!(session.is_frozen());
+        assert_eq!(session.freeze_depth(), 1);
+        assert!(control.is_frozen());
+        assert_eq!(control.thaw_count(), 0);
+
+        session.thaw().unwrap();
+        assert!(!session.is_frozen());
+        assert_eq!(session.freeze_depth(), 0);
+        assert!(!control.is_frozen());
+        assert_eq!(control.thaw_count(), 1);
+    }
+
+    #[test]
+    fn drop_auto_thaws_frozen_session() {
+        let (mut session, control) = session_with_region(vec![1, 2, 3, 4]);
+        session.freeze().unwrap();
+
+        drop(session);
+
+        assert!(!control.is_frozen());
+        assert_eq!(control.thaw_count(), 1);
     }
 }

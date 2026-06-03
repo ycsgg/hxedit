@@ -69,8 +69,8 @@ pub fn hint_for(input: &str) -> CommandHint {
         },
         #[cfg(feature = "memory")]
         "mem" => CommandHint {
-            syntax: "mem [list|refresh|info|commit|commit-all]".to_owned(),
-            details: "open/focus memory panel, list processes, refresh maps, inspect state, or commit active memory-document replacements".to_owned(),
+            syntax: "mem [list|refresh|info|freeze|thaw|commit|commit-all]".to_owned(),
+            details: "open/focus memory panel, list processes, refresh maps, inspect state, freeze/thaw the target, or commit active memory-document replacements".to_owned(),
         },
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
         | "paste?!" => paste_hint(name, rest, false),
