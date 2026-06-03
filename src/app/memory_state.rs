@@ -26,6 +26,11 @@ fn step_index(current: usize, delta: isize, count: usize) -> usize {
 #[cfg(feature = "memory")]
 pub(crate) const MEMORY_MAPS_HEADER_ROWS: usize = 5;
 
+/// Each region occupies two body rows in the maps view: one for the address /
+/// permissions summary and one for the label / path.
+#[cfg(feature = "memory")]
+const MEMORY_MAPS_REGION_ROWS: usize = 2;
+
 #[cfg(feature = "memory")]
 pub(crate) struct MemoryRuntime {
     pub(crate) session: crate::memory::MemorySession,
@@ -316,13 +321,23 @@ impl App {
     /// Scroll the panel body without changing the selection (wheel / Info view).
     #[cfg(feature = "memory")]
     pub(crate) fn scroll_memory_panel(&mut self, delta: isize) {
-        let Some(state) = self.memory_state.as_mut() else {
+        let Some((view, current_scroll)) = self
+            .memory_state
+            .as_ref()
+            .map(|state| (state.view, state.scroll_offset))
+        else {
             return;
         };
-        if delta < 0 {
-            state.scroll_offset = state.scroll_offset.saturating_sub((-delta) as usize);
+        let max_scroll = self.memory_panel_max_scroll(view);
+        let next_scroll = if delta < 0 {
+            current_scroll.saturating_sub((-delta) as usize)
         } else {
-            state.scroll_offset = state.scroll_offset.saturating_add(delta as usize);
+            current_scroll
+                .saturating_add(delta as usize)
+                .min(max_scroll)
+        };
+        if let Some(state) = self.memory_state.as_mut() {
+            state.scroll_offset = next_scroll.min(max_scroll);
         }
     }
 
@@ -342,17 +357,20 @@ impl App {
     /// highlight — opening a region or attaching still requires Enter.
     #[cfg(feature = "memory")]
     pub(crate) fn handle_memory_panel_click(&mut self, visible_row: usize) {
-        let Some((view, scroll)) = self
-            .memory_state
-            .as_ref()
-            .map(|state| (state.view, state.scroll_offset))
-        else {
+        let Some((view, scroll)) = self.memory_state.as_ref().map(|state| {
+            (
+                state.view,
+                state
+                    .scroll_offset
+                    .min(self.memory_panel_max_scroll(state.view)),
+            )
+        }) else {
             return;
         };
         let line = scroll + visible_row;
         match view {
             MemoryPanelView::Maps => {
-                let Some(index) = line.checked_sub(MEMORY_MAPS_HEADER_ROWS) else {
+                let Some(index) = self.memory_maps_region_index_for_line(line) else {
                     return;
                 };
                 let region = self
@@ -646,15 +664,69 @@ impl App {
 
     #[cfg(feature = "memory")]
     fn sync_memory_panel_selection(&mut self, region_index: usize) {
+        let Some(view) = self.memory_state.as_ref().map(|state| state.view) else {
+            return;
+        };
+        let visible_rows = self.side_panel_visible_rows();
+        let selected_line = match view {
+            MemoryPanelView::Maps => self.memory_maps_line_for_region(region_index),
+            MemoryPanelView::ProcessList => region_index,
+            MemoryPanelView::Info => 0,
+        };
+        let max_scroll = self.memory_panel_max_scroll(view);
         if let Some(state) = self.memory_state.as_mut() {
             state.selected_row = region_index;
-            let height = self.view_rows.max(1);
-            if region_index < state.scroll_offset {
-                state.scroll_offset = region_index;
-            } else if region_index >= state.scroll_offset + height {
-                state.scroll_offset = region_index.saturating_sub(height - 1);
+            if selected_line < state.scroll_offset {
+                state.scroll_offset = selected_line;
+            } else if selected_line >= state.scroll_offset + visible_rows {
+                state.scroll_offset = selected_line.saturating_sub(visible_rows - 1);
             }
+            state.scroll_offset = state.scroll_offset.min(max_scroll);
         }
+    }
+
+    #[cfg(feature = "memory")]
+    fn memory_panel_line_count(&self, view: MemoryPanelView) -> usize {
+        match view {
+            MemoryPanelView::Maps => self.memory_runtime.as_ref().map_or(1, |runtime| {
+                MEMORY_MAPS_HEADER_ROWS
+                    + runtime
+                        .session
+                        .regions()
+                        .count()
+                        .saturating_mul(MEMORY_MAPS_REGION_ROWS)
+            }),
+            MemoryPanelView::ProcessList => self
+                .memory_state
+                .as_ref()
+                .map_or(0, |state| state.processes.len()),
+            MemoryPanelView::Info => self
+                .memory_state
+                .as_ref()
+                .map_or(0, |state| state.message.lines().count()),
+        }
+    }
+
+    #[cfg(feature = "memory")]
+    fn memory_panel_max_scroll(&self, view: MemoryPanelView) -> usize {
+        self.memory_panel_line_count(view)
+            .saturating_sub(self.side_panel_visible_rows())
+    }
+
+    #[cfg(feature = "memory")]
+    fn memory_maps_line_for_region(&self, region_index: usize) -> usize {
+        MEMORY_MAPS_HEADER_ROWS + region_index.saturating_mul(MEMORY_MAPS_REGION_ROWS)
+    }
+
+    #[cfg(feature = "memory")]
+    fn memory_maps_region_index_for_line(&self, line: usize) -> Option<usize> {
+        let relative = line.checked_sub(MEMORY_MAPS_HEADER_ROWS)?;
+        let index = relative / MEMORY_MAPS_REGION_ROWS;
+        let count = self
+            .memory_runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.session.regions().count());
+        (index < count).then_some(index)
     }
 
     #[cfg(feature = "memory")]

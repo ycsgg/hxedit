@@ -130,7 +130,8 @@ impl App {
     /// Lines for the maps view: process info header rows followed by the region
     /// list. The number of leading non-region rows is
     /// [`crate::app::memory_state::MEMORY_MAPS_HEADER_ROWS`], which mouse
-    /// hit-testing relies on.
+    /// hit-testing relies on. Each region contributes exactly two lines so the
+    /// scroll/click mapping stays simple.
     fn memory_maps_lines(&self) -> Vec<Line<'static>> {
         let mut lines = vec![Line::styled(
             "Process memory",
@@ -151,7 +152,9 @@ impl App {
 
             let selected = self.memory_state().map_or(0, |state| state.selected_row);
             for (index, region) in runtime.session.regions().enumerate() {
-                lines.push(self.memory_region_line(runtime, index, region, selected));
+                let [summary, detail] = self.memory_region_lines(runtime, index, region, selected);
+                lines.push(summary);
+                lines.push(detail);
             }
         }
         #[cfg(not(feature = "memory"))]
@@ -161,32 +164,33 @@ impl App {
         lines
     }
 
-    /// One styled region row for the maps view. Distinguishes the selected
-    /// (cursor) row from the opened (loaded into the main view) region.
+    /// Two styled rows for one region in the maps view. Distinguishes the
+    /// selected (cursor) row from the opened (loaded into the main view)
+    /// region, while keeping each region mapped to exactly two display lines.
     #[cfg(feature = "memory")]
-    fn memory_region_line(
+    fn memory_region_lines(
         &self,
         runtime: &crate::app::memory_state::MemoryRuntime,
         index: usize,
         region: &crate::memory::MemoryRegion,
         selected: usize,
-    ) -> Line<'static> {
+    ) -> [Line<'static>; 2] {
         use ratatui::text::Span;
 
         let is_selected = index == selected;
         let is_opened = index == runtime.opened_region;
         let marker = match (is_selected, is_opened) {
-            (true, true) => "▶●",
-            (true, false) => "▶ ",
-            (false, true) => " ●",
-            (false, false) => "  ",
+            (true, true) | (false, true) => "●",
+            (true, false) => "▶",
+            (false, false) => " ",
         };
         let perms = region.permissions.label();
         let label = region
             .label
             .as_deref()
             .or_else(|| region.path.as_ref().and_then(|path| path.to_str()))
-            .unwrap_or("");
+            .filter(|label| !label.is_empty())
+            .unwrap_or("(anonymous)");
         let dirty = runtime
             .session
             .region_dirty_bytes(index)
@@ -205,8 +209,9 @@ impl App {
         } else {
             self.palette.inspector_field
         };
-        let text = format!(
-            "{marker} {:016x}-{:016x} {}{}{}{}{}  {label}",
+
+        let summary = format!(
+            "{marker} {:016x}-{:016x} {}{}{}{}{}",
             region.start,
             region.end,
             perms[0],
@@ -215,7 +220,11 @@ impl App {
             dirty,
             if stale { " stale" } else { "" },
         );
-        Line::from(Span::styled(text, row_style))
+        let detail = format!("  {label}");
+        [
+            Line::from(Span::styled(summary, row_style)),
+            Line::from(Span::styled(detail, row_style)),
+        ]
     }
 
     /// Lines for the process-list view; selected row highlighted.

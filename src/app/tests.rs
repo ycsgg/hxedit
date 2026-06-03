@@ -2522,11 +2522,27 @@ fn mem_maps_click_changes_highlight_only_not_opened_region() {
         super::memory_state::MemoryPanelView::Maps
     );
 
-    // Region 1 is at body row MEMORY_MAPS_HEADER_ROWS + 1.
-    let row = super::memory_state::MEMORY_MAPS_HEADER_ROWS + 1;
+    // Each region now occupies two body rows; region 1 starts after the header
+    // rows plus region 0's two-line entry.
+    let row = super::memory_state::MEMORY_MAPS_HEADER_ROWS + 2;
     app.handle_memory_panel_click(row);
     assert_eq!(app.memory_runtime().unwrap().selected_region, 1);
     // Clicking only highlights; the opened region / document is unchanged.
+    assert_eq!(app.memory_runtime().unwrap().opened_region, 0);
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_maps_scroll_clamps_and_click_uses_clamped_offset() {
+    let (mut app, _control) = app_with_two_fake_regions();
+
+    app.scroll_memory_panel(100);
+    assert_eq!(app.memory_state().unwrap().scroll_offset, 6);
+
+    // With scroll clamped to 6, visible row 1 maps to absolute line 7, which is
+    // region 1's summary line.
+    app.handle_memory_panel_click(1);
+    assert_eq!(app.memory_runtime().unwrap().selected_region, 1);
     assert_eq!(app.memory_runtime().unwrap().opened_region, 0);
 }
 
@@ -2541,8 +2557,15 @@ fn mem_info_panel_scrolls_without_changing_selection() {
         super::memory_state::MemoryPanelView::Info
     );
 
+    let max_scroll = app
+        .memory_state()
+        .unwrap()
+        .message
+        .lines()
+        .count()
+        .saturating_sub(app.side_panel_visible_rows());
     app.scroll_memory_panel(3);
-    assert_eq!(app.memory_state().unwrap().scroll_offset, 3);
+    assert_eq!(app.memory_state().unwrap().scroll_offset, max_scroll);
     app.scroll_memory_panel(-10);
     assert_eq!(app.memory_state().unwrap().scroll_offset, 0);
 }
