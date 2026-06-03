@@ -208,6 +208,7 @@ impl App {
                     SidePanelKind::Symbol => self.move_symbol_selection(-1),
                     SidePanelKind::Data => self.move_data_panel_selection(-1),
                     SidePanelKind::Diff => self.move_diff_selection(-1),
+                    SidePanelKind::Memory => self.move_memory_selection(-1),
                 }
                 Ok(true)
             }
@@ -217,6 +218,7 @@ impl App {
                     SidePanelKind::Symbol => self.move_symbol_selection(1),
                     SidePanelKind::Data => self.move_data_panel_selection(1),
                     SidePanelKind::Diff => self.move_diff_selection(1),
+                    SidePanelKind::Memory => self.move_memory_selection(1),
                 }
                 Ok(true)
             }
@@ -226,6 +228,7 @@ impl App {
                     SidePanelKind::Symbol => self.navigate_to_selected_symbol()?,
                     SidePanelKind::Data => self.move_data_panel_selection(0),
                     SidePanelKind::Diff => self.navigate_to_selected_diff_hunk()?,
+                    SidePanelKind::Memory => self.open_selected_memory_region()?,
                 }
                 Ok(true)
             }

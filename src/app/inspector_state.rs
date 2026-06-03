@@ -270,6 +270,10 @@ impl App {
                     self.mode = Mode::SidePanel;
                     self.ensure_diff_selection_visible();
                 }
+                SidePanelKind::Memory if self.memory_state().is_some() => {
+                    self.active_side_panel = SidePanelKind::Memory;
+                    self.mode = Mode::SidePanel;
+                }
                 _ => {
                     self.ensure_inspector_page_state(true);
                     self.focus_inspector_page_or_warn_with_toggle(false);

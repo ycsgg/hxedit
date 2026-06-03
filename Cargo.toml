@@ -30,6 +30,7 @@ default-bundle = [
     "symbols",
 ]
 disasm = []
+memory = []
 symbols = ["disasm", "dep:object", "dep:symbolic-common", "dep:symbolic-demangle"]
 asm = ["disasm", "dep:keystone-engine"]
 full = ["default-bundle", "asm"]

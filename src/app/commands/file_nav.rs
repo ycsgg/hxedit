@@ -30,17 +30,29 @@ impl App {
         let cursor_before = self.cursor;
         let offset = self.resolve_goto_target(target)?;
         self.cursor = self.document.goto(offset)?;
+        let destination = self.display_offset_to_va(self.cursor).map_or_else(
+            || format!("0x{:x}", self.cursor),
+            |va| format!("VA 0x{va:x}"),
+        );
         self.set_info_status(format!(
-            "moved {} → 0x{:x}",
+            "moved {} → {}",
             format_move_delta(cursor_before, self.cursor),
-            self.cursor
+            destination
         ));
         Ok(())
     }
 
     fn resolve_goto_target(&self, target: GotoTarget) -> HxResult<u64> {
         match target {
-            GotoTarget::Absolute(offset) => Ok(offset),
+            GotoTarget::Absolute(offset) => {
+                if let Some(base_va) = self.memory_base_va() {
+                    let end_va = base_va.saturating_add(self.document.len());
+                    if base_va <= offset && offset < end_va {
+                        return Ok(offset - base_va);
+                    }
+                }
+                Ok(offset)
+            }
             GotoTarget::End => {
                 if self.document.is_empty() {
                     Ok(0)

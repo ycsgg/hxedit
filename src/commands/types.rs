@@ -60,6 +60,17 @@ pub enum DiffCommand {
     Off,
 }
 
+#[cfg(feature = "memory")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemoryCommand {
+    Open,
+    List,
+    Refresh,
+    Info,
+    Commit,
+    CommitAll,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Quit {
@@ -132,6 +143,11 @@ pub enum Command {
         pattern: String,
         backward: bool,
     },
+    #[cfg(feature = "memory")]
+    MemorySearch {
+        query: crate::memory::MemorySearchQuery,
+        backward: bool,
+    },
     Inspector,
     /// `:insp more` — raise the per-format entry cap by one batch and
     /// re-parse so pagination-aware formats (ELF / PNG / ZIP / GIF / WAV) reveal more
@@ -144,6 +160,8 @@ pub enum Command {
         algorithm: HashAlgorithm,
     },
     Diff(DiffCommand),
+    #[cfg(feature = "memory")]
+    Memory(MemoryCommand),
     #[cfg(feature = "disasm")]
     Disassemble {
         arch: Option<String>,

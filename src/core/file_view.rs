@@ -8,9 +8,15 @@ use crate::error::{HxError, HxResult};
 #[derive(Debug)]
 pub struct FileView {
     path: PathBuf,
-    file: File,
+    storage: FileStorage,
     len: u64,
     cache: PageCache,
+}
+
+#[derive(Debug)]
+enum FileStorage {
+    Disk(File),
+    Memory(Vec<u8>),
 }
 
 impl FileView {
@@ -31,10 +37,19 @@ impl FileView {
         let len = file.metadata()?.len();
         Ok(Self {
             path: path.to_path_buf(),
-            file,
+            storage: FileStorage::Disk(file),
             len,
             cache: PageCache::new(page_size, cache_pages),
         })
+    }
+
+    pub fn from_bytes(path: PathBuf, bytes: Vec<u8>, page_size: usize, cache_pages: usize) -> Self {
+        Self {
+            path,
+            len: bytes.len() as u64,
+            storage: FileStorage::Memory(bytes),
+            cache: PageCache::new(page_size, cache_pages),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -50,7 +65,17 @@ impl FileView {
     }
 
     pub fn read_range(&mut self, offset: u64, len: usize) -> HxResult<Vec<u8>> {
-        Ok(self.cache.read_range(&mut self.file, offset, len)?)
+        match &mut self.storage {
+            FileStorage::Disk(file) => Ok(self.cache.read_range(file, offset, len)?),
+            FileStorage::Memory(bytes) => {
+                let start = offset as usize;
+                if start >= bytes.len() {
+                    return Ok(Vec::new());
+                }
+                let end = start.saturating_add(len).min(bytes.len());
+                Ok(bytes[start..end].to_vec())
+            }
+        }
     }
 
     pub fn reload(

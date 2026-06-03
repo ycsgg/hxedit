@@ -32,6 +32,9 @@ impl Document {
         if self.readonly {
             return Err(HxError::ReadOnly);
         }
+        if self.fixed_size {
+            return Err(HxError::FixedSizeViolation);
+        }
         let id = self.cell_id_at(offset).ok_or(HxError::OffsetOutOfRange)?;
         Ok(self.tombstones.insert(id).then_some(id))
     }
@@ -47,6 +50,9 @@ impl Document {
     pub fn mark_tombstones(&mut self, ids: &[CellId]) -> HxResult<()> {
         if self.readonly {
             return Err(HxError::ReadOnly);
+        }
+        if self.fixed_size {
+            return Err(HxError::FixedSizeViolation);
         }
         for id in ids {
             self.tombstones.insert(*id);
@@ -67,6 +73,9 @@ impl Document {
             return Err(HxError::ReadOnly);
         }
         if offset == self.len() {
+            if self.fixed_size {
+                return Err(HxError::FixedSizeViolation);
+            }
             if matches!(phase, NibblePhase::High) {
                 return self.insert_byte(offset, nibble << 4);
             }
@@ -109,6 +118,9 @@ impl Document {
     /// Set a byte: replace if within bounds, insert if at EOF.
     pub fn set_byte(&mut self, offset: u64, value: u8) -> HxResult<()> {
         if offset == self.len() {
+            if self.fixed_size {
+                return Err(HxError::FixedSizeViolation);
+            }
             self.insert_byte(offset, value)?;
             return Ok(());
         }
@@ -126,6 +138,9 @@ impl Document {
     pub fn insert_bytes(&mut self, offset: u64, bytes: &[u8]) -> HxResult<Vec<CellId>> {
         if self.readonly {
             return Err(HxError::ReadOnly);
+        }
+        if self.fixed_size {
+            return Err(HxError::FixedSizeViolation);
         }
         if offset > self.len() {
             return Err(HxError::OffsetOutOfRange);
@@ -151,6 +166,9 @@ impl Document {
         if self.readonly {
             return Err(HxError::ReadOnly);
         }
+        if self.fixed_size {
+            return Err(HxError::FixedSizeViolation);
+        }
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -164,6 +182,9 @@ impl Document {
     pub fn restore_real_delete(&mut self, offset: u64, cells: &[CellId]) -> HxResult<()> {
         if self.readonly {
             return Err(HxError::ReadOnly);
+        }
+        if self.fixed_size {
+            return Err(HxError::FixedSizeViolation);
         }
         if offset > self.len() {
             return Err(HxError::OffsetOutOfRange);

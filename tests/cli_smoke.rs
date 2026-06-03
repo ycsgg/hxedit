@@ -6,7 +6,9 @@ use hxedit::cli::Cli;
 #[test]
 fn app_constructs_from_cli() {
     let cli = Cli {
-        file: Path::new("tests/fixtures/ascii.bin").to_path_buf(),
+        file: Some(Path::new("tests/fixtures/ascii.bin").to_path_buf()),
+        pid: None,
+        process: None,
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,

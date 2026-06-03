@@ -9,6 +9,7 @@ pub(crate) struct StatusInfo<'a> {
     pub mode: Mode,
     pub path: &'a str,
     pub cursor: u64,
+    pub cursor_label: Option<String>,
     pub display_len: u64,
     pub visible_len: u64,
     pub selection_span: Option<u64>,
@@ -26,7 +27,11 @@ pub(crate) fn build(info: StatusInfo<'_>, palette: &Palette) -> Line<'static> {
         Span::raw(" "),
         Span::styled(info.path.to_owned(), palette.status),
         Span::raw("  "),
-        Span::styled(format!("offset 0x{:x}", info.cursor), palette.status),
+        Span::styled(
+            info.cursor_label
+                .unwrap_or_else(|| format!("offset 0x{:x}", info.cursor)),
+            palette.status,
+        ),
         Span::raw("  "),
         Span::styled(format!("len {}", info.display_len), palette.status),
         Span::raw("  "),
@@ -105,6 +110,7 @@ mod tests {
                 },
                 path: "sample.bin",
                 cursor: 0,
+                cursor_label: None,
                 display_len: 1,
                 visible_len: 1,
                 selection_span: None,
@@ -133,6 +139,7 @@ mod tests {
                 mode: Mode::Normal,
                 path: "sample.bin",
                 cursor: 0,
+                cursor_label: None,
                 display_len: 1,
                 visible_len: 1,
                 selection_span: None,
@@ -162,6 +169,7 @@ mod tests {
                 },
                 path: "sample.bin",
                 cursor: 0,
+                cursor_label: None,
                 display_len: 1,
                 visible_len: 1,
                 selection_span: None,
@@ -190,6 +198,7 @@ mod tests {
                 mode: Mode::Normal,
                 path: "sample.bin",
                 cursor: 0x10,
+                cursor_label: None,
                 display_len: 12,
                 visible_len: 10,
                 selection_span: Some(4),
@@ -213,5 +222,37 @@ mod tests {
         assert!(text.contains("view DIS"));
         assert!(text.contains("sel(span) 4"));
         assert!(text.contains("sel(logical) 3"));
+    }
+
+    #[test]
+    fn status_line_can_show_memory_virtual_address() {
+        let palette = Palette::new(ColorLevel::NoColor);
+        let line = build(
+            StatusInfo {
+                main_view_label: None,
+                mode: Mode::Normal,
+                path: "memory://4242/0x1000-0x1004",
+                cursor: 2,
+                cursor_label: Some("va 0x1002".to_owned()),
+                display_len: 4,
+                visible_len: 4,
+                selection_span: None,
+                selection_logical_len: None,
+                paste_info: None,
+                dirty: false,
+                message: "",
+                message_level: StatusLevel::Info,
+                readonly: false,
+            },
+            &palette,
+        );
+
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(text.contains("va 0x1002"));
+        assert!(!text.contains("offset 0x2"));
     }
 }

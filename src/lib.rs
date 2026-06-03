@@ -13,6 +13,8 @@ pub mod executable;
 pub mod export;
 pub mod format;
 pub mod input;
+#[cfg(feature = "memory")]
+pub mod memory;
 pub mod mode;
 pub mod profile;
 pub mod util;

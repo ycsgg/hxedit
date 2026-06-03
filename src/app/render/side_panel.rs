@@ -67,7 +67,77 @@ impl App {
             SidePanelKind::Diff => {
                 self.render_diff_panel(frame, side_panel_area);
             }
+            SidePanelKind::Memory => {
+                self.render_memory_panel(frame, side_panel_area);
+            }
         }
+    }
+
+    fn render_memory_panel(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let header_area = top_header_area(area);
+        if header_area.height > 0 {
+            frame.render_widget(
+                Paragraph::new(Line::styled("Memory", self.palette.inspector_header)),
+                header_area,
+            );
+        }
+
+        let body_area = scrolled_body_area(area);
+        let Some(state) = self.memory_state() else {
+            frame.render_widget(
+                Paragraph::new("No memory session is active.").wrap(Wrap { trim: false }),
+                body_area,
+            );
+            return;
+        };
+        let mut lines = vec![
+            Line::styled("Process memory", self.palette.inspector_header),
+            Line::raw(state.message.clone()),
+        ];
+
+        #[cfg(feature = "memory")]
+        if let Some(runtime) = self.memory_runtime() {
+            let process = runtime.session.process_info();
+            lines.push(Line::raw(format!("pid {}  {}", process.pid, process.name)));
+            lines.push(Line::raw(format!("base VA 0x{:x}", runtime.base_va)));
+            lines.push(Line::raw(""));
+            for (index, region) in runtime.session.regions().enumerate() {
+                let marker = if index == state.selected_row {
+                    "▶"
+                } else {
+                    " "
+                };
+                let perms = region.permissions.label();
+                let label = region
+                    .label
+                    .as_deref()
+                    .or_else(|| region.path.as_ref().and_then(|path| path.to_str()))
+                    .unwrap_or("");
+                let dirty = runtime
+                    .session
+                    .region_dirty_bytes(index)
+                    .filter(|bytes| *bytes > 0)
+                    .map_or(String::new(), |bytes| format!(" dirty:{bytes}"));
+                lines.push(Line::raw(format!(
+                    "{marker} {:016x}-{:016x} {}{}{}{}  {label}",
+                    region.start, region.end, perms[0], perms[1], perms[2], dirty,
+                )));
+            }
+        }
+
+        lines.extend([
+            Line::raw(""),
+            Line::raw(":mem list      list processes"),
+            Line::raw(":mem refresh   refresh process maps"),
+            Line::raw(":mem info      show selected region info"),
+            Line::raw(":mem commit    write active region replacements"),
+        ]);
+        let visible_start = state.scroll_offset.min(lines.len());
+        let visible_end = (visible_start + body_area.height as usize).min(lines.len());
+        frame.render_widget(
+            Paragraph::new(lines[visible_start..visible_end].to_vec()),
+            body_area,
+        );
     }
 
     fn render_diff_panel(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {

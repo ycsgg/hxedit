@@ -67,6 +67,11 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "format [elf|pe|macho|png|zip|gzip|gif|bmp|wav|tar|jpeg]".to_owned(),
             details: "auto-detect format when omitted, or force a built-in inspector".to_owned(),
         },
+        #[cfg(feature = "memory")]
+        "mem" => CommandHint {
+            syntax: "mem [list|refresh|info|commit|commit-all]".to_owned(),
+            details: "open/focus memory panel, list processes, refresh maps, inspect state, or commit active memory-document replacements".to_owned(),
+        },
         "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
         | "paste?!" => paste_hint(name, rest, false),
         "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?" | "pi!?"
@@ -91,6 +96,15 @@ pub fn hint_for(input: &str) -> CommandHint {
                 "search hex bytes upward like: S! 7f 45 4c 46".to_owned()
             } else {
                 "search hex bytes downward like: S 7f 45 4c 46".to_owned()
+            },
+        },
+        #[cfg(feature = "memory")]
+        "ms" | "ms!" => CommandHint {
+            syntax: format!("{name} [mode]<delim><pattern><delim> [in:<selector>] [not:<selector>]"),
+            details: if name.ends_with('!') {
+                "search process memory upward across readable regions; modes include /text/, x/hex/, b/byte/, u32/u64, filters include permissions, kind, path glob, and va range".to_owned()
+            } else {
+                "search process memory downward across readable regions; modes include /text/, x/hex/, b/byte/, u32/u64, filters include permissions, kind, path glob, and va range".to_owned()
             },
         },
         #[cfg(feature = "disasm")]
@@ -385,6 +399,10 @@ fn known_commands() -> Vec<&'static str> {
     #[cfg(feature = "symbols")]
     {
         commands.extend(["sym", "symbols", "symbol", "symbol!"]);
+    }
+    #[cfg(feature = "memory")]
+    {
+        commands.extend(["mem", "ms", "ms!"]);
     }
     commands
 }

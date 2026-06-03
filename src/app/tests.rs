@@ -12,7 +12,8 @@ use crate::app::{App, SearchDirection, StatusLevel};
 use crate::cli::Cli;
 use crate::clipboard::test_clipboard_text;
 use crate::commands::types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm};
-use crate::core::document::ByteSlot;
+use crate::config::Config;
+use crate::core::document::{ByteSlot, Document};
 use crate::format::parse::{FieldValue, StructValue};
 use crate::format::types::{FieldDef, FieldType};
 use crate::mode::{Mode, NibblePhase};
@@ -22,7 +23,9 @@ fn app_with_len(len: usize) -> App {
     let file = dir.path().join("sample.bin");
     fs::write(&file, vec![0_u8; len]).unwrap();
     let cli = Cli {
-        file,
+        file: Some(file),
+        pid: None,
+        process: None,
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,
@@ -42,7 +45,9 @@ fn app_with_bytes(bytes: &[u8]) -> App {
     let file = dir.path().join("sample.bin");
     fs::write(&file, bytes).unwrap();
     let cli = Cli {
-        file,
+        file: Some(file),
+        pid: None,
+        process: None,
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,
@@ -93,6 +98,18 @@ fn app_with_inspector_field(bytes: &[u8], offset: u64, size: usize) -> App {
     });
     app.mode = Mode::SidePanel;
     app.cursor = offset;
+    app
+}
+
+fn app_with_fixed_size_bytes(bytes: &[u8]) -> App {
+    let mut app = app_with_bytes(bytes);
+    let base = 0x1000_u64;
+    app.document = Document::from_memory_bytes(
+        format!("memory://4242/0x{base:x}-0x{:x}", base + bytes.len() as u64).into(),
+        bytes.to_vec(),
+        &Config::default(),
+    );
+    app.cursor = app.clamp_cursor_for_mode(app.cursor, app.mode);
     app
 }
 
@@ -379,7 +396,9 @@ fn app_falls_back_to_readonly_when_write_open_is_denied() {
     fs::set_permissions(&file, readonly_perms).unwrap();
 
     let cli = Cli {
-        file: file.clone(),
+        file: Some(file.clone()),
+        pid: None,
+        process: None,
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,
@@ -406,7 +425,9 @@ fn readonly_mode_allows_save_as_new_path() {
     fs::write(&file, [0x11_u8, 0x22]).unwrap();
 
     let cli = Cli {
-        file,
+        file: Some(file),
+        pid: None,
+        process: None,
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,
@@ -435,7 +456,9 @@ fn readonly_mode_rejects_save_in_place() {
     fs::write(&file, [0x11_u8, 0x22]).unwrap();
 
     let cli = Cli {
-        file,
+        file: Some(file),
+        pid: None,
+        process: None,
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,
@@ -1244,7 +1267,9 @@ fn hash_command_various_algorithms_and_ranges() {
     let file = dir.path().join("empty.bin");
     fs::write(&file, []).unwrap();
     let cli = Cli {
-        file,
+        file: Some(file),
+        pid: None,
+        process: None,
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,
@@ -1902,6 +1927,224 @@ fn disassembly_inline_assemble_unknown_symbol_keeps_document_unchanged() {
     assert_eq!(app.status_level, StatusLevel::Error);
     assert!(app.status_message.contains("unknown patch symbol"));
     assert_eq!(app.document.read_logical_range(0x100, 2).unwrap(), before);
+}
+
+#[test]
+fn fixed_size_document_blocks_insert_mode_and_eof_cursor() {
+    let mut app = app_with_fixed_size_bytes(&[0x12, 0x34]);
+
+    app.handle_action(Action::EnterInsert);
+    assert!(app.status_message.contains("fixed-size"));
+    assert!(matches!(app.mode, Mode::Normal));
+
+    app.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    assert_eq!(app.clamp_cursor_for_mode(app.document.len(), app.mode), 1);
+
+    app.cursor = 1;
+    app.handle_action(Action::EditHex(0xf));
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xf4));
+    assert_eq!(app.document.len(), 2);
+    assert_eq!(app.document.visible_len(), 2);
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_command_opens_memory_side_panel_placeholder() {
+    let mut app = app_with_bytes(b"abcdef");
+    app.execute_command(Command::Memory(crate::commands::types::MemoryCommand::Open))
+        .unwrap();
+
+    assert!(app.show_side_panel);
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Memory);
+    assert!(matches!(app.mode, Mode::SidePanel));
+    assert!(app.status_message.contains("memory panel opened"));
+    assert!(app.memory_state().is_some());
+}
+
+#[cfg(feature = "memory")]
+fn app_with_fake_memory(bytes: Vec<u8>) -> (App, crate::memory::FakeMemoryBackend) {
+    let control = crate::memory::FakeMemoryBackend::new();
+    let region = control.add_region(
+        0x1000,
+        bytes,
+        crate::memory::MemoryPermissions::read_write(),
+        crate::memory::RegionFingerprint(1),
+    );
+    let mut session = crate::memory::MemorySession::open(Box::new(control.clone())).unwrap();
+    let document = session.document_for_region(0, &Config::default()).unwrap();
+    let mut app = app_with_bytes(b"memory-placeholder");
+    app.document = document;
+    app.cursor = 0;
+    app.viewport_top = 0;
+    app.set_memory_runtime(
+        super::memory_state::MemoryRuntime {
+            session,
+            selected_region: 0,
+            opened_region: 0,
+            base_va: region.start,
+        },
+        "attached to fake memory".to_owned(),
+    );
+    (app, control)
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_commit_writes_replacement_spans_to_backend_and_clears_dirty_state() {
+    let (mut app, control) = app_with_fake_memory(vec![1, 2, 3, 4]);
+
+    app.document.set_byte(1, 0xaa).unwrap();
+    app.document.set_byte(2, 0xbb).unwrap();
+    assert!(app.document.is_dirty());
+
+    app.execute_command(Command::Memory(
+        crate::commands::types::MemoryCommand::Commit,
+    ))
+    .unwrap();
+
+    assert_eq!(
+        control.region_bytes(0x1000).unwrap(),
+        vec![1, 0xaa, 0xbb, 4]
+    );
+    assert_eq!(control.write_count(), 1);
+    assert!(!app.document.is_dirty());
+    assert!(app.status_message.contains("memory commit wrote 2 bytes"));
+    assert_eq!(
+        app.memory_runtime()
+            .unwrap()
+            .session
+            .region_dirty_bytes(0)
+            .unwrap(),
+        0
+    );
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_commit_all_uses_active_memory_document_replacements() {
+    let (mut app, control) = app_with_fake_memory(vec![1, 2, 3, 4]);
+
+    app.document.set_byte(0, 0x10).unwrap();
+    app.document.set_byte(3, 0x40).unwrap();
+    app.execute_command(Command::Memory(
+        crate::commands::types::MemoryCommand::CommitAll,
+    ))
+    .unwrap();
+
+    assert_eq!(
+        control.region_bytes(0x1000).unwrap(),
+        vec![0x10, 2, 3, 0x40]
+    );
+    assert_eq!(control.write_count(), 2);
+    assert!(!app.document.is_dirty());
+    assert!(app
+        .status_message
+        .contains("memory commit-all wrote 2 bytes"));
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn memory_goto_absolute_accepts_virtual_address() {
+    let (mut app, _control) = app_with_fake_memory(vec![1, 2, 3, 4]);
+
+    app.execute_command(Command::Goto {
+        target: GotoTarget::Absolute(0x1002),
+    })
+    .unwrap();
+
+    assert_eq!(app.cursor, 2);
+    assert!(app.status_message.contains("VA 0x1002"));
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn memory_search_opens_hit_region_and_reports_virtual_address() {
+    let control = crate::memory::FakeMemoryBackend::new();
+    let first = control.add_region(
+        0x1000,
+        b"aaaa".to_vec(),
+        crate::memory::MemoryPermissions::read_write(),
+        crate::memory::RegionFingerprint(1),
+    );
+    control.add_region(
+        0x2000,
+        b"xxneedle".to_vec(),
+        crate::memory::MemoryPermissions::read_write(),
+        crate::memory::RegionFingerprint(2),
+    );
+    let mut session = crate::memory::MemorySession::open(Box::new(control.clone())).unwrap();
+    let document = session.document_for_region(0, &Config::default()).unwrap();
+    let mut app = app_with_bytes(b"memory-placeholder");
+    app.document = document;
+    app.set_memory_runtime(
+        super::memory_state::MemoryRuntime {
+            session,
+            selected_region: 0,
+            opened_region: 0,
+            base_va: first.start,
+        },
+        "attached to fake memory".to_owned(),
+    );
+
+    app.execute_command(Command::MemorySearch {
+        query: crate::memory::MemorySearchQuery::parse("/needle/").unwrap(),
+        backward: false,
+    })
+    .unwrap();
+
+    assert_eq!(app.memory_runtime().unwrap().selected_region, 1);
+    assert_eq!(app.cursor, 2);
+    assert!(app
+        .document
+        .path()
+        .to_string_lossy()
+        .contains("0x2000-0x2008"));
+    assert!(app.status_message.contains("VA 0x2002"));
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn memory_panel_selection_does_not_change_active_document_base_va() {
+    let control = crate::memory::FakeMemoryBackend::new();
+    let first = control.add_region(
+        0x1000,
+        b"abcd".to_vec(),
+        crate::memory::MemoryPermissions::read_write(),
+        crate::memory::RegionFingerprint(1),
+    );
+    control.add_region(
+        0x2000,
+        b"wxyz".to_vec(),
+        crate::memory::MemoryPermissions::read_write(),
+        crate::memory::RegionFingerprint(2),
+    );
+    let mut session = crate::memory::MemorySession::open(Box::new(control)).unwrap();
+    let document = session.document_for_region(0, &Config::default()).unwrap();
+    let mut app = app_with_bytes(b"memory-placeholder");
+    app.document = document;
+    app.cursor = 1;
+    app.set_memory_runtime(
+        super::memory_state::MemoryRuntime {
+            session,
+            selected_region: 0,
+            opened_region: 0,
+            base_va: first.start,
+        },
+        "attached to fake memory".to_owned(),
+    );
+
+    app.move_memory_selection(1);
+    assert_eq!(app.memory_runtime().unwrap().selected_region, 1);
+    assert_eq!(app.display_offset_to_va(app.cursor), Some(0x1001));
+
+    app.execute_command(Command::Goto {
+        target: GotoTarget::Absolute(0x1002),
+    })
+    .unwrap();
+    assert_eq!(app.cursor, 2);
+    assert!(app.status_message.contains("VA 0x1002"));
 }
 
 #[cfg(feature = "disasm-capstone")]

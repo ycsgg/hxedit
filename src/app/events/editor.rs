@@ -10,6 +10,9 @@ impl App {
                 "view is overwrite-only; use :dis off for layout-changing edits".to_owned(),
             ));
         }
+        if insert && self.document.is_fixed_size() {
+            return Err(HxError::FixedSizeViolation);
+        }
         self.mode = if insert {
             Mode::InsertHex { pending: None }
         } else {

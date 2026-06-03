@@ -107,6 +107,14 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 backward: name.ends_with('!'),
             })
         }
+        #[cfg(feature = "memory")]
+        "ms" | "ms!" => {
+            let arg = rest.ok_or(HxError::MissingArgument("memory search pattern"))?;
+            Ok(Command::MemorySearch {
+                query: crate::memory::MemorySearchQuery::parse(arg)?,
+                backward: name.ends_with('!'),
+            })
+        }
         "hash" => {
             let arg = rest.ok_or(HxError::MissingArgument("hash algorithm"))?;
             let algo = HashAlgorithm::parse(arg)
@@ -114,6 +122,8 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             Ok(Command::Hash { algorithm: algo })
         }
         "diff" => parse_diff(rest),
+        #[cfg(feature = "memory")]
+        "mem" => parse_memory(rest),
         #[cfg(feature = "disasm")]
         "dis" | "disassemble" => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Disassemble { arch: None }),
@@ -149,6 +159,22 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         },
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
+}
+
+#[cfg(feature = "memory")]
+fn parse_memory(rest: Option<&str>) -> HxResult<Command> {
+    use crate::commands::types::MemoryCommand;
+
+    let command = match rest.map(str::trim) {
+        None | Some("") => MemoryCommand::Open,
+        Some("list") => MemoryCommand::List,
+        Some("refresh") => MemoryCommand::Refresh,
+        Some("info") => MemoryCommand::Info,
+        Some("commit") => MemoryCommand::Commit,
+        Some("commit-all") => MemoryCommand::CommitAll,
+        Some(other) => return Err(HxError::UnknownCommand(format!("mem {other}"))),
+    };
+    Ok(Command::Memory(command))
 }
 
 fn parse_goto_target(input: &str) -> HxResult<GotoTarget> {
@@ -471,6 +497,65 @@ mod tests {
     fn data_command_parses() {
         assert_eq!(parse_command("data").unwrap(), Command::Data);
         assert_eq!(parse_command("data off").unwrap(), Command::DataOff);
+    }
+
+    #[cfg(feature = "memory")]
+    #[test]
+    fn memory_command_parses_subcommands() {
+        use crate::commands::types::MemoryCommand;
+
+        assert_eq!(
+            parse_command("mem").unwrap(),
+            Command::Memory(MemoryCommand::Open)
+        );
+        assert_eq!(
+            parse_command("mem list").unwrap(),
+            Command::Memory(MemoryCommand::List)
+        );
+        assert_eq!(
+            parse_command("mem refresh").unwrap(),
+            Command::Memory(MemoryCommand::Refresh)
+        );
+        assert_eq!(
+            parse_command("mem info").unwrap(),
+            Command::Memory(MemoryCommand::Info)
+        );
+        assert_eq!(
+            parse_command("mem commit").unwrap(),
+            Command::Memory(MemoryCommand::Commit)
+        );
+        assert_eq!(
+            parse_command("mem commit-all").unwrap(),
+            Command::Memory(MemoryCommand::CommitAll)
+        );
+        assert!(matches!(
+            parse_command("mem freeze"),
+            Err(HxError::UnknownCommand(name)) if name == "mem freeze"
+        ));
+        assert!(matches!(
+            parse_command("mem unknown"),
+            Err(HxError::UnknownCommand(name)) if name == "mem unknown"
+        ));
+    }
+
+    #[cfg(feature = "memory")]
+    #[test]
+    fn memory_search_command_parses_pattern_and_filters() {
+        let Command::MemorySearch { query, backward } =
+            parse_command("ms x/4889c7/ in:r-x").unwrap()
+        else {
+            panic!("expected memory search command");
+        };
+        assert!(!backward);
+        assert_eq!(query.pattern, vec![0x48, 0x89, 0xc7]);
+
+        let Command::MemorySearch { query, backward } =
+            parse_command("ms! /token/ in:rw-").unwrap()
+        else {
+            panic!("expected memory search command");
+        };
+        assert!(backward);
+        assert_eq!(query.pattern, b"token");
     }
 
     #[test]

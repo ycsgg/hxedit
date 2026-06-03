@@ -4,6 +4,8 @@ use crate::app::{
     App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState, SidePanelKind,
 };
 use crate::commands::parser::parse_command;
+#[cfg(feature = "memory")]
+use crate::commands::types::MemoryCommand;
 use crate::commands::types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm};
 #[cfg(feature = "disasm")]
 use crate::disasm::backend::resolve_backend_kind;
@@ -86,8 +88,14 @@ impl App {
             Command::SearchSymbol { pattern, backward } => {
                 self.execute_symbol_search_command(pattern, backward)
             }
+            #[cfg(feature = "memory")]
+            Command::MemorySearch { query, backward } => {
+                self.execute_memory_search_command(query, backward)
+            }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
             Command::Diff(diff) => self.execute_diff_command(diff),
+            #[cfg(feature = "memory")]
+            Command::Memory(command) => self.execute_memory_command(command),
             #[cfg(feature = "disasm")]
             Command::Disassemble { arch } => self.execute_disassemble_command(arch.as_deref()),
             #[cfg(feature = "disasm")]
@@ -119,6 +127,74 @@ impl App {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(feature = "memory")]
+impl App {
+    fn execute_memory_command(&mut self, command: MemoryCommand) -> HxResult<()> {
+        let message = match command {
+            MemoryCommand::Open => self.memory_runtime().map_or_else(
+                || "memory panel opened; no memory session is active".to_owned(),
+                |runtime| {
+                    let process = runtime.session.process_info();
+                    format!("memory panel opened for {} ({})", process.name, process.pid)
+                },
+            ),
+            MemoryCommand::List => match crate::memory::list_processes() {
+                Ok(processes) => processes
+                    .iter()
+                    .take(8)
+                    .map(|process| format!("{}:{}", process.pid, process.name))
+                    .collect::<Vec<_>>()
+                    .join("  "),
+                Err(err) => format!("memory process list unavailable: {err}"),
+            },
+            MemoryCommand::Refresh => {
+                let Some(runtime) = self.memory_runtime_mut() else {
+                    self.open_memory_panel("memory maps refresh requires an active memory session");
+                    return Ok(());
+                };
+                runtime.session.refresh_regions()?;
+                let count = runtime.session.regions().count();
+                if count == 0 {
+                    runtime.selected_region = 0;
+                    runtime.opened_region = 0;
+                } else {
+                    runtime.selected_region = runtime.selected_region.min(count - 1);
+                    runtime.opened_region = runtime.opened_region.min(count - 1);
+                    runtime.base_va = runtime
+                        .session
+                        .region(runtime.opened_region)
+                        .map_or(runtime.base_va, |region| region.start);
+                }
+                format!("refreshed {count} memory regions")
+            }
+            MemoryCommand::Info => self.memory_runtime().map_or_else(
+                || "memory info requires an active memory session".to_owned(),
+                |runtime| {
+                    runtime.session.region(runtime.selected_region).map_or_else(
+                        || "no memory region is selected".to_owned(),
+                        |region| {
+                            let perms = region.permissions.label();
+                            format!(
+                                "region 0x{:x}-0x{:x} {}{}{} {} bytes",
+                                region.start,
+                                region.end,
+                                perms[0],
+                                perms[1],
+                                perms[2],
+                                region.len()
+                            )
+                        },
+                    )
+                },
+            ),
+            MemoryCommand::Commit => return self.commit_memory_document(false),
+            MemoryCommand::CommitAll => return self.commit_memory_document(true),
+        };
+        self.open_memory_panel(message);
+        Ok(())
     }
 }
 

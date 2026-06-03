@@ -14,6 +14,8 @@ pub enum HxError {
     EmptySearch,
     #[error("invalid offset: {0}")]
     InvalidOffset(String),
+    #[error("invalid CLI source: {0}")]
+    InvalidCliSource(String),
     #[error("invalid fill count: {0}")]
     InvalidFillCount(String),
     #[error("invalid replace command: {0}")]
@@ -38,6 +40,18 @@ pub enum HxError {
     UnknownDisassemblyArch(String),
     #[error("disassembly unavailable: {0}")]
     DisassemblyUnavailable(String),
+    #[error("memory unavailable: {0}")]
+    MemoryUnavailable(String),
+    #[error("memory document is fixed-size; operation would change length")]
+    FixedSizeViolation,
+    #[error("memory process is no longer the original target: {0}")]
+    ProcessDead(String),
+    #[error("memory access failed at 0x{addr:x} for {len} bytes: {message}")]
+    MemoryAccess {
+        addr: u64,
+        len: usize,
+        message: String,
+    },
     #[error("assembly error: {0}")]
     AssemblyError(String),
     #[error("invalid hex pattern: {0}")]
