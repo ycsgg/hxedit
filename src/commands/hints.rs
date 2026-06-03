@@ -102,9 +102,9 @@ pub fn hint_for(input: &str) -> CommandHint {
         "ms" | "ms!" => CommandHint {
             syntax: format!("{name} [mode]<delim><pattern><delim> [in:<selector>] [not:<selector>]"),
             details: if name.ends_with('!') {
-                "search process memory upward across readable regions; modes include /text/, x/hex/, b/byte/, u32/u64, filters include permissions, kind, path glob, and va range".to_owned()
+                "search process memory upward across readable regions; modes include /text/, x/hex/, b/byte/, u32/u64, filters include permissions, kind, path glob, and va range; repeat with gn/gN".to_owned()
             } else {
-                "search process memory downward across readable regions; modes include /text/, x/hex/, b/byte/, u32/u64, filters include permissions, kind, path glob, and va range".to_owned()
+                "search process memory downward across readable regions; modes include /text/, x/hex/, b/byte/, u32/u64, filters include permissions, kind, path glob, and va range; repeat with gn/gN".to_owned()
             },
         },
         #[cfg(feature = "disasm")]

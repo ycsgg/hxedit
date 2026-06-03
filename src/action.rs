@@ -17,6 +17,12 @@ pub enum Action {
     DeleteByte,
     SearchNext,
     SearchPrev,
+    /// Repeat the last cross-region memory search forward (`gn`).
+    #[cfg(feature = "memory")]
+    MemorySearchNext,
+    /// Repeat the last cross-region memory search backward (`gN`).
+    #[cfg(feature = "memory")]
+    MemorySearchPrev,
     Undo(usize),
     EditHex(u8),
     EditBackspace,

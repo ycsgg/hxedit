@@ -208,6 +208,9 @@ impl App {
             let runtime = self.memory_runtime.as_mut().expect("checked above");
             runtime.session.search(&query, start_addr, direction)?
         };
+        // Remember the query so `gn` / `gN` can replay it, independent of the
+        // file-search `/` `n` `p` history.
+        self.last_memory_search = Some(query);
         let Some(hit) = hit else {
             self.set_info_status("memory search pattern not found");
             return Ok(());
@@ -238,6 +241,21 @@ impl App {
             self.set_info_status(message);
         }
         Ok(())
+    }
+
+    /// Replay the last cross-region memory search (`gn` / `gN`). Uses the
+    /// memory-search history, never the file-search `/` `n` `p` history.
+    #[cfg(feature = "memory")]
+    pub(crate) fn repeat_memory_search(&mut self, backward: bool) -> crate::error::HxResult<()> {
+        if self.memory_runtime.is_none() {
+            self.open_memory_panel("memory search requires an active memory session");
+            return Ok(());
+        }
+        let Some(query) = self.last_memory_search.clone() else {
+            self.set_info_status("no active memory search; use :ms first");
+            return Ok(());
+        };
+        self.execute_memory_search_command(query, backward)
     }
 
     #[cfg(feature = "memory")]

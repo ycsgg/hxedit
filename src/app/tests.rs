@@ -2419,6 +2419,69 @@ fn mem_quit_blocked_when_any_region_dirty_and_forced_quit_discards() {
     assert!(app.should_quit);
 }
 
+#[cfg(feature = "memory")]
+#[test]
+fn mem_search_repeat_with_gn_advances_to_next_hit() {
+    let control = crate::memory::FakeMemoryBackend::new();
+    control.add_region(
+        0x1000,
+        b"ab__ab".to_vec(),
+        crate::memory::MemoryPermissions::read_write(),
+        crate::memory::RegionFingerprint(1),
+    );
+    let mut session = crate::memory::MemorySession::open(Box::new(control)).unwrap();
+    let document = session.document_for_region(0, &Config::default()).unwrap();
+    let mut app = app_with_bytes(b"memory-placeholder");
+    app.document = document;
+    app.set_memory_runtime(
+        super::memory_state::MemoryRuntime {
+            session,
+            selected_region: 0,
+            opened_region: 0,
+            base_va: 0x1000,
+            region_edits: std::collections::HashMap::new(),
+        },
+        "attached to fake memory".to_owned(),
+    );
+
+    app.execute_command(Command::MemorySearch {
+        query: crate::memory::MemorySearchQuery::parse("/ab/").unwrap(),
+        backward: false,
+    })
+    .unwrap();
+    // Forward search starts after the cursor, so from offset 0 it lands on the
+    // second "ab" at offset 4.
+    assert_eq!(app.cursor, 4);
+
+    // gn repeats the memory search forward, wrapping to the first "ab".
+    app.repeat_memory_search(false).unwrap();
+    assert_eq!(app.cursor, 0);
+    assert!(app.status_message.contains("VA 0x1000"));
+
+    // gN repeats backward to the later occurrence.
+    app.repeat_memory_search(true).unwrap();
+    assert_eq!(app.cursor, 4);
+}
+
+#[cfg(feature = "memory")]
+#[test]
+fn mem_search_repeat_without_query_reports_and_keeps_file_search_separate() {
+    let (mut app, _control) = app_with_fake_memory(b"hello".to_vec());
+
+    // No memory search yet: gn is a no-op with guidance.
+    app.repeat_memory_search(false).unwrap();
+    assert!(app.status_message.contains("no active memory search"));
+
+    // A file-style byte search must not populate the memory-search history.
+    app.execute_command(Command::SearchAscii {
+        pattern: b"lo".to_vec(),
+        backward: false,
+    })
+    .unwrap();
+    app.repeat_memory_search(false).unwrap();
+    assert!(app.status_message.contains("no active memory search"));
+}
+
 #[cfg(feature = "disasm-capstone")]
 #[test]
 fn disassembly_insert_blocked_and_replace_restricted() {

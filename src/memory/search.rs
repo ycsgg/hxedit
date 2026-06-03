@@ -148,24 +148,11 @@ impl MemoryRegionFilter {
 }
 
 pub(crate) fn search_bytes_forward(bytes: &[u8], pattern: &[u8]) -> Option<usize> {
-    let mut matcher = KmpMatcher::new(pattern);
-    for (idx, byte) in bytes.iter().enumerate() {
-        if matcher.feed(*byte) {
-            return Some(idx + 1 - pattern.len());
-        }
-    }
-    None
+    memchr::memmem::find(bytes, pattern)
 }
 
 pub(crate) fn search_bytes_backward(bytes: &[u8], pattern: &[u8]) -> Option<usize> {
-    let reversed_pattern = pattern.iter().rev().copied().collect::<Vec<_>>();
-    let mut matcher = KmpMatcher::new(&reversed_pattern);
-    for (idx, byte) in bytes.iter().enumerate().rev() {
-        if matcher.feed(*byte) {
-            return Some(idx);
-        }
-    }
-    None
+    memchr::memmem::rfind(bytes, pattern)
 }
 
 pub(crate) fn search_region_forward(
@@ -397,48 +384,6 @@ fn selector_matches(selector: &FilterSelector, region: &MemoryRegion) -> bool {
     }
 }
 
-#[derive(Debug)]
-struct KmpMatcher<'a> {
-    pattern: &'a [u8],
-    prefix: Vec<usize>,
-    matched: usize,
-}
-
-impl<'a> KmpMatcher<'a> {
-    fn new(pattern: &'a [u8]) -> Self {
-        let mut prefix = vec![0; pattern.len()];
-        let mut matched = 0;
-        for idx in 1..pattern.len() {
-            while matched > 0 && pattern[idx] != pattern[matched] {
-                matched = prefix[matched - 1];
-            }
-            if pattern[idx] == pattern[matched] {
-                matched += 1;
-                prefix[idx] = matched;
-            }
-        }
-        Self {
-            pattern,
-            prefix,
-            matched: 0,
-        }
-    }
-
-    fn feed(&mut self, byte: u8) -> bool {
-        while self.matched > 0 && byte != self.pattern[self.matched] {
-            self.matched = self.prefix[self.matched - 1];
-        }
-        if byte == self.pattern[self.matched] {
-            self.matched += 1;
-            if self.matched == self.pattern.len() {
-                self.matched = self.prefix[self.matched - 1];
-                return true;
-            }
-        }
-        false
-    }
-}
-
 fn permission_matches(mask: &[PermissionSlot; 3], region: &MemoryRegion) -> bool {
     [
         (mask[0], region.permissions.read),
@@ -583,5 +528,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(found, Some(1));
+    }
+
+    #[test]
+    fn memmem_search_finds_match_across_chunk_boundary() {
+        // Build a buffer larger than one search chunk with the pattern
+        // straddling the chunk boundary so the overlap path is exercised.
+        let total = (SEARCH_CHUNK + 16) as usize;
+        let mut bytes = vec![0u8; total];
+        let needle = b"NEEDLE";
+        let pos = SEARCH_CHUNK as usize - 3; // straddles the 256 KiB boundary
+        bytes[pos..pos + needle.len()].copy_from_slice(needle);
+
+        let read = |addr: u64, len: usize| Ok(bytes[addr as usize..addr as usize + len].to_vec());
+
+        let forward = search_region_forward(read, 0, bytes.len() as u64, needle).unwrap();
+        assert_eq!(forward, Some(pos as u64));
+
+        let backward = search_region_backward(read, 0, bytes.len() as u64, needle).unwrap();
+        assert_eq!(backward, Some(pos as u64));
     }
 }

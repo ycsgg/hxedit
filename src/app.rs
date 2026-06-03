@@ -33,6 +33,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
 
+use crate::action::Action;
 use crate::cli::{Cli, CliTarget};
 use crate::config::Config;
 use crate::core::document::Document;
@@ -111,6 +112,14 @@ pub struct App {
     undo_stack: Vec<UndoStep>,
     redo_stack: Vec<UndoStep>,
     last_search: Option<SearchState>,
+    /// Last cross-region memory search query, replayed by `gn` / `gN`. Kept
+    /// separate from `last_search` so file `/`/`n`/`p` history never mixes with
+    /// memory search history (mem-design.md §9).
+    #[cfg(feature = "memory")]
+    last_memory_search: Option<crate::memory::MemorySearchQuery>,
+    /// True after a `g` prefix key, waiting for the next key (e.g. `gn` / `gN`).
+    #[cfg(feature = "memory")]
+    pending_g: bool,
     last_paste: Option<PasteState>,
     profiler: Option<Profiler>,
     disasm_cache: Option<DisasmCache>,
@@ -543,6 +552,10 @@ impl App {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             last_search: None,
+            #[cfg(feature = "memory")]
+            last_memory_search: None,
+            #[cfg(feature = "memory")]
+            pending_g: false,
             last_paste: None,
             profiler: config.profile.then(|| {
                 Profiler::new(StartupStats {
@@ -665,6 +678,47 @@ impl App {
         result
     }
 
+    /// Map a key to an action, handling the `g` multi-key prefix used by the
+    /// memory-search repeat bindings (`gn` / `gN`). The prefix only arms in
+    /// Normal / Visual / SidePanel modes; any other key clears it.
+    #[cfg(feature = "memory")]
+    fn map_key_with_prefix(&mut self, key: crossterm::event::KeyEvent) -> Option<Action> {
+        use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
+
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return None;
+        }
+
+        if self.pending_g {
+            self.pending_g = false;
+            if key.modifiers.intersection(!KeyModifiers::SHIFT).is_empty() {
+                match key.code {
+                    KeyCode::Char('n') => return Some(Action::MemorySearchNext),
+                    KeyCode::Char('N') => return Some(Action::MemorySearchPrev),
+                    _ => {}
+                }
+            }
+            // Not a recognized `g`-prefixed sequence: fall through and map the
+            // key normally so the second key is not silently swallowed.
+        }
+
+        let prefix_mode = matches!(self.mode, Mode::Normal | Mode::Visual | Mode::SidePanel);
+        if prefix_mode
+            && key.code == KeyCode::Char('g')
+            && key.modifiers.intersection(!KeyModifiers::SHIFT).is_empty()
+        {
+            self.pending_g = true;
+            return None;
+        }
+
+        map_key(self.mode, key)
+    }
+
+    #[cfg(not(feature = "memory"))]
+    fn map_key_with_prefix(&mut self, key: crossterm::event::KeyEvent) -> Option<Action> {
+        map_key(self.mode, key)
+    }
+
     fn run_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         while !self.should_quit {
             terminal.draw(|frame| self.render(frame))?;
@@ -679,7 +733,7 @@ impl App {
                         if let Some(profiler) = self.profiler.as_mut() {
                             profiler.record_key_event();
                         }
-                        if let Some(action) = map_key(self.mode, key) {
+                        if let Some(action) = self.map_key_with_prefix(key) {
                             self.handle_action(action);
                         }
                     }

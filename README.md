@@ -95,8 +95,9 @@ Memory-related commands in `memory` builds:
 
 | Command | Description |
 |---------|-------------|
-| `:mem` / `:mem list|refresh|info|freeze|thaw|commit|commit-all` | Open the process-memory side panel, inspect regions, refresh maps, suspend/resume the target, or write active memory-document replacement spans back |
-| `:ms [mode]<delim><pattern><delim> [filter...]` / `:ms! ...` | Search readable process regions by virtual address; modes include text, `x/hex/`, `b/byte/`, `u32/u64`, and filters such as `in:rw-`, `in:heap`, `not:path:/usr/lib/*`, `in:va:start-end` |
+| `:mem` / `:mem list|refresh|info|freeze|thaw|commit|commit-all` | Open the process-memory side panel, inspect regions, refresh maps, suspend/resume the target, write the active region's replacement spans back (`commit`), or commit every dirty region in virtual-address order (`commit-all`). `:mem info` reports the selected region and fingerprint, its dirty bytes and undo/redo depth, session-wide dirty totals with stale-base flags, backend ro/rw, and freeze state |
+| `:w` / `:q` in memory mode | `:w` (no path) is equivalent to `:mem commit`; `:w <path>` is rejected (use `:export <path>`). Uncommitted replacements, undo, and redo are kept per region across region switches, so `:q` refuses to quit while any region is dirty and summarizes the total; `:q!` discards |
+| `:ms [mode]<delim><pattern><delim> [filter...]` / `:ms! ...` | Search readable process regions by virtual address; modes include text, `x/hex/`, `b/byte/`, `u32/u64`, and filters such as `in:rw-`, `in:heap`, `not:path:/usr/lib/*`, `in:va:start-end`. Repeat the last memory search with `gn` / `gN` (independent of the file-search `n` / `p` history) |
 
 Disassembly-related commands in `default` / `full` builds:
 

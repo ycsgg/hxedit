@@ -92,6 +92,10 @@ impl App {
             Action::DeleteByte => self.delete_at_cursor_or_selection(),
             Action::SearchNext => self.repeat_search(crate::app::SearchDirection::Forward),
             Action::SearchPrev => self.repeat_search(crate::app::SearchDirection::Backward),
+            #[cfg(feature = "memory")]
+            Action::MemorySearchNext => self.repeat_memory_search(false),
+            #[cfg(feature = "memory")]
+            Action::MemorySearchPrev => self.repeat_memory_search(true),
             Action::Undo(steps) => self.handle_undo_action(steps),
             Action::Redo(steps) => self.handle_redo_action(steps),
             Action::EditHex(value) => self.handle_edit_hex_action(value),
