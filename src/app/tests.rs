@@ -2357,6 +2357,52 @@ fn mem_commit_all_stops_on_non_writable_region_and_keeps_dirty() {
 
 #[cfg(feature = "memory")]
 #[test]
+fn mem_info_aggregates_dirty_undo_freeze_and_access() {
+    let (mut app, _control) = app_with_two_fake_regions();
+
+    // Dirty edit on opened region 0 via the edit path so undo depth is set.
+    app.cursor = 0;
+    app.mode = Mode::EditHex {
+        phase: NibblePhase::High,
+    };
+    app.handle_action(Action::EditHex(0xa));
+    app.handle_action(Action::EditHex(0xa));
+    assert!(app.document.is_dirty());
+
+    // Stash a dirty edit on region 1 too.
+    app.memory_runtime_mut().unwrap().region_edits.insert(
+        1,
+        super::memory_state::RegionEditState {
+            spans: vec![(0, vec![0x99, 0x88])],
+            undo: Vec::new(),
+            redo: Vec::new(),
+            cursor: 0,
+        },
+    );
+
+    app.execute_command(Command::Memory(crate::commands::types::MemoryCommand::Info))
+        .unwrap();
+
+    let info = &app.status_message;
+    assert!(info.contains("fp=0x1"), "info missing fingerprint: {info}");
+    assert!(info.contains("access rw"), "info missing access: {info}");
+    assert!(info.contains("undo 2"), "info missing undo depth: {info}");
+    assert!(
+        info.contains("session dirty 2 regions"),
+        "info missing session totals: {info}"
+    );
+    assert!(
+        info.contains("3 bytes total"),
+        "info missing byte total: {info}"
+    );
+    assert!(
+        info.contains("target running"),
+        "info missing freeze: {info}"
+    );
+}
+
+#[cfg(feature = "memory")]
+#[test]
 fn mem_quit_blocked_when_any_region_dirty_and_forced_quit_discards() {
     let (mut app, _control) = app_with_two_fake_regions();
     app.document.set_byte(1, 0xaa).unwrap();

@@ -170,26 +170,7 @@ impl App {
                 }
                 format!("refreshed {count} memory regions")
             }
-            MemoryCommand::Info => self.memory_runtime().map_or_else(
-                || "memory info requires an active memory session".to_owned(),
-                |runtime| {
-                    runtime.session.region(runtime.selected_region).map_or_else(
-                        || "no memory region is selected".to_owned(),
-                        |region| {
-                            let perms = region.permissions.label();
-                            format!(
-                                "region 0x{:x}-0x{:x} {}{}{} {} bytes",
-                                region.start,
-                                region.end,
-                                perms[0],
-                                perms[1],
-                                perms[2],
-                                region.len()
-                            )
-                        },
-                    )
-                },
-            ),
+            MemoryCommand::Info => self.memory_info_text(),
             MemoryCommand::Freeze => return self.execute_memory_freeze_command(),
             MemoryCommand::Thaw => return self.execute_memory_thaw_command(),
             MemoryCommand::Commit => return self.commit_memory_document(false),

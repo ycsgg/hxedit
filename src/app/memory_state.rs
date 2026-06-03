@@ -679,6 +679,107 @@ impl App {
         }
     }
 
+    /// Pending replacement bytes for a single region, sourcing the opened
+    /// region from its live document and others from stashed `region_edits`.
+    #[cfg(feature = "memory")]
+    fn memory_region_dirty_bytes(&self, index: usize) -> usize {
+        let Some(runtime) = self.memory_runtime.as_ref() else {
+            return 0;
+        };
+        if index == runtime.opened_region && self.document.is_fixed_size() {
+            self.document
+                .replacement_spans()
+                .iter()
+                .map(|(_, b)| b.len())
+                .sum()
+        } else {
+            runtime
+                .region_edits
+                .get(&index)
+                .map_or(0, RegionEditState::dirty_bytes)
+        }
+    }
+
+    /// Aggregated `:mem info` report (mem-design.md §7.3): selected region and
+    /// fingerprint, its dirty bytes and undo/redo depth, session-wide dirty
+    /// region totals with stale-base flags, backend access mode, and freeze
+    /// state. Returns one line per `\n`-joined fact.
+    #[cfg(feature = "memory")]
+    pub(crate) fn memory_info_text(&self) -> String {
+        let Some(runtime) = self.memory_runtime.as_ref() else {
+            return "memory info requires an active memory session".to_owned();
+        };
+        let selected = runtime.selected_region;
+        let opened = runtime.opened_region;
+        let mut lines: Vec<String> = Vec::new();
+
+        if let Some(region) = runtime.session.region(selected) {
+            let perms = region.permissions.label();
+            lines.push(format!(
+                "region 0x{:x}-0x{:x} {}{}{} {} bytes fp=0x{:x}",
+                region.start,
+                region.end,
+                perms[0],
+                perms[1],
+                perms[2],
+                region.len(),
+                region.fingerprint.0
+            ));
+            lines.push(format!(
+                "access {}",
+                if region.permissions.write { "rw" } else { "ro" }
+            ));
+        } else {
+            lines.push("no memory region is selected".to_owned());
+        }
+
+        let (undo_depth, redo_depth) = if selected == opened {
+            (self.undo_stack.len(), self.redo_stack.len())
+        } else {
+            runtime
+                .region_edits
+                .get(&selected)
+                .map_or((0, 0), |edit| (edit.undo.len(), edit.redo.len()))
+        };
+        lines.push(format!(
+            "selected dirty {} bytes, undo {undo_depth} / redo {redo_depth}",
+            self.memory_region_dirty_bytes(selected)
+        ));
+
+        let (dirty_regions, dirty_bytes) = self.memory_dirty_summary().unwrap_or((0, 0));
+        lines.push(format!(
+            "session dirty {dirty_regions} region{}, {dirty_bytes} bytes total",
+            if dirty_regions == 1 { "" } else { "s" }
+        ));
+
+        let mut dirty_list: Vec<String> = Vec::new();
+        for (index, region) in runtime.session.regions().enumerate() {
+            let bytes = self.memory_region_dirty_bytes(index);
+            if bytes == 0 {
+                continue;
+            }
+            let stale = runtime.session.region_stale_base(index).unwrap_or(false);
+            dirty_list.push(format!(
+                "0x{:x}-0x{:x} {bytes}B{}",
+                region.start,
+                region.end,
+                if stale { " [stale-base]" } else { "" }
+            ));
+        }
+        if !dirty_list.is_empty() {
+            lines.push(format!("dirty regions: {}", dirty_list.join(", ")));
+        }
+
+        let freeze = if runtime.session.is_frozen() {
+            format!("frozen [depth {}]", runtime.session.freeze_depth())
+        } else {
+            "running".to_owned()
+        };
+        lines.push(format!("target {freeze}"));
+
+        lines.join("\n")
+    }
+
     #[cfg(not(feature = "memory"))]
     pub(crate) fn open_selected_memory_region(&mut self) -> crate::error::HxResult<()> {
         self.open_memory_panel("memory feature is not enabled");
