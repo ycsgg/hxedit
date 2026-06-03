@@ -8,6 +8,12 @@ pub enum HxError {
     ReadOnly,
     #[error("buffer has unsaved changes; use :q! to force quit")]
     DirtyQuit,
+    #[cfg(feature = "memory")]
+    #[error("{regions} regions dirty, total {bytes} bytes; use :q! to discard or :mem commit-all")]
+    MemoryDirtyQuit { regions: usize, bytes: usize },
+    #[cfg(feature = "memory")]
+    #[error(":w <path> cannot save process memory; use :export <path> to export logical bytes")]
+    MemoryWritePath,
     #[error("offset is outside the current document")]
     OffsetOutOfRange,
     #[error("search pattern must not be empty")]

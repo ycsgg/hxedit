@@ -1,5 +1,11 @@
+#[cfg(feature = "memory")]
+use crate::app::UndoStep;
 use crate::app::{App, SidePanelKind, StatusLevel};
 use crate::mode::Mode;
+
+/// `(region_index, replacement spans)` pairs queued for `:mem commit-all`.
+#[cfg(feature = "memory")]
+type DirtyRegionSpans = Vec<(usize, Vec<(u64, Vec<u8>)>)>;
 
 #[cfg(feature = "memory")]
 pub(crate) struct MemoryRuntime {
@@ -7,6 +13,27 @@ pub(crate) struct MemoryRuntime {
     pub(crate) selected_region: usize,
     pub(crate) opened_region: usize,
     pub(crate) base_va: u64,
+    /// Per-region editing state for regions that are not the currently opened
+    /// document. Lets undo/redo stacks and pending replacements survive region
+    /// switches so `:mem commit-all` and cross-region recovery work.
+    pub(crate) region_edits: std::collections::HashMap<usize, RegionEditState>,
+}
+
+/// Editing state captured for a region while it is not the opened document.
+#[cfg(feature = "memory")]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RegionEditState {
+    pub(crate) spans: Vec<(u64, Vec<u8>)>,
+    pub(crate) undo: Vec<UndoStep>,
+    pub(crate) redo: Vec<UndoStep>,
+    pub(crate) cursor: u64,
+}
+
+#[cfg(feature = "memory")]
+impl RegionEditState {
+    pub(crate) fn dirty_bytes(&self) -> usize {
+        self.spans.iter().map(|(_, bytes)| bytes.len()).sum()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -289,6 +316,14 @@ impl App {
             self.sync_memory_panel_selection(region_index);
             return Ok(());
         }
+        // Switching to a different region: stash the editing state of the
+        // region we are leaving so its undo/redo and pending replacements
+        // survive, then restore the target region's saved state if any.
+        self.stash_opened_region_edits();
+        let saved = self
+            .memory_runtime
+            .as_mut()
+            .and_then(|runtime| runtime.region_edits.remove(&region_index));
         let document = {
             let runtime = self.memory_runtime.as_mut().expect("checked above");
             let document = runtime.session.document_for_region(region_index, &config)?;
@@ -298,18 +333,59 @@ impl App {
             document
         };
         self.document = document;
-        self.cursor = self.clamp_cursor_for_mode(addr.saturating_sub(region.start), self.mode);
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        let restored_cursor = if let Some(saved) = saved {
+            self.document.apply_replacement_spans(&saved.spans)?;
+            self.undo_stack = saved.undo;
+            self.redo_stack = saved.redo;
+            Some(saved.cursor)
+        } else {
+            None
+        };
+        let cursor_offset = restored_cursor.unwrap_or_else(|| addr.saturating_sub(region.start));
+        self.cursor = self.clamp_cursor_for_mode(cursor_offset, self.mode);
         self.viewport_top =
             super::navigation::align_offset(self.cursor, self.config.bytes_per_line);
         self.selection_anchor = None;
         self.mouse_selection_anchor = None;
-        self.undo_stack.clear();
-        self.redo_stack.clear();
         self.document_revision = self.document_revision.saturating_add(1);
         self.invalidate_disassembly_cache();
         self.refresh_inspector();
         self.sync_memory_panel_selection(region_index);
         Ok(())
+    }
+
+    /// Capture the opened region's current editing state into `region_edits`
+    /// so it can be restored after switching away. Clears the entry when the
+    /// region has no pending edits.
+    #[cfg(feature = "memory")]
+    fn stash_opened_region_edits(&mut self) {
+        if !self.document.is_fixed_size() {
+            return;
+        }
+        let Some(opened) = self.memory_runtime.as_ref().map(|r| r.opened_region) else {
+            return;
+        };
+        let spans = self.document.replacement_spans();
+        let undo = std::mem::take(&mut self.undo_stack);
+        let redo = std::mem::take(&mut self.redo_stack);
+        let cursor = self.cursor;
+        if let Some(runtime) = self.memory_runtime.as_mut() {
+            if spans.is_empty() && undo.is_empty() && redo.is_empty() {
+                runtime.region_edits.remove(&opened);
+            } else {
+                runtime.region_edits.insert(
+                    opened,
+                    RegionEditState {
+                        spans,
+                        undo,
+                        redo,
+                        cursor,
+                    },
+                );
+            }
+        }
     }
 
     #[cfg(feature = "memory")]
@@ -330,6 +406,9 @@ impl App {
         &mut self,
         commit_all: bool,
     ) -> crate::error::HxResult<()> {
+        if commit_all {
+            return self.commit_all_memory_regions();
+        }
         if !self.document.is_fixed_size() {
             self.open_memory_panel("memory commit requires an active memory document");
             return Ok(());
@@ -369,6 +448,7 @@ impl App {
                 runtime.session.write_at(addr, bytes)?;
             }
             runtime.session.clear_region_dirty(region_index)?;
+            runtime.region_edits.remove(&region_index);
             runtime.base_va = region.start;
         }
 
@@ -388,9 +468,8 @@ impl App {
         self.invalidate_disassembly_cache();
         self.refresh_inspector();
 
-        let command_label = if commit_all { "commit-all" } else { "commit" };
         let mut message = format!(
-            "memory {command_label} wrote {total_bytes} byte{} across {} span{} at 0x{:x}-0x{:x}",
+            "memory commit wrote {total_bytes} byte{} across {} span{} at 0x{:x}-0x{:x}",
             if total_bytes == 1 { "" } else { "s" },
             spans.len(),
             if spans.len() == 1 { "" } else { "s" },
@@ -405,6 +484,199 @@ impl App {
         }
         self.open_memory_panel(message);
         Ok(())
+    }
+
+    /// Walk every dirty region in the session in virtual-address order and
+    /// commit its pending replacements, stopping at the first failure and
+    /// reporting which regions were written. Per mem-design.md §7.2.
+    #[cfg(feature = "memory")]
+    fn commit_all_memory_regions(&mut self) -> crate::error::HxResult<()> {
+        if self.memory_runtime.is_none() {
+            self.open_memory_panel("memory commit requires an active memory session");
+            return Ok(());
+        }
+        // Make the opened region's live document the authoritative source for
+        // its own spans, then merge with the stashed per-region edits.
+        let opened = self
+            .memory_runtime
+            .as_ref()
+            .expect("checked above")
+            .opened_region;
+        let opened_spans = if self.document.is_fixed_size() {
+            self.document.replacement_spans()
+        } else {
+            Vec::new()
+        };
+
+        let mut dirty: DirtyRegionSpans = Vec::new();
+        {
+            let runtime = self.memory_runtime.as_ref().expect("checked above");
+            for (index, edit) in &runtime.region_edits {
+                if *index != opened && !edit.spans.is_empty() {
+                    dirty.push((*index, edit.spans.clone()));
+                }
+            }
+        }
+        if !opened_spans.is_empty() {
+            dirty.push((opened, opened_spans));
+        }
+        if dirty.is_empty() {
+            self.open_memory_panel("memory session has no pending replacements");
+            return Ok(());
+        }
+        {
+            let runtime = self.memory_runtime.as_ref().expect("checked above");
+            dirty.sort_by_key(|(index, _)| {
+                runtime
+                    .session
+                    .region(*index)
+                    .map_or(u64::MAX, |region| region.start)
+            });
+        }
+
+        let total_regions = dirty.len();
+        let target_was_running = !self
+            .memory_runtime
+            .as_ref()
+            .expect("checked above")
+            .session
+            .is_frozen();
+        let mut committed_regions = 0usize;
+        let mut committed_bytes = 0usize;
+        let mut opened_committed = false;
+
+        for (index, spans) in &dirty {
+            let Some(region) = self
+                .memory_runtime
+                .as_ref()
+                .expect("checked above")
+                .session
+                .region(*index)
+                .cloned()
+            else {
+                continue;
+            };
+            if !region.permissions.write {
+                let message = format!(
+                    "memory commit-all stopped at 0x{:x}-0x{:x}: region is not writable; {committed_regions}/{total_regions} regions committed ({committed_bytes} bytes), remaining left dirty",
+                    region.start, region.end
+                );
+                self.finish_commit_all(opened_committed);
+                self.set_error_status(message.clone());
+                if let Some(state) = self.memory_state.as_mut() {
+                    state.message = message;
+                }
+                return Ok(());
+            }
+            let mut region_bytes = 0usize;
+            let runtime = self.memory_runtime.as_mut().expect("checked above");
+            for (offset, bytes) in spans {
+                let addr = match region.start.checked_add(*offset) {
+                    Some(addr) => addr,
+                    None => continue,
+                };
+                if let Err(err) = runtime.session.write_at(addr, bytes) {
+                    let message = format!(
+                        "memory commit-all stopped at VA 0x{addr:x}: {err}; {committed_regions}/{total_regions} regions committed ({committed_bytes} bytes), remaining left dirty"
+                    );
+                    self.finish_commit_all(opened_committed);
+                    self.set_error_status(message.clone());
+                    if let Some(state) = self.memory_state.as_mut() {
+                        state.message = message;
+                    }
+                    return Ok(());
+                }
+                region_bytes += bytes.len();
+            }
+            runtime.session.clear_region_dirty(*index)?;
+            if *index == opened {
+                opened_committed = true;
+            } else {
+                runtime.region_edits.remove(index);
+            }
+            committed_regions += 1;
+            committed_bytes += region_bytes;
+        }
+
+        self.finish_commit_all(opened_committed);
+        let mut message = format!(
+            "memory commit-all wrote {committed_bytes} byte{} across {committed_regions} region{}",
+            if committed_bytes == 1 { "" } else { "s" },
+            if committed_regions == 1 { "" } else { "s" }
+        );
+        if target_was_running {
+            message.push_str(" [warning: target was running; use :mem freeze for safer edits]");
+        }
+        if let Some(state) = self.memory_state.as_mut() {
+            state.message = message.clone();
+        }
+        self.open_memory_panel(message);
+        Ok(())
+    }
+
+    /// Rebuild the opened region's document after a commit-all so the rendered
+    /// view matches the bytes now held by the target.
+    #[cfg(feature = "memory")]
+    fn finish_commit_all(&mut self, opened_committed: bool) {
+        if !opened_committed {
+            return;
+        }
+        let Some(opened) = self.memory_runtime.as_ref().map(|r| r.opened_region) else {
+            return;
+        };
+        let config = self.config.clone();
+        let document = self
+            .memory_runtime
+            .as_mut()
+            .and_then(|runtime| runtime.session.document_for_region(opened, &config).ok());
+        if let Some(document) = document {
+            self.document = document;
+            self.document.clear_replacements();
+            self.undo_stack.clear();
+            self.redo_stack.clear();
+            self.document_revision = self.document_revision.saturating_add(1);
+            self.cursor = self.clamp_cursor_for_mode(self.cursor, self.mode);
+            self.invalidate_disassembly_cache();
+            self.refresh_inspector();
+        }
+    }
+
+    /// Total dirty regions and bytes across the whole session, combining the
+    /// opened region's live document with stashed per-region edits. Used by the
+    /// `:q` quit guard and `:mem info` aggregation.
+    #[cfg(feature = "memory")]
+    pub(crate) fn memory_dirty_summary(&self) -> Option<(usize, usize)> {
+        let runtime = self.memory_runtime.as_ref()?;
+        let opened = runtime.opened_region;
+        let mut regions = 0usize;
+        let mut bytes = 0usize;
+        for (index, edit) in &runtime.region_edits {
+            if *index == opened {
+                continue;
+            }
+            let region_bytes = edit.dirty_bytes();
+            if region_bytes > 0 {
+                regions += 1;
+                bytes += region_bytes;
+            }
+        }
+        if self.document.is_fixed_size() {
+            let opened_bytes = self
+                .document
+                .replacement_spans()
+                .iter()
+                .map(|(_, b)| b.len())
+                .sum::<usize>();
+            if opened_bytes > 0 {
+                regions += 1;
+                bytes += opened_bytes;
+            }
+        }
+        if regions == 0 {
+            None
+        } else {
+            Some((regions, bytes))
+        }
     }
 
     #[cfg(not(feature = "memory"))]

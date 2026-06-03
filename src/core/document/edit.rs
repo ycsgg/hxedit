@@ -115,6 +115,29 @@ impl Document {
         self.set_display_byte_by_id(id, value)
     }
 
+    /// Re-apply a set of `(offset, bytes)` replacement spans onto this
+    /// document. Pure replacement semantics: every byte must fall within the
+    /// current display bounds, so this never inserts, tombstones, or
+    /// real-deletes. The inverse of [`Document::replacement_spans`], used to
+    /// restore per-region memory edits after rebuilding a fixed-size document.
+    pub fn apply_replacement_spans(&mut self, spans: &[(u64, Vec<u8>)]) -> HxResult<()> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        for (offset, bytes) in spans {
+            for (index, value) in bytes.iter().enumerate() {
+                let target = offset
+                    .checked_add(index as u64)
+                    .ok_or(HxError::OffsetOutOfRange)?;
+                if target >= self.len() {
+                    return Err(HxError::OffsetOutOfRange);
+                }
+                self.replace_display_byte(target, *value)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Set a byte: replace if within bounds, insert if at EOF.
     pub fn set_byte(&mut self, offset: u64, value: u8) -> HxResult<()> {
         if offset == self.len() {

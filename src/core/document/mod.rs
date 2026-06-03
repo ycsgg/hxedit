@@ -529,4 +529,28 @@ mod tests {
         assert_eq!(doc.len(), 4);
         assert_eq!(doc.visible_len(), 4);
     }
+
+    #[test]
+    fn apply_replacement_spans_roundtrips_with_replacement_spans() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1000-0x1004"),
+            vec![0x12, 0x34, 0x56, 0x78],
+            &config,
+        );
+
+        let spans = vec![(0u64, vec![0xaa, 0xbb]), (3u64, vec![0xcc])];
+        doc.apply_replacement_spans(&spans).unwrap();
+        assert_eq!(doc.byte_at(0).unwrap(), ByteSlot::Present(0xaa));
+        assert_eq!(doc.byte_at(1).unwrap(), ByteSlot::Present(0xbb));
+        assert_eq!(doc.byte_at(3).unwrap(), ByteSlot::Present(0xcc));
+        assert_eq!(doc.replacement_spans(), spans);
+
+        // Out-of-bounds spans are rejected without changing length.
+        assert!(matches!(
+            doc.apply_replacement_spans(&[(4, vec![0x00])]),
+            Err(HxError::OffsetOutOfRange)
+        ));
+        assert_eq!(doc.len(), 4);
+    }
 }

@@ -2,8 +2,14 @@ use super::*;
 
 impl App {
     pub(super) fn execute_quit_command(&mut self, force: bool) -> HxResult<()> {
-        if self.document.is_dirty() && !force {
-            return Err(HxError::DirtyQuit);
+        if !force {
+            #[cfg(feature = "memory")]
+            if let Some((regions, bytes)) = self.memory_dirty_summary() {
+                return Err(HxError::MemoryDirtyQuit { regions, bytes });
+            }
+            if self.document.is_dirty() {
+                return Err(HxError::DirtyQuit);
+            }
         }
         self.should_quit = true;
         Ok(())
@@ -14,6 +20,19 @@ impl App {
         path: Option<std::path::PathBuf>,
         should_quit: bool,
     ) -> HxResult<()> {
+        // In memory mode, `:w` is equivalent to `:mem commit`. `:w <path>`
+        // must not save process memory as a file; direct the user to :export.
+        #[cfg(feature = "memory")]
+        if self.document.is_fixed_size() {
+            if path.is_some() {
+                return Err(HxError::MemoryWritePath);
+            }
+            self.commit_memory_document(false)?;
+            if should_quit {
+                return self.execute_quit_command(false);
+            }
+            return Ok(());
+        }
         let (saved, profile) = self.document.save(path)?;
         self.undo_stack.clear();
         self.redo_stack.clear();

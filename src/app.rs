@@ -247,7 +247,7 @@ pub(crate) enum EditOp {
 /// One entry on the undo stack: the cursor/mode before the edit, plus the
 /// list of operations that were performed (replayed in reverse to undo).
 #[derive(Debug, Clone)]
-struct UndoStep {
+pub(crate) struct UndoStep {
     cursor_before: u64,
     mode_before: Mode,
     cursor_after: u64,
@@ -449,6 +449,7 @@ impl App {
                 selected_region,
                 opened_region: selected_region,
                 base_va: region.start,
+                region_edits: std::collections::HashMap::new(),
             },
             message,
         })
