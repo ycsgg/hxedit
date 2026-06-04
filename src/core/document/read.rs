@@ -226,6 +226,7 @@ impl Document {
         let has_replacements = self.has_replacements();
         let mut out = Vec::with_capacity((end - start) as usize);
         let mut cursor = 0_u64;
+        let read_chunk_len = self.max_contiguous_read_len();
 
         for piece in &pieces {
             if cursor >= end {
@@ -254,7 +255,7 @@ impl Document {
                     let mut cell_off = source_start;
 
                     while remaining > 0 {
-                        let batch = (remaining as usize).min(LOGICAL_CHUNK);
+                        let batch = (remaining as usize).min(read_chunk_len);
                         let raw = self.raw_range(file_off, batch)?;
                         if raw.is_empty() {
                             break;
@@ -327,28 +328,37 @@ impl Document {
         Ok(out)
     }
 
-    /// Compute a hash over the logical bytes in a display range, streaming
-    /// data through the hasher in 64 KB chunks without materializing the
-    /// entire byte vector in memory.
-    pub fn hash_logical_bytes(
+    /// Walk the logical bytes in a display range, invoking `sink` with each
+    /// 64 KB chunk (tombstones skipped, replacements applied) without
+    /// materializing the entire byte vector in memory.
+    ///
+    /// This is the streaming primitive behind `:export`, `:fill`, and
+    /// `:xor!`, mirroring [`Document::hash_logical_bytes`]: clean original
+    /// chunks are forwarded straight from the page-cache read buffer, while
+    /// chunks overlapping tombstones/replacements are condensed into a scratch
+    /// buffer first. Returns the total number of logical bytes visited.
+    pub fn for_each_logical_chunk(
         &mut self,
         start: u64,
         end_inclusive: u64,
-        mut hasher: Box<dyn digest::DynDigest>,
-    ) -> HxResult<(u64, Vec<u8>)> {
+        mut sink: impl FnMut(&[u8]) -> HxResult<()>,
+    ) -> HxResult<u64> {
         let len = self.len();
         if len == 0 || start > end_inclusive || start >= len {
-            return Ok((0, Vec::new()));
+            return Ok(0);
         }
 
         let end = end_inclusive.min(len - 1) + 1;
         let pieces: Vec<Piece> = self.pieces_snapshot();
         let has_tombstones = self.has_tombstones();
         let has_replacements = self.has_replacements();
-        let mut bytes_hashed: u64 = 0;
+        let mut visited: u64 = 0;
         let mut cursor = 0_u64;
-
         let mut chunk_buf = Vec::with_capacity(LOGICAL_CHUNK);
+        // Never read more in one shot than the page cache can hold, otherwise
+        // `read_range` returns nothing for spans larger than
+        // `page_size * cache_pages`.
+        let read_chunk_len = self.max_contiguous_read_len();
 
         for piece in &pieces {
             if cursor >= end {
@@ -377,7 +387,139 @@ impl Document {
                     let mut cell_off = source_start;
 
                     while remaining > 0 {
-                        let batch = (remaining as usize).min(LOGICAL_CHUNK);
+                        let batch = (remaining as usize).min(read_chunk_len);
+                        let raw = self.raw_range(file_off, batch)?;
+                        if raw.is_empty() {
+                            break;
+                        }
+                        let read_len = raw.len() as u64;
+
+                        let (need_ts, need_rep) = self.search_overlay_flags(
+                            PieceSource::Original,
+                            cell_off,
+                            read_len,
+                            has_tombstones,
+                            has_replacements,
+                        );
+
+                        if !need_ts && !need_rep {
+                            sink(&raw)?;
+                            visited += read_len;
+                        } else {
+                            chunk_buf.clear();
+                            for (i, &base) in raw.iter().enumerate() {
+                                let id = CellId::Original(cell_off + i as u64);
+                                if need_ts && self.is_tombstone(id) {
+                                    continue;
+                                }
+                                let byte = if need_rep {
+                                    self.replacement_for(id).unwrap_or(base)
+                                } else {
+                                    base
+                                };
+                                chunk_buf.push(byte);
+                            }
+                            sink(&chunk_buf)?;
+                            visited += chunk_buf.len() as u64;
+                        }
+
+                        file_off += read_len;
+                        cell_off += read_len;
+                        remaining -= read_len;
+                    }
+                }
+                PieceSource::Add => {
+                    let (need_ts, need_rep) = self.search_overlay_flags(
+                        PieceSource::Add,
+                        source_start,
+                        overlap_len,
+                        has_tombstones,
+                        has_replacements,
+                    );
+
+                    let slice = self.add_slice(source_start, overlap_len);
+
+                    if !need_ts && !need_rep {
+                        sink(slice)?;
+                        visited += slice.len() as u64;
+                    } else {
+                        chunk_buf.clear();
+                        for (i, &base) in slice.iter().enumerate() {
+                            let id = CellId::Add(source_start + i as u64);
+                            if need_ts && self.is_tombstone(id) {
+                                continue;
+                            }
+                            let byte = if need_rep {
+                                self.replacement_for(id).unwrap_or(base)
+                            } else {
+                                base
+                            };
+                            chunk_buf.push(byte);
+                        }
+                        sink(&chunk_buf)?;
+                        visited += chunk_buf.len() as u64;
+                    }
+                }
+            }
+
+            cursor = piece_end;
+        }
+
+        Ok(visited)
+    }
+
+    /// Compute a hash over the logical bytes in a display range, streaming
+    /// data through the hasher in 64 KB chunks without materializing the
+    /// entire byte vector in memory.
+    pub fn hash_logical_bytes(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        mut hasher: Box<dyn digest::DynDigest>,
+    ) -> HxResult<(u64, Vec<u8>)> {
+        let len = self.len();
+        if len == 0 || start > end_inclusive || start >= len {
+            return Ok((0, Vec::new()));
+        }
+
+        let end = end_inclusive.min(len - 1) + 1;
+        let pieces: Vec<Piece> = self.pieces_snapshot();
+        let has_tombstones = self.has_tombstones();
+        let has_replacements = self.has_replacements();
+        let mut bytes_hashed: u64 = 0;
+        let mut cursor = 0_u64;
+
+        let mut chunk_buf = Vec::with_capacity(LOGICAL_CHUNK);
+        let read_chunk_len = self.max_contiguous_read_len();
+
+        for piece in &pieces {
+            if cursor >= end {
+                break;
+            }
+            let piece_end = cursor + piece.len;
+            if piece_end <= start {
+                cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = start.max(cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start >= overlap_end {
+                cursor = piece_end;
+                continue;
+            }
+
+            let source_start = piece.start + (overlap_start - cursor);
+            let overlap_len = overlap_end - overlap_start;
+
+            match piece.source {
+                PieceSource::Original => {
+                    let mut remaining = overlap_len;
+                    let mut file_off = source_start;
+                    let mut cell_off = source_start;
+
+                    while remaining > 0 {
+                        let batch = (remaining as usize).min(read_chunk_len);
                         let raw = self.raw_range(file_off, batch)?;
                         if raw.is_empty() {
                             break;

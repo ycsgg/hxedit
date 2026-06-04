@@ -8,12 +8,20 @@ pub enum HxError {
     ReadOnly,
     #[error("buffer has unsaved changes; use :q! to force quit")]
     DirtyQuit,
+    #[cfg(feature = "memory")]
+    #[error("{regions} regions dirty, total {bytes} bytes; use :q! to discard or :mem commit-all")]
+    MemoryDirtyQuit { regions: usize, bytes: usize },
+    #[cfg(feature = "memory")]
+    #[error(":w <path> cannot save process memory; use :export <path> to export logical bytes")]
+    MemoryWritePath,
     #[error("offset is outside the current document")]
     OffsetOutOfRange,
     #[error("search pattern must not be empty")]
     EmptySearch,
     #[error("invalid offset: {0}")]
     InvalidOffset(String),
+    #[error("invalid CLI source: {0}")]
+    InvalidCliSource(String),
     #[error("invalid fill count: {0}")]
     InvalidFillCount(String),
     #[error("invalid replace command: {0}")]
@@ -38,6 +46,18 @@ pub enum HxError {
     UnknownDisassemblyArch(String),
     #[error("disassembly unavailable: {0}")]
     DisassemblyUnavailable(String),
+    #[error("memory unavailable: {0}")]
+    MemoryUnavailable(String),
+    #[error("memory document is fixed-size; operation would change length")]
+    FixedSizeViolation,
+    #[error("memory process is no longer the original target: {0}")]
+    ProcessDead(String),
+    #[error("memory access failed at 0x{addr:x} for {len} bytes: {message}")]
+    MemoryAccess {
+        addr: u64,
+        len: usize,
+        message: String,
+    },
     #[error("assembly error: {0}")]
     AssemblyError(String),
     #[error("invalid hex pattern: {0}")]

@@ -48,6 +48,7 @@ pub struct Document {
     page_size: usize,
     cache_pages: usize,
     original_len: u64,
+    fixed_size: bool,
     view: FileView,
     pieces: PieceTable,
     tombstones: BTreeSet<CellId>,
@@ -82,11 +83,28 @@ impl Document {
             page_size: config.page_size,
             cache_pages: config.cache_pages,
             original_len,
+            fixed_size: false,
             view,
             pieces: PieceTable::new(original_len),
             tombstones: BTreeSet::new(),
             replacements: BTreeMap::new(),
         })
+    }
+
+    pub fn from_memory_bytes(path: PathBuf, bytes: Vec<u8>, config: &Config) -> Self {
+        let original_len = bytes.len() as u64;
+        Self {
+            path: path.clone(),
+            readonly: false,
+            page_size: config.page_size,
+            cache_pages: config.cache_pages,
+            original_len,
+            fixed_size: true,
+            view: FileView::from_bytes(path, bytes, config.page_size, config.cache_pages),
+            pieces: PieceTable::new(original_len),
+            tombstones: BTreeSet::new(),
+            replacements: BTreeMap::new(),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -123,6 +141,10 @@ impl Document {
         self.readonly
     }
 
+    pub fn is_fixed_size(&self) -> bool {
+        self.fixed_size
+    }
+
     pub fn io_stats(&self) -> CacheStats {
         self.view.cache_stats()
     }
@@ -131,6 +153,9 @@ impl Document {
     /// tombstones and applying replacements. After saving, resets all edit
     /// state and reloads the file.
     pub fn save(&mut self, path: Option<PathBuf>) -> HxResult<(PathBuf, save::SaveProfile)> {
+        if self.fixed_size {
+            return Err(HxError::FixedSizeViolation);
+        }
         let target = path.unwrap_or_else(|| self.path.clone());
         if self.readonly && target == self.path {
             return Err(HxError::ReadOnly);
@@ -142,6 +167,7 @@ impl Document {
         self.view
             .reload(&target, self.readonly, self.page_size, self.cache_pages)?;
         self.original_len = self.view.len();
+        self.fixed_size = false;
         self.pieces = PieceTable::new(self.original_len);
         self.tombstones.clear();
         self.replacements.clear();
@@ -157,6 +183,19 @@ impl Document {
             return Err(HxError::OffsetOutOfRange);
         }
         Ok(offset)
+    }
+
+    /// Largest contiguous span (in bytes) that `raw_range` can satisfy in a
+    /// single call. The page cache only materializes the pages spanned by one
+    /// `read_range`; asking for more than `page_size * cache_pages` evicts the
+    /// earlier pages mid-read and returns a short/empty buffer. Chunked readers
+    /// cap their per-read batch to this so they stay correct for any cache
+    /// configuration. Always at least one page.
+    pub(crate) fn max_contiguous_read_len(&self) -> usize {
+        self.page_size
+            .saturating_mul(self.cache_pages)
+            .max(self.page_size)
+            .max(1)
     }
 
     /// Cheap snapshot of the piece list (small structs, no data).
@@ -278,6 +317,34 @@ impl Document {
     /// Return the replacement value for a cell, if any.
     pub fn replacement_for(&self, id: CellId) -> Option<u8> {
         self.replacements.get(&id).copied()
+    }
+
+    /// Return contiguous replacement runs keyed by original/display offset.
+    ///
+    /// Fixed-size memory documents are replacement-only, so their piece table
+    /// remains the identity mapping and every replacement is an original cell.
+    /// This helper gives the memory commit path compact write ranges without
+    /// exposing the replacement map itself.
+    pub fn replacement_spans(&self) -> Vec<(u64, Vec<u8>)> {
+        let mut spans: Vec<(u64, Vec<u8>)> = Vec::new();
+        for (id, value) in &self.replacements {
+            let CellId::Original(offset) = *id else {
+                continue;
+            };
+            if let Some((start, bytes)) = spans.last_mut() {
+                if *start + bytes.len() as u64 == offset {
+                    bytes.push(*value);
+                    continue;
+                }
+            }
+            spans.push((offset, vec![*value]));
+        }
+        spans
+    }
+
+    /// Clear all replacement overlays after an external fixed-size commit.
+    pub fn clear_replacements(&mut self) {
+        self.replacements.clear();
     }
 
     /// Borrow a slice of the add-buffer.
@@ -403,5 +470,100 @@ impl Document {
             has_tombstones && self.has_tombstone_in_range(lo, hi),
             has_replacements && self.has_replacement_in_range(lo, hi),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::config::Config;
+    use crate::core::document::{ByteSlot, Document};
+    use crate::core::piece_table::CellId;
+    use crate::error::HxError;
+    use crate::mode::NibblePhase;
+
+    #[test]
+    fn fixed_size_memory_document_allows_replacement_only() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1000-0x1004"),
+            vec![0x12, 0x34, 0x56, 0x78],
+            &config,
+        );
+
+        assert!(doc.is_fixed_size());
+        assert_eq!(doc.len(), 4);
+        assert_eq!(doc.visible_len(), 4);
+        assert_eq!(doc.original_len(), 4);
+
+        let id = doc.replace_nibble(1, NibblePhase::Low, 0xf).unwrap();
+        assert_eq!(doc.byte_at(1).unwrap(), ByteSlot::Present(0x3f));
+        doc.replace_display_byte_by_id(id, 0x34).unwrap();
+        assert_eq!(doc.byte_at(1).unwrap(), ByteSlot::Present(0x34));
+        assert_eq!(doc.len(), 4);
+        assert_eq!(doc.visible_len(), 4);
+    }
+
+    #[test]
+    fn fixed_size_memory_document_rejects_length_changing_ops() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1000-0x1004"),
+            vec![0x12, 0x34, 0x56, 0x78],
+            &config,
+        );
+
+        assert!(matches!(
+            doc.replace_nibble(doc.len(), NibblePhase::High, 0xa),
+            Err(HxError::FixedSizeViolation)
+        ));
+        assert!(matches!(
+            doc.set_byte(doc.len(), 0xff),
+            Err(HxError::FixedSizeViolation)
+        ));
+        assert!(matches!(
+            doc.insert_byte(1, 0xff),
+            Err(HxError::FixedSizeViolation)
+        ));
+        assert!(matches!(
+            doc.mark_tombstone(1),
+            Err(HxError::FixedSizeViolation)
+        ));
+        assert!(matches!(
+            doc.delete_range_real(1, 1),
+            Err(HxError::FixedSizeViolation)
+        ));
+        assert!(matches!(
+            doc.restore_real_delete(1, &[CellId::Original(1)]),
+            Err(HxError::FixedSizeViolation)
+        ));
+        assert!(matches!(doc.save(None), Err(HxError::FixedSizeViolation)));
+        assert_eq!(doc.len(), 4);
+        assert_eq!(doc.visible_len(), 4);
+    }
+
+    #[test]
+    fn apply_replacement_spans_roundtrips_with_replacement_spans() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1000-0x1004"),
+            vec![0x12, 0x34, 0x56, 0x78],
+            &config,
+        );
+
+        let spans = vec![(0u64, vec![0xaa, 0xbb]), (3u64, vec![0xcc])];
+        doc.apply_replacement_spans(&spans).unwrap();
+        assert_eq!(doc.byte_at(0).unwrap(), ByteSlot::Present(0xaa));
+        assert_eq!(doc.byte_at(1).unwrap(), ByteSlot::Present(0xbb));
+        assert_eq!(doc.byte_at(3).unwrap(), ByteSlot::Present(0xcc));
+        assert_eq!(doc.replacement_spans(), spans);
+
+        // Out-of-bounds spans are rejected without changing length.
+        assert!(matches!(
+            doc.apply_replacement_spans(&[(4, vec![0x00])]),
+            Err(HxError::OffsetOutOfRange)
+        ));
+        assert_eq!(doc.len(), 4);
     }
 }

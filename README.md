@@ -14,7 +14,7 @@ A terminal hex editor for large files, written in Rust.
   - real insert
   - tombstone delete
 - Full undo / redo across edits, paste, replace, and inspector writes
-- ASCII and hex search with forward/backward traversal, wrap-around, and visible-hit highlighting
+- Unified text/hex/typed-value search with forward/backward traversal, wrap-around, and visible-hit highlighting; large files are scanned with SIMD `memmem` (only chunks containing tombstone/replacement edits fall back to byte-at-a-time)
 - Built-in format inspectors for ELF, PE/COFF, Mach-O, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG
 - Hashing for MD5, SHA1, SHA256, SHA512, and CRC32
 - Clipboard copy/paste, export, fill/zero/xor/replace transforms
@@ -78,8 +78,7 @@ Notes:
 | `:w` / `:w <path>` / `:wq` | Save / save as / save and quit |
 | `:u [n]` / `:redo [n]` | Undo / redo |
 | `:g <offset>` / `:g end` / `:g +n` / `:g -n` | Goto |
-| `:s <text>` / `:s! <text>` | ASCII search |
-| `:S <hex>` / `:S! <hex>` | Hex search |
+| `:s [mode]<delim><pattern><delim>` / `:s! ...` | Unified search; default `/text/` searches UTF-8 bytes, `x/hex/` searches raw hex bytes, `b/255/` searches one byte, and `u32/u64/i32/i64` variants search typed integer bytes (`!` searches backward). `:S` remains only as a deprecated hex-search alias during transition |
 | `:p` / `:pi` / `:p?` / `:pi?` | Overwrite / insert paste and previews |
 | `:c [fmt] [disp]` | Copy the active selection |
 | `:export <path>` / `:export c` / `:export py` | Export logical bytes |
@@ -90,6 +89,14 @@ Notes:
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh|next|prev|off` | Show a synchronized page comparing current logical bytes with another file; visible pages realign inserted/deleted bytes within `N`, equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__` |
 | `:insp` / `:insp more` | Open inspector / reveal more paginated entries |
 | `:format ...` | Force format |
+
+Memory-related commands in `memory` builds:
+
+| Command | Description |
+|---------|-------------|
+| `:mem` / `:mem list|refresh|info|freeze|thaw|commit|commit-all` | Open the process-memory side panel, inspect regions, refresh maps, suspend/resume the target, write the active region's replacement spans back (`commit`), or commit every dirty region in virtual-address order (`commit-all`). The panel has three views: maps (region list — the selected/cursor row and the currently opened region are highlighted distinctly), `:mem list` process picker (Enter attaches to the highlighted process), and `:mem info` (aggregated report). All views scroll with the mouse wheel or arrow keys; clicking a row only changes the highlight |
+| `:w` / `:q` in memory mode | `:w` (no path) is equivalent to `:mem commit`; `:w <path>` is rejected (use `:export <path>`). Uncommitted replacements, undo, and redo are kept per region across region switches, so `:q` refuses to quit while any region is dirty and summarizes the total; `:q!` discards |
+| `:ms [mode]<delim><pattern><delim> [filter...]` / `:ms! ...` | Search readable process regions by virtual address; modes include text, `x/hex/`, `b/byte/`, `u32/u64`, and filters such as `in:rw-`, `in:heap`, `not:path:/usr/lib/*`, `in:va:start-end`. Repeat the last memory search with `gn` / `gN` (independent of the file-search `n` / `p` history) |
 
 Disassembly-related commands in `default` / `full` builds:
 

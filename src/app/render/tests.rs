@@ -11,7 +11,9 @@ pub(super) fn app_with_bytes(bytes: &[u8]) -> App {
     let file = dir.path().join("sample.bin");
     fs::write(&file, bytes).unwrap();
     let cli = Cli {
-        file,
+        file: Some(file),
+        pid: None,
+        process: None,
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,

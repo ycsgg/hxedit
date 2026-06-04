@@ -11,6 +11,7 @@ mod disasm_editing;
 mod editing_state;
 mod events;
 mod inspector_state;
+mod memory_state;
 mod mode_state;
 mod mouse;
 mod navigation;
@@ -32,7 +33,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
 
-use crate::cli::Cli;
+use crate::action::Action;
+use crate::cli::{Cli, CliTarget};
 use crate::config::Config;
 use crate::core::document::Document;
 use crate::core::piece_table::CellId;
@@ -63,6 +65,7 @@ pub(crate) enum SidePanelKind {
     Symbol,
     Data,
     Diff,
+    Memory,
 }
 
 /// Data inspector state for cursor-relative primitive decoding.
@@ -109,6 +112,14 @@ pub struct App {
     undo_stack: Vec<UndoStep>,
     redo_stack: Vec<UndoStep>,
     last_search: Option<SearchState>,
+    /// Last cross-region memory search query, replayed by `gn` / `gN`. Kept
+    /// separate from `last_search` so file `/`/`n`/`p` history never mixes with
+    /// memory search history (mem-design.md §9).
+    #[cfg(feature = "memory")]
+    last_memory_search: Option<crate::memory::MemorySearchQuery>,
+    /// True after a `g` prefix key, waiting for the next key (e.g. `gn` / `gN`).
+    #[cfg(feature = "memory")]
+    pending_g: bool,
     last_paste: Option<PasteState>,
     profiler: Option<Profiler>,
     disasm_cache: Option<DisasmCache>,
@@ -133,12 +144,45 @@ pub struct App {
     data_state: Option<DataState>,
     /// Cached diff side panel state.
     diff_state: Option<DiffState>,
+    /// Active process-memory session and selected region.
+    #[cfg(feature = "memory")]
+    memory_runtime: Option<memory_state::MemoryRuntime>,
+    /// Cached memory side panel state.
+    memory_state: Option<memory_state::MemoryPanelState>,
     /// Monotonic logical-content revision used to mark diff results stale.
     document_revision: u64,
     /// Distinguishes “no detected format” from “detected but failed to parse”.
     inspector_error: Option<String>,
     /// Last non-fatal render read error already surfaced to stderr.
     last_render_error: Option<String>,
+}
+
+#[cfg(feature = "memory")]
+struct OpenedMemoryCliTarget {
+    document: Document,
+    runtime: memory_state::MemoryRuntime,
+    message: String,
+}
+
+#[cfg(feature = "memory")]
+fn memory_initial_cursor(
+    document: &Document,
+    config: &Config,
+    runtime: Option<&memory_state::MemoryRuntime>,
+) -> Option<u64> {
+    let runtime = runtime?;
+    if document.is_empty() {
+        return Some(0);
+    }
+    let base = runtime.base_va;
+    let end = base.saturating_add(document.len());
+    if config.initial_offset == 0 {
+        Some(0)
+    } else if base <= config.initial_offset && config.initial_offset < end {
+        Some(config.initial_offset - base)
+    } else {
+        Some(config.initial_offset.min(document.len() - 1))
+    }
 }
 
 /// Inspector panel runtime state.
@@ -212,7 +256,7 @@ pub(crate) enum EditOp {
 /// One entry on the undo stack: the cursor/mode before the edit, plus the
 /// list of operations that were performed (replayed in reverse to undo).
 #[derive(Debug, Clone)]
-struct UndoStep {
+pub(crate) struct UndoStep {
     cursor_before: u64,
     mode_before: Mode,
     cursor_after: u64,
@@ -383,17 +427,97 @@ impl App {
         self.set_status(StatusLevel::Error, message);
     }
 
+    #[cfg(feature = "memory")]
+    fn open_memory_cli_target(
+        backend: Box<dyn crate::memory::MemoryBackend>,
+        config: &Config,
+    ) -> crate::error::HxResult<OpenedMemoryCliTarget> {
+        let mut session = crate::memory::MemorySession::open(backend)?;
+        let selected_region = session
+            .regions()
+            .position(|region| region.permissions.read && !region.is_empty())
+            .ok_or_else(|| {
+                crate::error::HxError::MemoryUnavailable(
+                    "target process has no readable memory regions".to_owned(),
+                )
+            })?;
+        let region = session
+            .region(selected_region)
+            .cloned()
+            .ok_or(crate::error::HxError::OffsetOutOfRange)?;
+        let process = session.process_info().clone();
+        let document = session.document_for_region(selected_region, config)?;
+        let message = format!(
+            "attached to {} ({}) region 0x{:x}-0x{:x}",
+            process.name, process.pid, region.start, region.end
+        );
+        Ok(OpenedMemoryCliTarget {
+            document,
+            runtime: memory_state::MemoryRuntime {
+                session,
+                selected_region,
+                opened_region: selected_region,
+                base_va: region.start,
+                region_edits: std::collections::HashMap::new(),
+            },
+            message,
+        })
+    }
+
     pub fn from_cli(cli: Cli) -> Result<Self> {
         let startup_begin = Instant::now();
         let config = cli.config()?;
         let after_config = Instant::now();
-        let document = Document::open(&cli.file, &config)?;
+        #[cfg(feature = "memory")]
+        let mut memory_runtime = None;
+        #[cfg(feature = "memory")]
+        let mut memory_message = None;
+        let document = match cli.target()? {
+            CliTarget::File(path) => Document::open(&path, &config)?,
+            #[cfg(feature = "memory")]
+            CliTarget::Pid(pid) => {
+                let opened = Self::open_memory_cli_target(
+                    crate::memory::open_backend_for_pid(pid)?,
+                    &config,
+                )?;
+                memory_message = Some(opened.message);
+                memory_runtime = Some(opened.runtime);
+                opened.document
+            }
+            #[cfg(not(feature = "memory"))]
+            CliTarget::Pid(pid) => {
+                return Err(crate::error::HxError::MemoryUnavailable(format!(
+                    "--pid {pid} requires the memory feature"
+                ))
+                .into())
+            }
+            #[cfg(feature = "memory")]
+            CliTarget::Process(name) => {
+                let opened = Self::open_memory_cli_target(
+                    crate::memory::open_backend_for_process(&name)?,
+                    &config,
+                )?;
+                memory_message = Some(opened.message);
+                memory_runtime = Some(opened.runtime);
+                opened.document
+            }
+            #[cfg(not(feature = "memory"))]
+            CliTarget::Process(name) => {
+                return Err(crate::error::HxError::MemoryUnavailable(format!(
+                    "--process {name} requires the memory feature"
+                ))
+                .into())
+            }
+        };
         let after_open = Instant::now();
         let cursor = if document.is_empty() {
             0
         } else {
             config.initial_offset.min(document.len() - 1)
         };
+        #[cfg(feature = "memory")]
+        let cursor =
+            memory_initial_cursor(&document, &config, memory_runtime.as_ref()).unwrap_or(cursor);
         let after_init = Instant::now();
 
         let show_side_panel = config.inspector;
@@ -428,6 +552,10 @@ impl App {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             last_search: None,
+            #[cfg(feature = "memory")]
+            last_memory_search: None,
+            #[cfg(feature = "memory")]
+            pending_g: false,
             last_paste: None,
             profiler: config.profile.then(|| {
                 Profiler::new(StartupStats {
@@ -451,10 +579,20 @@ impl App {
             symbol_state: None,
             data_state: None,
             diff_state: None,
+            #[cfg(feature = "memory")]
+            memory_runtime,
+            memory_state: None,
             document_revision: 0,
             inspector_error: None,
             last_render_error: None,
         };
+
+        #[cfg(feature = "memory")]
+        if let Some(message) = memory_message {
+            if let Some(runtime) = app.memory_runtime.take() {
+                app.set_memory_runtime(runtime, message);
+            }
+        }
 
         if app.show_side_panel {
             app.refresh_inspector();
@@ -540,6 +678,47 @@ impl App {
         result
     }
 
+    /// Map a key to an action, handling the `g` multi-key prefix used by the
+    /// memory-search repeat bindings (`gn` / `gN`). The prefix only arms in
+    /// Normal / Visual / SidePanel modes; any other key clears it.
+    #[cfg(feature = "memory")]
+    fn map_key_with_prefix(&mut self, key: crossterm::event::KeyEvent) -> Option<Action> {
+        use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
+
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return None;
+        }
+
+        if self.pending_g {
+            self.pending_g = false;
+            if key.modifiers.intersection(!KeyModifiers::SHIFT).is_empty() {
+                match key.code {
+                    KeyCode::Char('n') => return Some(Action::MemorySearchNext),
+                    KeyCode::Char('N') => return Some(Action::MemorySearchPrev),
+                    _ => {}
+                }
+            }
+            // Not a recognized `g`-prefixed sequence: fall through and map the
+            // key normally so the second key is not silently swallowed.
+        }
+
+        let prefix_mode = matches!(self.mode, Mode::Normal | Mode::Visual | Mode::SidePanel);
+        if prefix_mode
+            && key.code == KeyCode::Char('g')
+            && key.modifiers.intersection(!KeyModifiers::SHIFT).is_empty()
+        {
+            self.pending_g = true;
+            return None;
+        }
+
+        map_key(self.mode, key)
+    }
+
+    #[cfg(not(feature = "memory"))]
+    fn map_key_with_prefix(&mut self, key: crossterm::event::KeyEvent) -> Option<Action> {
+        map_key(self.mode, key)
+    }
+
     fn run_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         while !self.should_quit {
             terminal.draw(|frame| self.render(frame))?;
@@ -554,7 +733,7 @@ impl App {
                         if let Some(profiler) = self.profiler.as_mut() {
                             profiler.record_key_event();
                         }
-                        if let Some(action) = map_key(self.mode, key) {
+                        if let Some(action) = self.map_key_with_prefix(key) {
                             self.handle_action(action);
                         }
                     }

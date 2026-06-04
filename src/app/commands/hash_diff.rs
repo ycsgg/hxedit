@@ -63,7 +63,7 @@ impl App {
         }
     }
 
-    pub(super) fn close_diff_projection_for_side_panel_switch(&mut self) {
+    pub(crate) fn close_diff_projection_for_side_panel_switch(&mut self) {
         if self.diff_state().is_some() {
             self.diff_state = None;
             self.clear_diff_cell_selection();

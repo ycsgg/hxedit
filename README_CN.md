@@ -14,7 +14,7 @@
   - real insert
   - tombstone delete
 - 编辑、粘贴、替换、inspector 写入都支持完整 undo / redo
-- ASCII / hex 搜索，支持前后向、自动 wrap-around、同屏命中高亮
+- 统一文本 / hex / typed-value 搜索，支持前后向、自动 wrap-around、同屏命中高亮；大文件用 SIMD `memmem` 扫描（只有含 tombstone / replacement 编辑的分块才退回逐字节）
 - 内置格式检查器：ELF、PE/COFF、Mach-O、PNG、ZIP、GZIP、GIF、BMP、WAV、TAR、JPEG
 - 哈希：MD5、SHA1、SHA256、SHA512、CRC32
 - 剪贴板复制 / 粘贴、导出、fill / zero / xor / replace
@@ -78,8 +78,7 @@ hxedit some.bin
 | `:w` / `:w <path>` / `:wq` | 保存 / 另存 / 保存退出 |
 | `:u [n]` / `:redo [n]` | undo / redo |
 | `:g <offset>` / `:g end` / `:g +n` / `:g -n` | 跳转 |
-| `:s <text>` / `:s! <text>` | ASCII 搜索 |
-| `:S <hex>` / `:S! <hex>` | Hex 搜索 |
+| `:s [mode]<delim><pattern><delim>` / `:s! ...` | 统一搜索；默认 `/text/` 按 UTF-8 bytes 搜索，`x/hex/` 搜索原始 hex bytes，`b/255/` 搜索单字节，`u32/u64/i32/i64` 变体搜索 typed integer bytes（`!` 反向搜索）。`:S` 过渡期仅作为已废弃的 hex-search 别名保留 |
 | `:p` / `:pi` / `:p?` / `:pi?` | overwrite / insert paste 与预览 |
 | `:c [fmt] [disp]` | 复制当前选区 |
 | `:export <path>` / `:export c` / `:export py` | 导出逻辑字节 |

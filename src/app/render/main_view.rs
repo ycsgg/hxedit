@@ -48,7 +48,11 @@ impl App {
             crate::app::MainView::Disassembly(_) => layout::MainPaneKind::Disassembly,
         };
         let gutter_width = match &self.main_view {
-            crate::app::MainView::Hex => offset_width(self.document.len()) as u16,
+            crate::app::MainView::Hex => offset_width(
+                self.memory_base_va()
+                    .and_then(|base| base.checked_add(self.document.len().saturating_sub(1)))
+                    .unwrap_or_else(|| self.document.len()),
+            ) as u16,
             crate::app::MainView::Disassembly(state) => {
                 let max_name = state
                     .info
@@ -137,6 +141,9 @@ impl App {
                 mode: self.mode,
                 path: &path_display,
                 cursor: self.cursor,
+                cursor_label: self
+                    .display_offset_to_va(self.cursor)
+                    .map(|va| format!("va 0x{va:x}")),
                 display_len: self.document.len(),
                 visible_len: self.document.visible_len(),
                 selection_span,
@@ -231,11 +238,18 @@ impl App {
         } else {
             &visible_rows.offsets
         };
-        let gutter_lines = gutter::build(
-            gutter_offsets,
-            offset_width(self.document.len()),
-            &self.palette,
-        );
+        let gutter_display_offsets;
+        let (gutter_offsets, gutter_width_value) = if let Some(base_va) = self.memory_base_va() {
+            gutter_display_offsets = gutter_offsets
+                .iter()
+                .map(|offset| base_va.saturating_add(*offset))
+                .collect::<Vec<_>>();
+            let max_va = base_va.saturating_add(self.document.len().saturating_sub(1));
+            (&gutter_display_offsets[..], offset_width(max_va))
+        } else {
+            (gutter_offsets.as_slice(), offset_width(self.document.len()))
+        };
+        let gutter_lines = gutter::build(gutter_offsets, gutter_width_value, &self.palette);
         let overlays = hex_grid::HexGridOverlays {
             diff_spans: diff_page.overlay_spans,
             selection,

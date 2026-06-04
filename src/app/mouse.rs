@@ -35,6 +35,8 @@ impl App {
                         self.scroll_data_panel(-3);
                     } else if self.active_side_panel == SidePanelKind::Diff {
                         self.scroll_diff_panel(-3);
+                    } else if self.active_side_panel == SidePanelKind::Memory {
+                        self.scroll_memory_panel(-3);
                     } else {
                         self.scroll_inspector(-3);
                     }
@@ -69,6 +71,8 @@ impl App {
                         self.scroll_data_panel(3);
                     } else if self.active_side_panel == SidePanelKind::Diff {
                         self.scroll_diff_panel(3);
+                    } else if self.active_side_panel == SidePanelKind::Memory {
+                        self.scroll_memory_panel(3);
                     } else {
                         self.scroll_inspector(3);
                     }
@@ -165,6 +169,10 @@ impl App {
                         }
                         if self.show_side_panel && self.active_side_panel == SidePanelKind::Diff {
                             self.select_diff_panel_row(visible_row);
+                            return;
+                        }
+                        if self.show_side_panel && self.active_side_panel == SidePanelKind::Memory {
+                            self.handle_memory_panel_click(visible_row);
                             return;
                         }
                         if self.show_side_panel

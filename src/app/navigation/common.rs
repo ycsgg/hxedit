@@ -25,12 +25,14 @@ impl App {
     pub(crate) fn clamp_cursor_for_mode(&self, offset: u64, mode: Mode) -> u64 {
         self.clamp_offset_with_eof(
             offset,
-            matches!(mode, Mode::EditHex { .. } | Mode::InsertHex { .. }),
+            !self.document.is_fixed_size()
+                && matches!(mode, Mode::EditHex { .. } | Mode::InsertHex { .. }),
         )
     }
 
     pub(crate) fn mode_allows_eof_cursor(&self) -> bool {
-        matches!(self.mode, Mode::EditHex { .. } | Mode::InsertHex { .. })
+        !self.document.is_fixed_size()
+            && matches!(self.mode, Mode::EditHex { .. } | Mode::InsertHex { .. })
     }
 
     pub(crate) fn cursor_anchor_offset(&self) -> u64 {

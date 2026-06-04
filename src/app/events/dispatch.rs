@@ -92,6 +92,10 @@ impl App {
             Action::DeleteByte => self.delete_at_cursor_or_selection(),
             Action::SearchNext => self.repeat_search(crate::app::SearchDirection::Forward),
             Action::SearchPrev => self.repeat_search(crate::app::SearchDirection::Backward),
+            #[cfg(feature = "memory")]
+            Action::MemorySearchNext => self.repeat_memory_search(false),
+            #[cfg(feature = "memory")]
+            Action::MemorySearchPrev => self.repeat_memory_search(true),
             Action::Undo(steps) => self.handle_undo_action(steps),
             Action::Redo(steps) => self.handle_redo_action(steps),
             Action::EditHex(value) => self.handle_edit_hex_action(value),
@@ -208,6 +212,7 @@ impl App {
                     SidePanelKind::Symbol => self.move_symbol_selection(-1),
                     SidePanelKind::Data => self.move_data_panel_selection(-1),
                     SidePanelKind::Diff => self.move_diff_selection(-1),
+                    SidePanelKind::Memory => self.move_memory_selection(-1),
                 }
                 Ok(true)
             }
@@ -217,6 +222,7 @@ impl App {
                     SidePanelKind::Symbol => self.move_symbol_selection(1),
                     SidePanelKind::Data => self.move_data_panel_selection(1),
                     SidePanelKind::Diff => self.move_diff_selection(1),
+                    SidePanelKind::Memory => self.move_memory_selection(1),
                 }
                 Ok(true)
             }
@@ -226,6 +232,7 @@ impl App {
                     SidePanelKind::Symbol => self.navigate_to_selected_symbol()?,
                     SidePanelKind::Data => self.move_data_panel_selection(0),
                     SidePanelKind::Diff => self.navigate_to_selected_diff_hunk()?,
+                    SidePanelKind::Memory => self.handle_memory_panel_enter()?,
                 }
                 Ok(true)
             }

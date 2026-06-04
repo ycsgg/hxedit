@@ -63,21 +63,13 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 target: parse_goto_target(arg)?,
             })
         }
-        "s" | "s!" => {
-            let arg = rest.ok_or(HxError::MissingArgument("ascii search pattern"))?;
-            if arg.is_empty() {
-                return Err(HxError::EmptySearch);
-            }
-            Ok(Command::SearchAscii {
-                pattern: arg.as_bytes().to_vec(),
-                backward: name.ends_with('!'),
-            })
-        }
+        "s" | "s!" => parse_search(rest, name.ends_with('!')),
         "S" | "S!" => {
             let arg = rest.ok_or(HxError::MissingArgument("hex search pattern"))?;
             Ok(Command::SearchHex {
                 pattern: parse_hex_bytes(arg)?,
                 backward: name.ends_with('!'),
+                deprecated_alias: true,
             })
         }
         #[cfg(feature = "disasm")]
@@ -107,6 +99,14 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 backward: name.ends_with('!'),
             })
         }
+        #[cfg(feature = "memory")]
+        "ms" | "ms!" => {
+            let arg = rest.ok_or(HxError::MissingArgument("memory search pattern"))?;
+            Ok(Command::MemorySearch {
+                query: crate::memory::MemorySearchQuery::parse(arg)?,
+                backward: name.ends_with('!'),
+            })
+        }
         "hash" => {
             let arg = rest.ok_or(HxError::MissingArgument("hash algorithm"))?;
             let algo = HashAlgorithm::parse(arg)
@@ -114,6 +114,8 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             Ok(Command::Hash { algorithm: algo })
         }
         "diff" => parse_diff(rest),
+        #[cfg(feature = "memory")]
+        "mem" => parse_memory(rest),
         #[cfg(feature = "disasm")]
         "dis" | "disassemble" => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Disassemble { arch: None }),
@@ -151,6 +153,24 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
     }
 }
 
+#[cfg(feature = "memory")]
+fn parse_memory(rest: Option<&str>) -> HxResult<Command> {
+    use crate::commands::types::MemoryCommand;
+
+    let command = match rest.map(str::trim) {
+        None | Some("") => MemoryCommand::Open,
+        Some("list") => MemoryCommand::List,
+        Some("refresh") => MemoryCommand::Refresh,
+        Some("info") => MemoryCommand::Info,
+        Some("freeze") => MemoryCommand::Freeze,
+        Some("thaw") => MemoryCommand::Thaw,
+        Some("commit") => MemoryCommand::Commit,
+        Some("commit-all") => MemoryCommand::CommitAll,
+        Some(other) => return Err(HxError::UnknownCommand(format!("mem {other}"))),
+    };
+    Ok(Command::Memory(command))
+}
+
 fn parse_goto_target(input: &str) -> HxResult<GotoTarget> {
     let trimmed = input.trim();
     if trimmed.eq_ignore_ascii_case("end") {
@@ -172,6 +192,106 @@ fn parse_goto_target(input: &str) -> HxResult<GotoTarget> {
     }
 
     Ok(GotoTarget::Absolute(parse_offset(trimmed)?))
+}
+
+fn parse_search(input: Option<&str>, backward: bool) -> HxResult<Command> {
+    let arg = input
+        .ok_or(HxError::MissingArgument("search pattern"))?
+        .trim();
+    if arg.is_empty() {
+        return Err(HxError::EmptySearch);
+    }
+
+    let Some((mode, body, _rest)) = parse_search_delimited_pattern(arg)? else {
+        // Backward-compatible plain text form. The documented command surface is
+        // now `:s [mode]<delim><text><delim>`, but keeping `:s foo` avoids
+        // breaking existing muscle memory while `:S` is the only deprecated
+        // alias that gets an explicit warning.
+        return Ok(Command::SearchAscii {
+            pattern: arg.as_bytes().to_vec(),
+            backward,
+        });
+    };
+
+    let (pattern, is_text) = parse_search_pattern(mode, body)?;
+    if pattern.is_empty() {
+        return Err(HxError::EmptySearch);
+    }
+    if is_text {
+        Ok(Command::SearchAscii { pattern, backward })
+    } else {
+        Ok(Command::SearchHex {
+            pattern,
+            backward,
+            deprecated_alias: false,
+        })
+    }
+}
+
+fn parse_search_delimited_pattern(input: &str) -> HxResult<Option<(&str, &str, &str)>> {
+    let Some((delim_idx, delimiter)) = input
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_ascii_alphanumeric()).then_some((idx, ch)))
+    else {
+        return Ok(None);
+    };
+
+    let mode = &input[..delim_idx];
+    let body_start = delim_idx + delimiter.len_utf8();
+    let body = &input[body_start..];
+    let Some(end_rel) = body.find(delimiter) else {
+        return Err(HxError::MissingArgument("search closing delimiter"));
+    };
+    let pattern = &body[..end_rel];
+    let rest = body[end_rel + delimiter.len_utf8()..].trim();
+    if !rest.is_empty() {
+        return Err(HxError::UnknownCommand(format!("s {rest}")));
+    }
+    Ok(Some((mode, pattern, rest)))
+}
+
+fn parse_search_pattern(mode: &str, body: &str) -> HxResult<(Vec<u8>, bool)> {
+    match mode {
+        "" | "s" | "str" | "utf8" => Ok((body.as_bytes().to_vec(), true)),
+        "x" | "hex" => parse_hex_stream(body).map(|bytes| (bytes, false)),
+        "b" | "byte" => {
+            let value = parse_offset(body)?;
+            let byte = u8::try_from(value).map_err(|_| HxError::InvalidOffset(body.to_owned()))?;
+            Ok((vec![byte], false))
+        }
+        "u32" | "u32le" => parse_u32(body).map(|value| (value.to_le_bytes().to_vec(), false)),
+        "u32be" => parse_u32(body).map(|value| (value.to_be_bytes().to_vec(), false)),
+        "u64" | "u64le" => parse_offset(body).map(|value| (value.to_le_bytes().to_vec(), false)),
+        "u64be" => parse_offset(body).map(|value| (value.to_be_bytes().to_vec(), false)),
+        "i32" | "i32le" => parse_i32(body).map(|value| (value.to_le_bytes().to_vec(), false)),
+        "i32be" => parse_i32(body).map(|value| (value.to_be_bytes().to_vec(), false)),
+        "i64" | "i64le" => parse_i64(body).map(|value| (value.to_le_bytes().to_vec(), false)),
+        "i64be" => parse_i64(body).map(|value| (value.to_be_bytes().to_vec(), false)),
+        other => Err(HxError::UnknownCommand(format!("s {other}/.../"))),
+    }
+}
+
+fn parse_u32(input: &str) -> HxResult<u32> {
+    u32::try_from(parse_offset(input)?).map_err(|_| HxError::InvalidOffset(input.to_owned()))
+}
+
+fn parse_i32(input: &str) -> HxResult<i32> {
+    i32::try_from(parse_i64(input)?).map_err(|_| HxError::InvalidOffset(input.to_owned()))
+}
+
+fn parse_i64(input: &str) -> HxResult<i64> {
+    let trimmed = input.trim();
+    if let Some(hex) = trimmed.strip_prefix("-0x") {
+        let value =
+            i64::from_str_radix(hex, 16).map_err(|_| HxError::InvalidOffset(input.to_owned()))?;
+        Ok(-value)
+    } else if let Some(hex) = trimmed.strip_prefix("0x") {
+        i64::from_str_radix(hex, 16).map_err(|_| HxError::InvalidOffset(input.to_owned()))
+    } else {
+        trimmed
+            .parse::<i64>()
+            .map_err(|_| HxError::InvalidOffset(input.to_owned()))
+    }
 }
 
 fn opt_path(input: Option<&str>) -> Option<PathBuf> {
@@ -471,6 +591,127 @@ mod tests {
     fn data_command_parses() {
         assert_eq!(parse_command("data").unwrap(), Command::Data);
         assert_eq!(parse_command("data off").unwrap(), Command::DataOff);
+    }
+
+    #[cfg(feature = "memory")]
+    #[test]
+    fn memory_command_parses_subcommands() {
+        use crate::commands::types::MemoryCommand;
+
+        assert_eq!(
+            parse_command("mem").unwrap(),
+            Command::Memory(MemoryCommand::Open)
+        );
+        assert_eq!(
+            parse_command("mem list").unwrap(),
+            Command::Memory(MemoryCommand::List)
+        );
+        assert_eq!(
+            parse_command("mem refresh").unwrap(),
+            Command::Memory(MemoryCommand::Refresh)
+        );
+        assert_eq!(
+            parse_command("mem info").unwrap(),
+            Command::Memory(MemoryCommand::Info)
+        );
+        assert_eq!(
+            parse_command("mem freeze").unwrap(),
+            Command::Memory(MemoryCommand::Freeze)
+        );
+        assert_eq!(
+            parse_command("mem thaw").unwrap(),
+            Command::Memory(MemoryCommand::Thaw)
+        );
+        assert_eq!(
+            parse_command("mem commit").unwrap(),
+            Command::Memory(MemoryCommand::Commit)
+        );
+        assert_eq!(
+            parse_command("mem commit-all").unwrap(),
+            Command::Memory(MemoryCommand::CommitAll)
+        );
+        assert!(matches!(
+            parse_command("mem unknown"),
+            Err(HxError::UnknownCommand(name)) if name == "mem unknown"
+        ));
+    }
+
+    #[cfg(feature = "memory")]
+    #[test]
+    fn memory_search_command_parses_pattern_and_filters() {
+        let Command::MemorySearch { query, backward } =
+            parse_command("ms x/4889c7/ in:r-x").unwrap()
+        else {
+            panic!("expected memory search command");
+        };
+        assert!(!backward);
+        assert_eq!(query.pattern, vec![0x48, 0x89, 0xc7]);
+
+        let Command::MemorySearch { query, backward } =
+            parse_command("ms! /token/ in:rw-").unwrap()
+        else {
+            panic!("expected memory search command");
+        };
+        assert!(backward);
+        assert_eq!(query.pattern, b"token");
+    }
+
+    #[test]
+    fn unified_search_command_parses_modes() {
+        assert_eq!(
+            parse_command("s /hello/").unwrap(),
+            Command::SearchAscii {
+                pattern: b"hello".to_vec(),
+                backward: false,
+            }
+        );
+        assert_eq!(
+            parse_command("s! @hello/world@").unwrap(),
+            Command::SearchAscii {
+                pattern: b"hello/world".to_vec(),
+                backward: true,
+            }
+        );
+        assert_eq!(
+            parse_command("s x/48 89 c7/").unwrap(),
+            Command::SearchHex {
+                pattern: vec![0x48, 0x89, 0xc7],
+                backward: false,
+                deprecated_alias: false,
+            }
+        );
+        assert_eq!(
+            parse_command("s b/255/").unwrap(),
+            Command::SearchHex {
+                pattern: vec![0xff],
+                backward: false,
+                deprecated_alias: false,
+            }
+        );
+        assert_eq!(
+            parse_command("s u32be/0x12345678/").unwrap(),
+            Command::SearchHex {
+                pattern: vec![0x12, 0x34, 0x56, 0x78],
+                backward: false,
+                deprecated_alias: false,
+            }
+        );
+        assert!(matches!(
+            parse_command("s i16/1/"),
+            Err(HxError::UnknownCommand(name)) if name == "s i16/.../"
+        ));
+    }
+
+    #[test]
+    fn legacy_hex_search_alias_is_marked_deprecated() {
+        assert_eq!(
+            parse_command("S! 7f 45 4c 46").unwrap(),
+            Command::SearchHex {
+                pattern: vec![0x7f, 0x45, 0x4c, 0x46],
+                backward: true,
+                deprecated_alias: true,
+            }
+        );
     }
 
     #[test]

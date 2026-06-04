@@ -13,6 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 rust-version = "1.94"
 include = [
     "/src/**",
+    "/benches/**",
     "/Cargo.toml",
     "/Cargo.lock",
     "/README.md",
@@ -30,6 +31,7 @@ default-bundle = [
     "symbols",
 ]
 disasm = []
+memory = []
 symbols = ["disasm", "dep:object", "dep:symbolic-common", "dep:symbolic-demangle"]
 asm = ["disasm", "dep:keystone-engine"]
 full = ["default-bundle", "asm"]
@@ -61,6 +63,10 @@ keystone-engine = { package = "hexpatch-keystone", version = "0.9.4", optional =
 [dev-dependencies]
 pretty_assertions = "1.4"
 tempfile = "3.14"
+
+[[bench]]
+name = "perf_bench"
+harness = false
 
 [profile.release]
 lto = true

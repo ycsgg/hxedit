@@ -60,6 +60,19 @@ pub enum DiffCommand {
     Off,
 }
 
+#[cfg(feature = "memory")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemoryCommand {
+    Open,
+    List,
+    Refresh,
+    Info,
+    Freeze,
+    Thaw,
+    Commit,
+    CommitAll,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Quit {
@@ -121,6 +134,7 @@ pub enum Command {
     SearchHex {
         pattern: Vec<u8>,
         backward: bool,
+        deprecated_alias: bool,
     },
     #[cfg(feature = "disasm")]
     SearchInstruction {
@@ -130,6 +144,11 @@ pub enum Command {
     #[cfg(feature = "symbols")]
     SearchSymbol {
         pattern: String,
+        backward: bool,
+    },
+    #[cfg(feature = "memory")]
+    MemorySearch {
+        query: crate::memory::MemorySearchQuery,
         backward: bool,
     },
     Inspector,
@@ -144,6 +163,8 @@ pub enum Command {
         algorithm: HashAlgorithm,
     },
     Diff(DiffCommand),
+    #[cfg(feature = "memory")]
+    Memory(MemoryCommand),
     #[cfg(feature = "disasm")]
     Disassemble {
         arch: Option<String>,

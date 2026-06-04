@@ -4,6 +4,8 @@ use crate::app::{
     App, EditOp, ReplacementChange, SearchDirection, SearchKind, SearchState, SidePanelKind,
 };
 use crate::commands::parser::parse_command;
+#[cfg(feature = "memory")]
+use crate::commands::types::MemoryCommand;
 use crate::commands::types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm};
 #[cfg(feature = "disasm")]
 use crate::disasm::backend::resolve_backend_kind;
@@ -73,11 +75,13 @@ impl App {
                 Ok(())
             }
             Command::SearchAscii { pattern, backward } => {
-                self.execute_search_command(SearchKind::Ascii, pattern, backward)
+                self.execute_search_command(SearchKind::Ascii, pattern, backward, false)
             }
-            Command::SearchHex { pattern, backward } => {
-                self.execute_search_command(SearchKind::Hex, pattern, backward)
-            }
+            Command::SearchHex {
+                pattern,
+                backward,
+                deprecated_alias,
+            } => self.execute_search_command(SearchKind::Hex, pattern, backward, deprecated_alias),
             #[cfg(feature = "disasm")]
             Command::SearchInstruction { pattern, backward } => {
                 self.execute_instruction_search_command(pattern, backward)
@@ -86,8 +90,14 @@ impl App {
             Command::SearchSymbol { pattern, backward } => {
                 self.execute_symbol_search_command(pattern, backward)
             }
+            #[cfg(feature = "memory")]
+            Command::MemorySearch { query, backward } => {
+                self.execute_memory_search_command(query, backward)
+            }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
             Command::Diff(diff) => self.execute_diff_command(diff),
+            #[cfg(feature = "memory")]
+            Command::Memory(command) => self.execute_memory_command(command),
             #[cfg(feature = "disasm")]
             Command::Disassemble { arch } => self.execute_disassemble_command(arch.as_deref()),
             #[cfg(feature = "disasm")]
@@ -119,6 +129,64 @@ impl App {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(feature = "memory")]
+impl App {
+    fn execute_memory_command(&mut self, command: MemoryCommand) -> HxResult<()> {
+        let message = match command {
+            MemoryCommand::Open => self.memory_runtime().map_or_else(
+                || "memory panel opened; no memory session is active".to_owned(),
+                |runtime| {
+                    let process = runtime.session.process_info();
+                    format!("memory panel opened for {} ({})", process.name, process.pid)
+                },
+            ),
+            MemoryCommand::List => {
+                match crate::memory::list_processes() {
+                    Ok(processes) => {
+                        let message = format!("{} processes (Enter to attach)", processes.len());
+                        self.open_memory_process_list_panel(processes, message);
+                    }
+                    Err(err) => {
+                        self.open_memory_panel(format!("memory process list unavailable: {err}"));
+                    }
+                }
+                return Ok(());
+            }
+            MemoryCommand::Refresh => {
+                let Some(runtime) = self.memory_runtime_mut() else {
+                    self.open_memory_panel("memory maps refresh requires an active memory session");
+                    return Ok(());
+                };
+                runtime.session.refresh_regions()?;
+                let count = runtime.session.regions().count();
+                if count == 0 {
+                    runtime.selected_region = 0;
+                    runtime.opened_region = 0;
+                } else {
+                    runtime.selected_region = runtime.selected_region.min(count - 1);
+                    runtime.opened_region = runtime.opened_region.min(count - 1);
+                    runtime.base_va = runtime
+                        .session
+                        .region(runtime.opened_region)
+                        .map_or(runtime.base_va, |region| region.start);
+                }
+                format!("refreshed {count} memory regions")
+            }
+            MemoryCommand::Info => {
+                let text = self.memory_info_text();
+                self.open_memory_info_panel(text);
+                return Ok(());
+            }
+            MemoryCommand::Freeze => return self.execute_memory_freeze_command(),
+            MemoryCommand::Thaw => return self.execute_memory_thaw_command(),
+            MemoryCommand::Commit => return self.commit_memory_document(false),
+            MemoryCommand::CommitAll => return self.commit_memory_document(true),
+        };
+        self.open_memory_panel(message);
+        Ok(())
     }
 }
 

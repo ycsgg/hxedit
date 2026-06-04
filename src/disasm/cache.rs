@@ -209,7 +209,9 @@ mod tests {
         let file = dir.path().join("sample.bin");
         fs::write(&file, bytes).unwrap();
         let cli = Cli {
-            file,
+            file: Some(file),
+            pid: None,
+            process: None,
             bytes_per_line: 16,
             page_size: 4096,
             cache_pages: 8,
@@ -219,7 +221,7 @@ mod tests {
             offset: None,
             inspector: false,
         };
-        Document::open(&cli.file, &cli.config().unwrap()).unwrap()
+        Document::open(cli.file.as_ref().unwrap(), &cli.config().unwrap()).unwrap()
     }
 
     fn x86_64_elf(code: &[u8]) -> Vec<u8> {

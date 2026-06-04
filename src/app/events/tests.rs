@@ -14,7 +14,9 @@ fn app_with_len(len: usize) -> App {
     let file = dir.path().join("sample.bin");
     fs::write(&file, vec![0_u8; len]).unwrap();
     let cli = Cli {
-        file,
+        file: Some(file),
+        pid: None,
+        process: None,
         bytes_per_line: 16,
         page_size: 4096,
         cache_pages: 8,
