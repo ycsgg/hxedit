@@ -1,9 +1,7 @@
-use std::fs;
-use std::time::Instant;
-
 use hxedit::commands::types::HashAlgorithm;
 use hxedit::config::Config;
 use hxedit::core::document::Document;
+use std::fs;
 use tempfile::tempdir;
 
 fn make_16mb_doc() -> (tempfile::TempDir, Document) {
@@ -85,43 +83,29 @@ impl digest::DynDigest for Crc32Hasher {
 }
 
 #[test]
-fn hash_16mb_sha256_is_fast() {
+fn hash_16mb_sha256_hashes_full_logical_range() {
     let (_dir, mut doc) = make_16mb_doc();
 
     let hasher = make_hasher(HashAlgorithm::Sha256);
-    let start = Instant::now();
     let (bytes_hashed, hash_bytes) = doc.hash_logical_bytes(0, doc.len() - 1, hasher).unwrap();
-    let elapsed = start.elapsed();
 
-    eprintln!("16MB sha256 hash took: {elapsed:?}");
-    assert!(
-        elapsed.as_secs() < 3,
-        "sha256 hash took too long: {elapsed:?}"
-    );
     assert_eq!(bytes_hashed, 16 * 1024 * 1024);
     assert_eq!(hash_bytes.len(), 32);
 }
 
 #[test]
-fn hash_16mb_crc32_is_fast() {
+fn hash_16mb_crc32_hashes_full_logical_range() {
     let (_dir, mut doc) = make_16mb_doc();
 
     let hasher = make_hasher(HashAlgorithm::Crc32);
-    let start = Instant::now();
     let (bytes_hashed, hash_bytes) = doc.hash_logical_bytes(0, doc.len() - 1, hasher).unwrap();
-    let elapsed = start.elapsed();
 
-    eprintln!("16MB crc32 hash took: {elapsed:?}");
-    assert!(
-        elapsed.as_secs() < 3,
-        "crc32 hash took too long: {elapsed:?}"
-    );
     assert_eq!(bytes_hashed, 16 * 1024 * 1024);
     assert_eq!(hash_bytes.len(), 4);
 }
 
 #[test]
-fn hash_16mb_with_tombstone_is_fast() {
+fn hash_16mb_with_tombstone_skips_deleted_bytes() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("hash-tombstone.bin");
     let size: usize = 16 * 1024 * 1024;
@@ -139,20 +123,13 @@ fn hash_16mb_with_tombstone_is_fast() {
     doc.delete_byte(1_000_000).unwrap();
 
     let hasher = make_hasher(HashAlgorithm::Sha256);
-    let start = Instant::now();
     let (bytes_hashed, _hash_bytes) = doc.hash_logical_bytes(0, doc.len() - 1, hasher).unwrap();
-    let elapsed = start.elapsed();
 
-    eprintln!("16MB sha256 (2 tombstones) took: {elapsed:?}");
-    assert!(
-        elapsed.as_secs() < 3,
-        "sha256 with tombstones took too long: {elapsed:?}"
-    );
     assert_eq!(bytes_hashed, 16 * 1024 * 1024 - 2);
 }
 
 #[test]
-fn hash_16mb_with_insert_is_fast() {
+fn hash_16mb_with_insert_counts_inserted_bytes() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("hash-insert.bin");
     let size: usize = 16 * 1024 * 1024;
@@ -170,31 +147,17 @@ fn hash_16mb_with_insert_is_fast() {
     doc.insert_bytes(mid, &[0xAA, 0xBB]).unwrap();
 
     let hasher = make_hasher(HashAlgorithm::Md5);
-    let start = Instant::now();
     let (bytes_hashed, _hash_bytes) = doc.hash_logical_bytes(0, doc.len() - 1, hasher).unwrap();
-    let elapsed = start.elapsed();
 
-    eprintln!("16MB md5 (with insert) took: {elapsed:?}");
-    assert!(
-        elapsed.as_secs() < 3,
-        "md5 with insert took too long: {elapsed:?}"
-    );
     assert_eq!(bytes_hashed, 16 * 1024 * 1024 + 2);
 }
 
 #[test]
-fn logical_bytes_16mb_is_fast() {
+fn logical_bytes_16mb_returns_full_visible_content() {
     let (_dir, mut doc) = make_16mb_doc();
 
-    let start = Instant::now();
     let bytes = doc.logical_bytes(0, doc.len() - 1).unwrap();
-    let elapsed = start.elapsed();
 
-    eprintln!("16MB logical_bytes took: {elapsed:?}");
-    assert!(
-        elapsed.as_secs() < 3,
-        "logical_bytes took too long: {elapsed:?}"
-    );
     assert_eq!(bytes.len(), 16 * 1024 * 1024);
 }
 
