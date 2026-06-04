@@ -134,6 +134,7 @@ pub enum Command {
     SearchHex {
         pattern: Vec<u8>,
         backward: bool,
+        deprecated_alias: bool,
     },
     #[cfg(feature = "disasm")]
     SearchInstruction {

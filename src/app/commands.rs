@@ -75,11 +75,13 @@ impl App {
                 Ok(())
             }
             Command::SearchAscii { pattern, backward } => {
-                self.execute_search_command(SearchKind::Ascii, pattern, backward)
+                self.execute_search_command(SearchKind::Ascii, pattern, backward, false)
             }
-            Command::SearchHex { pattern, backward } => {
-                self.execute_search_command(SearchKind::Hex, pattern, backward)
-            }
+            Command::SearchHex {
+                pattern,
+                backward,
+                deprecated_alias,
+            } => self.execute_search_command(SearchKind::Hex, pattern, backward, deprecated_alias),
             #[cfg(feature = "disasm")]
             Command::SearchInstruction { pattern, backward } => {
                 self.execute_instruction_search_command(pattern, backward)

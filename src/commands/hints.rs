@@ -83,19 +83,19 @@ pub fn hint_for(input: &str) -> CommandHint {
                     .to_owned(),
         },
         "s" | "s!" => CommandHint {
-            syntax: format!("{name} <ascii>"),
+            syntax: format!("{name} [mode]<delim><pattern><delim>"),
             details: if name.ends_with('!') {
-                "search ASCII text upward; use n/p to jump next/previous match".to_owned()
+                "search upward; modes include /text/, x/hex/, b/byte/, u32/u64 and signed variants; use n/p to jump next/previous match".to_owned()
             } else {
-                "search ASCII text downward; use n/p to jump next/previous match".to_owned()
+                "search downward; modes include /text/, x/hex/, b/byte/, u32/u64 and signed variants; use n/p to jump next/previous match".to_owned()
             },
         },
         "S" | "S!" => CommandHint {
-            syntax: format!("{name} <hex-bytes>"),
+            syntax: format!("{name} <hex-bytes> (deprecated; use s{} x/<hex-bytes>/)", if name.ends_with('!') { "!" } else { "" }),
             details: if name.ends_with('!') {
-                "search hex bytes upward like: S! 7f 45 4c 46".to_owned()
+                "deprecated hex-search alias; search upward with the unified form like: s! x/7f 45 4c 46/".to_owned()
             } else {
-                "search hex bytes downward like: S 7f 45 4c 46".to_owned()
+                "deprecated hex-search alias; search downward with the unified form like: s x/7f 45 4c 46/".to_owned()
             },
         },
         #[cfg(feature = "memory")]

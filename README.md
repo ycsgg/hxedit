@@ -14,7 +14,7 @@ A terminal hex editor for large files, written in Rust.
   - real insert
   - tombstone delete
 - Full undo / redo across edits, paste, replace, and inspector writes
-- ASCII and hex search with forward/backward traversal, wrap-around, and visible-hit highlighting
+- Unified text/hex/typed-value search with forward/backward traversal, wrap-around, and visible-hit highlighting
 - Built-in format inspectors for ELF, PE/COFF, Mach-O, PNG, ZIP, GZIP, GIF, BMP, WAV, TAR, and JPEG
 - Hashing for MD5, SHA1, SHA256, SHA512, and CRC32
 - Clipboard copy/paste, export, fill/zero/xor/replace transforms
@@ -78,8 +78,7 @@ Notes:
 | `:w` / `:w <path>` / `:wq` | Save / save as / save and quit |
 | `:u [n]` / `:redo [n]` | Undo / redo |
 | `:g <offset>` / `:g end` / `:g +n` / `:g -n` | Goto |
-| `:s <text>` / `:s! <text>` | ASCII search |
-| `:S <hex>` / `:S! <hex>` | Hex search |
+| `:s [mode]<delim><pattern><delim>` / `:s! ...` | Unified search; default `/text/` searches UTF-8 bytes, `x/hex/` searches raw hex bytes, `b/255/` searches one byte, and `u32/u64/i32/i64` variants search typed integer bytes (`!` searches backward). `:S` remains only as a deprecated hex-search alias during transition |
 | `:p` / `:pi` / `:p?` / `:pi?` | Overwrite / insert paste and previews |
 | `:c [fmt] [disp]` | Copy the active selection |
 | `:export <path>` / `:export c` / `:export py` | Export logical bytes |

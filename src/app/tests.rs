@@ -933,6 +933,29 @@ fn search_forward_backward_and_wrap() {
     assert!(app3.status_message.contains("wrapped"));
 }
 
+#[test]
+fn unified_search_command_executes_and_warns_for_deprecated_alias() {
+    let mut app = app_with_bytes(b"abc hello xyz");
+    app.execute_command(crate::commands::parser::parse_command("s /hello/").unwrap())
+        .unwrap();
+    assert_eq!(app.cursor, 4);
+    assert!(app.status_message.contains("found ascii"));
+
+    let mut app2 = app_with_bytes(&[0x00, 0x48, 0x89, 0xc7, 0xff]);
+    app2.execute_command(crate::commands::parser::parse_command("s x/48 89 c7/").unwrap())
+        .unwrap();
+    assert_eq!(app2.cursor, 1);
+    assert!(app2.status_message.contains("found hex"));
+
+    let mut app3 = app_with_bytes(&[0x00, 0x48, 0x89, 0xc7, 0xff]);
+    app3.execute_command(crate::commands::parser::parse_command("S 48 89 c7").unwrap())
+        .unwrap();
+    assert_eq!(app3.cursor, 1);
+    assert_eq!(app3.status_level, StatusLevel::Warning);
+    assert!(app3.status_message.contains("deprecated :S"));
+    assert!(app3.status_message.contains(":s x/.../"));
+}
+
 #[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
 #[test]
 fn search_repeat_works_while_side_panel_has_focus() {
@@ -1656,6 +1679,7 @@ fn disassembly_search_variants() {
     app2.execute_command(Command::SearchHex {
         pattern: vec![0x89, 0xe5],
         backward: false,
+        deprecated_alias: false,
     })
     .unwrap();
     assert_eq!(app2.cursor, 0x102);

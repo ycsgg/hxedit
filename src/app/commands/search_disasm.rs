@@ -6,13 +6,19 @@ impl App {
         kind: SearchKind,
         pattern: Vec<u8>,
         backward: bool,
+        deprecated_alias: bool,
     ) -> HxResult<()> {
         let search = SearchState {
             kind,
             query: crate::app::SearchQuery::Bytes(pattern),
         };
         self.last_search = Some(search.clone());
-        self.run_search(&search, search_direction(backward))
+        self.run_search(&search, search_direction(backward))?;
+        if deprecated_alias {
+            let search_status = self.status_message.clone();
+            self.set_warning_status(format!("deprecated :S; use :s x/.../; {}", search_status));
+        }
+        Ok(())
     }
 
     #[cfg(feature = "disasm")]

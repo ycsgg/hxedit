@@ -188,6 +188,7 @@ fn parses_basic_commands() {
         Command::SearchHex {
             pattern: vec![0x7f, 0x45, 0x4c, 0x46],
             backward: false,
+            deprecated_alias: true,
         }
     );
     assert_eq!(
@@ -195,6 +196,7 @@ fn parses_basic_commands() {
         Command::SearchHex {
             pattern: vec![0x7f, 0x45, 0x4c, 0x46],
             backward: true,
+            deprecated_alias: true,
         }
     );
     #[cfg(feature = "disasm")]
@@ -276,6 +278,7 @@ fn parses_uppercase_hex_search_patterns() {
         Command::SearchHex {
             pattern: vec![0xde, 0xad, 0xbe, 0xef],
             backward: false,
+            deprecated_alias: true,
         }
     );
     assert_eq!(
@@ -283,6 +286,7 @@ fn parses_uppercase_hex_search_patterns() {
         Command::SearchHex {
             pattern: vec![0x7f, 0x45, 0x4c, 0x46],
             backward: false,
+            deprecated_alias: true,
         }
     );
 }
