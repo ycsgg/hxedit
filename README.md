@@ -19,6 +19,7 @@ A terminal hex editor for large files, written in Rust.
 - Hashing for MD5, SHA1, SHA256, SHA512, and CRC32
 - Clipboard copy/paste, export, fill/zero/xor/replace transforms
 - Read-only synchronized diff page against another file (`:diff`)
+- Process memory editing: attach to a running process by PID or name, browse and edit memory regions, freeze/thaw the target, and commit changes back
 - Large-file support through paged I/O and cache
 - Optional disassembly browsing, symbol search, and inline assemble patching
 
@@ -64,6 +65,8 @@ Notes:
 |------|-------------|
 | `--readonly` | Open without write access; automatically falls back to read-only when needed |
 | `--offset <n\|0xhex>` | Start at a specific byte offset |
+| `--pid <PID>` | Attach to a running process by PID for memory editing |
+| `--process <NAME>` | Attach to a running process by name for memory editing |
 | `--inspector` | Open with the side panel visible on the inspector page |
 | `--bytes-per-line <n>` | Bytes shown per row, default `16` |
 | `--page-size <n>` | Page-cache read size, default `16384` |

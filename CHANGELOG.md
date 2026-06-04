@@ -5,11 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-06-04
+
+### Added
+
+- Process memory editing mode with `--pid <PID>` and `--process <NAME>` CLI flags, plus the `:mem` command family for attaching to, inspecting, and editing live process memory
+- Memory panel views (region list, process picker, aggregated info report) with region highlighting and mouse interaction
+- Memory freeze and thaw commands (`:mem freeze` / `:mem thaw`) to suspend and resume the target process
+- Per-region editing state with `:w` / `:q` commit semantics; uncommitted replacements, undo, and redo are kept per region across switches
+- Aggregated `:mem info` report across the whole session
+- Memory search (`:ms` / `:ms!`) with `gn` / `gN` repeat, independent of file-search history
+- Unified search command syntax (`:s` replaces the deprecated `:S` hex-search alias)
+- Read-only synchronized diff page (`:diff`) comparing current logical bytes against another file
+- Fixed hex column header (`00 01 02 ... 0F`) for quick column lookup while scrolling
+- XOR selection command (`:xor` / `:xor!`) to XOR the active selection to clipboard or in place
+- Performance benchmarks via `cargo bench`
 
 ### Changed
 
-- The repository source code is now dual-licensed under `MIT OR Apache-2.0`; `full` builds continue to use Keystone and now ship explicit third-party / FOSS notice / license / exception files under a dedicated `licenses/` layout in release archives.
+- The repository source code is now dual-licensed under `MIT OR Apache-2.0`; `full` builds continue to use Keystone and now ship explicit third-party / FOSS notice / license / exception files under a dedicated `licenses/` layout in release archives
+- `:export`, `:fill`, and `:xor!` now stream output to avoid full materialization in memory
+- Clean-document search uses SIMD `memmem` for faster scanning; only chunks containing tombstone or replacement edits fall back to byte-at-a-time
+- Refactored app render, events, and commands for cleaner separation
+
+### Fixed
+
+- Edit nibble no-op undo: editing a nibble no longer creates an empty undo entry
+- Memory panel row mapping and scrolling now correctly track the cursor position
 
 ## [0.2.0] - 2026-05-06
 
@@ -81,7 +103,7 @@ Initial release.
 - CI on Ubuntu and Windows (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --all-targets`)
 - Release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, published with `SHA256SUMS.txt`
 
-[Unreleased]: https://github.com/ycsgg/hxedit/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/ycsgg/hxedit/compare/v0.2.1...v0.3.0
 [0.2.0]: https://github.com/ycsgg/hxedit/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ycsgg/hxedit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ycsgg/hxedit/releases/tag/v0.1.0

@@ -19,6 +19,7 @@
 - 哈希：MD5、SHA1、SHA256、SHA512、CRC32
 - 剪贴板复制 / 粘贴、导出、fill / zero / xor / replace
 - 只读同步滚动 diff 页面，可用 `:diff` 对比另一个文件
+- 进程内存编辑：通过 PID 或进程名附加到运行中的进程，浏览和编辑内存区域，冻结/解冻目标进程，并将修改写回
 - 分页 I/O 和缓存，适合大文件
 - 可选的反汇编浏览、symbol 搜索、内联汇编 patch
 
@@ -64,6 +65,8 @@ hxedit some.bin
 |------|------|
 | `--readonly` | 只读打开；需要时会自动退回只读 |
 | `--offset <n\|0xhex>` | 从指定偏移开始 |
+| `--pid <PID>` | 通过 PID 附加到运行中的进程进行内存编辑 |
+| `--process <NAME>` | 通过进程名附加到运行中的进程进行内存编辑 |
 | `--inspector` | 启动时显示 side panel 的 inspector 页 |
 | `--bytes-per-line <n>` | 每行字节数，默认 `16` |
 | `--page-size <n>` | 页缓存读取大小，默认 `16384` |
@@ -89,6 +92,14 @@ hxedit some.bin
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh|next|prev|off` | 同步滚动显示 current logical bytes 与另一个文件；可见页会在 `N` 范围内重对齐插入/删除字节，右侧相同字节为灰色，不同字节左右亮黄，缺失字节以红色 `__` 占位 |
 | `:insp` / `:insp more` | 打开 inspector / 加载更多分页项 |
 | `:format ...` | 强制格式 |
+
+`memory` 档位下的内存编辑命令：
+
+| 命令 | 说明 |
+|------|------|
+| `:mem` / `:mem list\|refresh\|info\|freeze\|thaw\|commit\|commit-all` | 打开进程内存侧面板，查看区域、刷新映射、暂停/恢复目标进程、将当前区域的替换写回（`commit`），或按虚拟地址顺序提交所有脏区域（`commit-all`）。面板有三种视图：maps（区域列表——选中/光标行和当前打开的区域分别高亮）、`:mem list` 进程选择器（Enter 附加到高亮进程）、`:mem info`（聚合报告）。所有视图支持鼠标滚轮或方向键滚动；点击行仅改变高亮 |
+| `:w` / `:q` 在内存模式下 | `:w`（无路径）等同于 `:mem commit`；`:w <path>` 被拒绝（请使用 `:export <path>`）。未提交的替换、undo、redo 在区域切换时按区域保留，因此 `:q` 在有脏区域时拒绝退出并汇总总数；`:q!` 丢弃 |
+| `:ms [mode]<delim><pattern><delim> [filter...]` / `:ms! ...` | 按虚拟地址搜索可读进程区域；模式包括文本、`x/hex/`、`b/byte/`、`u32/u64`，过滤器如 `in:rw-`、`in:heap`、`not:path:/usr/lib/*`、`in:va:start-end`。使用 `gn` / `gN` 重复上次内存搜索（独立于文件搜索的 `n` / `p` 历史） |
 
 `default` / `full` 档位下的反汇编命令：
 
