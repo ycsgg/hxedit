@@ -3,6 +3,11 @@ use crate::core::piece_table::CellId;
 use crate::error::{HxError, HxResult};
 use crate::mode::NibblePhase;
 
+/// A single cell's replacement change: `(cell, before, after)` where each
+/// replacement value is `None` when the cell shows its base byte. Returned by
+/// the streaming in-place transforms so callers can build an undo record.
+pub type ReplacementDelta = (CellId, Option<u8>, Option<u8>);
+
 impl Document {
     /// Get the current replacement value for a cell (used by undo to snapshot
     /// the "before" state).
@@ -113,6 +118,150 @@ impl Document {
             return Err(HxError::OffsetOutOfRange);
         }
         self.set_display_byte_by_id(id, value)
+    }
+
+    /// Apply an in-place transform to every visible byte in a display range,
+    /// streaming through the piece list in 64 KB chunks so a multi-GB
+    /// selection never materializes its bytes twice in memory.
+    ///
+    /// Tombstoned cells are skipped (they carry no logical byte), matching the
+    /// `logical_bytes` view. Each visited cell's current display byte (base
+    /// byte with any replacement applied) is passed to `transform`; the result
+    /// is written back as a replacement. Returns one
+    /// `(cell, before_replacement, after_replacement)` entry per cell whose
+    /// replacement state actually changed, plus the total count of visible
+    /// (non-tombstone) cells visited, ready for the caller's undo record and
+    /// status reporting.
+    ///
+    /// Pure replacement semantics: never inserts, tombstones, or real-deletes.
+    pub fn transform_visible_range_in_place(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        mut transform: impl FnMut(u8) -> u8,
+    ) -> HxResult<(u64, Vec<ReplacementDelta>)> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let len = self.len();
+        if len == 0 || start > end_inclusive || start >= len {
+            return Ok((0, Vec::new()));
+        }
+
+        // Cap per-read batches to what the page cache can serve in one call
+        // (see `max_contiguous_read_len`); 64 KB is just an upper bound.
+        let transform_chunk = self.max_contiguous_read_len().min(64 * 1024);
+        let end = end_inclusive.min(len - 1) + 1;
+        let pieces = self.pieces_snapshot();
+        let mut changes = Vec::new();
+        let mut visited = 0_u64;
+        let mut cursor = 0_u64;
+
+        for piece in &pieces {
+            if cursor >= end {
+                break;
+            }
+            let piece_end = cursor + piece.len;
+            if piece_end <= start {
+                cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = start.max(cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start >= overlap_end {
+                cursor = piece_end;
+                continue;
+            }
+
+            let source_start = piece.start + (overlap_start - cursor);
+            let mut remaining = overlap_end - overlap_start;
+            let mut source_off = source_start;
+
+            while remaining > 0 {
+                let batch = (remaining as usize).min(transform_chunk);
+                // Owned buffer so we can freely mutate replacements afterwards
+                // without holding an immutable borrow of the add-buffer.
+                let raw = self.read_chunk(piece.source, source_off, batch)?;
+                if raw.is_empty() {
+                    break;
+                }
+                let read_len = raw.len() as u64;
+
+                for (i, &base) in raw.iter().enumerate() {
+                    let id = CellId::from_source(piece.source, source_off + i as u64);
+                    if self.is_tombstone(id) {
+                        continue;
+                    }
+                    visited += 1;
+                    let current = self.replacement_for(id).unwrap_or(base);
+                    let updated = transform(current);
+                    let before = self.replacement_state(id);
+                    self.set_display_byte_by_id(id, updated)?;
+                    let after = self.replacement_state(id);
+                    if after != before {
+                        changes.push((id, before, after));
+                    }
+                }
+
+                source_off += read_len;
+                remaining -= read_len;
+            }
+
+            cursor = piece_end;
+        }
+
+        Ok((visited, changes))
+    }
+
+    /// Overwrite a run of consecutive display cells starting at `offset`,
+    /// generating each cell's new byte from its zero-based position in the run
+    /// via `byte_at`. Streams cell resolution in 64 KB batches so a multi-GB
+    /// fill never resolves every `CellId` up front.
+    ///
+    /// Matches the overwrite-paste contract used by `:fill`/`:zero`: writes are
+    /// clamped to the current display length (bytes past EOF are dropped), and
+    /// hitting a tombstoned cell is an error (overwrite does not skip slots).
+    /// Returns the run length actually written plus the per-cell replacement
+    /// changes for undo.
+    pub fn overwrite_run_positional(
+        &mut self,
+        offset: u64,
+        run_len: u64,
+        mut byte_at: impl FnMut(u64) -> u8,
+    ) -> HxResult<(u64, Vec<ReplacementDelta>)> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let doc_len = self.len();
+        if run_len == 0 || offset >= doc_len {
+            return Ok((0, Vec::new()));
+        }
+
+        const OVERWRITE_CHUNK: u64 = 64 * 1024;
+        let applied = run_len.min(doc_len - offset);
+        let mut changes = Vec::new();
+        let mut written = 0_u64;
+
+        while written < applied {
+            let batch = (applied - written).min(OVERWRITE_CHUNK);
+            let ids = self.cell_ids_range(offset + written, batch);
+            for (i, id) in ids.into_iter().enumerate() {
+                if self.is_tombstone(id) {
+                    return Err(HxError::OffsetOutOfRange);
+                }
+                let value = byte_at(written + i as u64);
+                let before = self.replacement_state(id);
+                self.set_display_byte_by_id(id, value)?;
+                let after = self.replacement_state(id);
+                if after != before {
+                    changes.push((id, before, after));
+                }
+            }
+            written += batch;
+        }
+
+        Ok((applied, changes))
     }
 
     /// Re-apply a set of `(offset, bytes)` replacement spans onto this

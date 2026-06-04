@@ -3,6 +3,7 @@
 //! Run with: `cargo bench --bench perf_bench`
 
 use std::fs;
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 use digest::Digest;
@@ -283,6 +284,62 @@ fn bench_logical_bytes_large_copy() -> BenchResult {
     Ok(())
 }
 
+fn bench_export_stream_64mb() -> BenchResult {
+    let (_dir, path) = write_patterned_file("export-stream.bin", 64 * 1024 * 1024)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let out_dir = tempdir()?;
+    let out_path = out_dir.path().join("export-out.bin");
+
+    let t = Instant::now();
+    let file = fs::File::create(&out_path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    let written = doc.for_each_logical_chunk(0, doc.len() - 1, |chunk| {
+        writer
+            .write_all(chunk)
+            .map_err(hxedit::error::HxError::from)
+    })?;
+    writer.flush()?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, 64 * 1024 * 1024);
+    print("export stream 64MB to file", elapsed, 1);
+    Ok(())
+}
+
+fn bench_fill_stream_4mb() -> BenchResult {
+    // Smaller than the export bench: fill writes one replacement-map entry per
+    // byte, so the BTreeMap cost (existing replacement semantics) dominates and
+    // would make a 64 MB run take many seconds. 4 MB still spans dozens of
+    // 64 KB chunks, exercising the streaming path.
+    let (_dir, path) = write_patterned_file("fill-stream.bin", 4 * 1024 * 1024)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let pattern = [0xde_u8, 0xad, 0xbe];
+
+    let t = Instant::now();
+    let (written, _changes) = doc.overwrite_run_positional(0, doc.len(), |run_index| {
+        pattern[(run_index % pattern.len() as u64) as usize]
+    })?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, 4 * 1024 * 1024);
+    print("fill stream 4MB repeating pattern", elapsed, 1);
+    Ok(())
+}
+
+fn bench_xor_stream_4mb() -> BenchResult {
+    // See `bench_fill_stream_4mb`: in-place xor also writes per-byte
+    // replacements, so keep the span at 4 MB to stay chunk-representative
+    // without a multi-second BTreeMap write.
+    let (_dir, path) = write_patterned_file("xor-stream.bin", 4 * 1024 * 1024)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    let (visited, _changes) =
+        doc.transform_visible_range_in_place(0, doc.len() - 1, |byte| byte ^ 0x5a)?;
+    let elapsed = t.elapsed();
+    assert_eq!(visited, 4 * 1024 * 1024);
+    print("xor! stream 4MB in place", elapsed, 1);
+    Ok(())
+}
+
 fn bench_hash_sha256_16mb() -> BenchResult {
     let (_dir, path) = write_patterned_file("hash-sha256.bin", 16 * 1024 * 1024)?;
     let mut doc = Document::open(&path, &bench_config())?;
@@ -410,6 +467,9 @@ fn main() {
         ("paste_overwrite_large", bench_paste_overwrite_large),
         ("paste_overwrite_bulk_path", bench_paste_overwrite_bulk_path),
         ("logical_bytes_large_copy", bench_logical_bytes_large_copy),
+        ("export_stream_64mb", bench_export_stream_64mb),
+        ("fill_stream_4mb", bench_fill_stream_4mb),
+        ("xor_stream_4mb", bench_xor_stream_4mb),
         ("hash_sha256_16mb", bench_hash_sha256_16mb),
         ("hash_crc32_16mb", bench_hash_crc32_16mb),
         ("hash_16mb_with_tombstones", bench_hash_16mb_with_tombstones),

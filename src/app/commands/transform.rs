@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use super::*;
 
 #[derive(Debug, Clone, Copy)]
@@ -21,16 +23,15 @@ impl App {
             return Ok(());
         }
 
-        let bytes = repeated_pattern(pattern, len);
-        let applied = self.apply_paste_overwrite(&bytes)?;
-        let requested = bytes.len();
+        let applied = self.apply_fill_overwrite(pattern, len as u64)?;
+        let requested = len;
         let pattern_preview = hex_preview(pattern);
 
         if applied == 0 {
             self.set_warning_status(format!(
                 "fill produced no bytes [pattern {pattern_preview}] (cursor at EOF; overwrite truncates)"
             ));
-        } else if applied < requested {
+        } else if (applied as usize) < requested {
             self.set_warning_status(format!(
                 "filled {applied}/{requested} bytes [pattern {pattern_preview}] (truncated at EOF)"
             ));
@@ -41,6 +42,48 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Overwrite-fill `run_len` display cells from the cursor with a repeating
+    /// pattern, streaming so neither the repeated pattern nor the full cell-id
+    /// list is materialized up front. Mirrors `apply_paste_overwrite`'s undo,
+    /// cursor, and inspector behavior.
+    fn apply_fill_overwrite(&mut self, pattern: &[u8], run_len: u64) -> HxResult<u64> {
+        if self.document.is_readonly() {
+            return Err(HxError::ReadOnly);
+        }
+        let cursor_before = self.cursor;
+        let pattern_len = pattern.len() as u64;
+        let (written, changes) =
+            self.document
+                .overwrite_run_positional(cursor_before, run_len, |run_index| {
+                    pattern[(run_index % pattern_len) as usize]
+                })?;
+
+        if written == 0 {
+            return Ok(0);
+        }
+
+        let changes: Vec<ReplacementChange> = changes
+            .into_iter()
+            .map(|(id, before, after)| ReplacementChange { id, before, after })
+            .collect();
+
+        let cursor_after =
+            self.clamp_cursor_for_mode(cursor_before + written.saturating_sub(1), self.mode);
+        if !changes.is_empty() {
+            self.push_undo_step(
+                vec![EditOp::ReplaceBytes { changes }],
+                cursor_before,
+                self.mode,
+                cursor_after,
+                self.mode,
+            );
+        }
+        self.cursor = cursor_after;
+        self.invalidate_disassembly_cache();
+        self.refresh_inspector();
+        Ok(written)
     }
 
     pub(super) fn execute_paste_command(
@@ -59,26 +102,39 @@ impl App {
         };
 
         let display_span = end - start + 1;
+
+        // Binary export streams logical bytes to disk in 64 KB chunks so a
+        // multi-GB selection never materializes the whole range in memory.
+        if let ExportFormat::Binary { path } = &format {
+            let file = std::fs::File::create(path)?;
+            let mut writer = std::io::BufWriter::new(file);
+            let written =
+                self.document
+                    .for_each_logical_chunk(start, end, |chunk| -> HxResult<()> {
+                        writer.write_all(chunk)?;
+                        Ok(())
+                    })?;
+            writer.flush()?;
+            let written = written as usize;
+            if display_span as usize != written {
+                self.set_info_status(format!(
+                    "exported {} logical bytes (display span {}) to {}",
+                    written,
+                    display_span,
+                    path.display()
+                ));
+            } else {
+                self.set_info_status(format!("exported {} bytes to {}", written, path.display()));
+            }
+            return Ok(());
+        }
+
+        // C array / Python bytes still materialize the selection: they emit a
+        // full text literal that is clipboard-bound anyway.
         let bytes = self.document.logical_bytes(start, end)?;
 
         match format {
-            ExportFormat::Binary { path } => {
-                std::fs::write(&path, &bytes)?;
-                if display_span as usize != bytes.len() {
-                    self.set_info_status(format!(
-                        "exported {} logical bytes (display span {}) to {}",
-                        bytes.len(),
-                        display_span,
-                        path.display()
-                    ));
-                } else {
-                    self.set_info_status(format!(
-                        "exported {} bytes to {}",
-                        bytes.len(),
-                        path.display()
-                    ));
-                }
-            }
+            ExportFormat::Binary { .. } => unreachable!("binary export handled above"),
             ExportFormat::CArray { name } => {
                 let ident = crate::export::sanitize_identifier(&name);
                 let text = crate::export::format_c_array(&ident, &bytes);
@@ -123,85 +179,69 @@ impl App {
             return Err(HxError::MissingSelection);
         };
 
-        let display_span = end - start + 1;
-        let mut bytes = self.document.logical_bytes(start, end)?;
-        if bytes.is_empty() {
-            self.set_info_status("xor: no logical bytes in selection");
-            return Ok(());
-        }
-        for byte in &mut bytes {
-            *byte ^= key;
-        }
-
         if in_place {
-            self.apply_xor_in_place(start, end, key, &bytes)
+            self.apply_xor_in_place(start, end, key)
         } else {
-            self.copy_xor_result(key, display_span, &bytes)
+            self.copy_xor_result(start, end, key)
         }
     }
 
-    fn copy_xor_result(&mut self, key: u8, display_span: u64, bytes: &[u8]) -> HxResult<()> {
-        let text = bytes
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<Vec<_>>()
-            .join(" ");
+    fn copy_xor_result(&mut self, start: u64, end: u64, key: u8) -> HxResult<()> {
+        // The clipboard payload is a full hex string anyway, but stream the
+        // selection through 64 KB chunks so we never hold the raw logical bytes
+        // and the formatted text at the same time.
+        let display_span = end - start + 1;
+        let mut text = String::new();
+        let mut logical_len = 0u64;
+        self.document
+            .for_each_logical_chunk(start, end, |chunk| -> HxResult<()> {
+                for &byte in chunk {
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(&format!("{:02x}", byte ^ key));
+                }
+                logical_len += chunk.len() as u64;
+                Ok(())
+            })?;
+
+        if logical_len == 0 {
+            self.set_info_status("xor: no logical bytes in selection");
+            return Ok(());
+        }
+
         crate::clipboard::copy_text(&text)?;
 
-        if display_span as usize != bytes.len() {
+        if display_span != logical_len {
             self.set_info_status(format!(
-                "xor 0x{key:02x}: copied {} logical bytes (display span {}) [hex]",
-                bytes.len(),
-                display_span
+                "xor 0x{key:02x}: copied {logical_len} logical bytes (display span {display_span}) [hex]"
             ));
         } else {
-            self.set_info_status(format!(
-                "xor 0x{key:02x}: copied {} bytes [hex]",
-                bytes.len()
-            ));
+            self.set_info_status(format!("xor 0x{key:02x}: copied {logical_len} bytes [hex]"));
         }
         Ok(())
     }
 
-    fn apply_xor_in_place(
-        &mut self,
-        start: u64,
-        end: u64,
-        key: u8,
-        xored_bytes: &[u8],
-    ) -> HxResult<()> {
+    fn apply_xor_in_place(&mut self, start: u64, end: u64, key: u8) -> HxResult<()> {
         if self.document.is_readonly() {
             return Err(HxError::ReadOnly);
-        }
-        if xored_bytes.is_empty() {
-            self.set_info_status("xor!: no logical bytes in selection");
-            return Ok(());
         }
 
         let cursor_before = self.cursor;
         let mode_before = self.mode;
-        let span = end - start + 1;
-        let ids = self.document.cell_ids_range(start, span);
-        let mut changes = Vec::with_capacity(xored_bytes.len());
-        let mut xored = xored_bytes.iter().copied();
-
-        for id in ids {
-            if self.document.is_tombstone(id) {
-                continue;
-            }
-            let Some(byte) = xored.next() else {
-                break;
-            };
-            let before = self.document.replacement_state(id);
-            self.document.replace_display_byte_by_id(id, byte)?;
-            let after = self.document.replacement_state(id);
-            if after != before {
-                changes.push(ReplacementChange { id, before, after });
-            }
+        // Stream the selection in 64 KB chunks: read → xor → write back as a
+        // replacement, never materializing the whole logical range.
+        let (visible_count, raw_changes) =
+            self.document
+                .transform_visible_range_in_place(start, end, |byte| byte ^ key)?;
+        if visible_count == 0 {
+            self.set_info_status("xor!: no logical bytes in selection");
+            return Ok(());
         }
-
-        debug_assert!(xored.next().is_none());
-
+        let changes: Vec<ReplacementChange> = raw_changes
+            .into_iter()
+            .map(|(id, before, after)| ReplacementChange { id, before, after })
+            .collect();
         let visual_selection = self.selection_range();
         let inspector_selection = visual_selection.is_none()
             && self.active_side_panel == SidePanelKind::Inspector
@@ -249,13 +289,11 @@ impl App {
 
         if changed_count == 0 {
             self.set_info_status(format!(
-                "xor! 0x{key:02x}: {} logical bytes unchanged",
-                xored_bytes.len()
+                "xor! 0x{key:02x}: {visible_count} logical bytes unchanged"
             ));
         } else {
             self.set_info_status(format!(
-                "xor! 0x{key:02x}: replaced {} logical bytes in place",
-                xored_bytes.len()
+                "xor! 0x{key:02x}: replaced {visible_count} logical bytes in place"
             ));
         }
         Ok(())
@@ -459,10 +497,6 @@ impl App {
             },
         })
     }
-}
-
-fn repeated_pattern(pattern: &[u8], len: usize) -> Vec<u8> {
-    pattern.iter().copied().cycle().take(len).collect()
 }
 
 fn hex_preview(bytes: &[u8]) -> String {

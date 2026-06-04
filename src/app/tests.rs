@@ -1225,6 +1225,118 @@ fn xor_bang_uses_inspector_field_selection() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Streaming transforms across the 64 KB chunk boundary
+//
+// :export / :fill / :xor! now walk pieces in 64 KB chunks instead of
+// materializing the whole selection. These exercise ranges larger than one
+// chunk to make sure chunk seams stay byte-accurate.
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn export_streams_large_selection_across_chunk_boundary() {
+    let size = 200_000usize; // > 3 * 64 KiB chunks
+    let data: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+    let mut app = app_with_bytes(&data);
+
+    // Whole-file visual selection.
+    app.cursor = 0;
+    app.toggle_visual();
+    app.move_horizontal((app.document.len() - 1) as i64);
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("stream_export.bin");
+    app.execute_command(Command::Export {
+        format: ExportFormat::Binary { path: path.clone() },
+    })
+    .unwrap();
+
+    assert_eq!(fs::read(&path).unwrap(), data);
+    assert!(app
+        .status_message
+        .contains(&format!("exported {size} bytes")));
+}
+
+#[test]
+fn export_streams_logical_bytes_skipping_tombstone() {
+    let size = 130_000usize; // spans two chunks
+    let data: Vec<u8> = (0..size).map(|i| (i % 191) as u8).collect();
+    let mut app = app_with_bytes(&data);
+
+    // Tombstone one byte in the second chunk, then export everything.
+    app.cursor = 100_000;
+    app.delete_current().unwrap();
+    app.cursor = 0;
+    app.toggle_visual();
+    app.move_horizontal((app.document.len() - 1) as i64);
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("stream_export_tombstone.bin");
+    app.execute_command(Command::Export {
+        format: ExportFormat::Binary { path: path.clone() },
+    })
+    .unwrap();
+
+    let mut expected = data.clone();
+    expected.remove(100_000);
+    assert_eq!(fs::read(&path).unwrap(), expected);
+    assert!(app.status_message.contains("logical bytes"));
+}
+
+#[test]
+fn fill_streams_repeating_pattern_across_chunk_boundary() {
+    let size = 200_000usize;
+    let mut app = app_with_bytes(&vec![0u8; size]);
+    app.cursor = 0;
+    app.execute_command(Command::Fill {
+        pattern: vec![0xde, 0xad, 0xbe],
+        len: size,
+    })
+    .unwrap();
+
+    let filled = app.document.logical_bytes(0, (size - 1) as u64).unwrap();
+    let pattern = [0xde, 0xad, 0xbe];
+    for (i, byte) in filled.iter().enumerate() {
+        assert_eq!(*byte, pattern[i % 3], "mismatch at {i}");
+    }
+    assert!(app.status_message.contains(&format!("filled {size} bytes")));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, (size - 1) as u64).unwrap(),
+        vec![0u8; size]
+    );
+}
+
+#[test]
+fn xor_bang_streams_large_selection_across_chunk_boundary() {
+    let size = 200_000usize;
+    let data: Vec<u8> = (0..size).map(|i| (i % 253) as u8).collect();
+    let mut app = app_with_bytes(&data);
+    app.cursor = 0;
+    app.toggle_visual();
+    app.move_horizontal((app.document.len() - 1) as i64);
+
+    app.execute_command(Command::Xor {
+        key: 0x5a,
+        in_place: true,
+    })
+    .unwrap();
+
+    let xored = app.document.logical_bytes(0, (size - 1) as u64).unwrap();
+    let expected: Vec<u8> = data.iter().map(|b| b ^ 0x5a).collect();
+    assert_eq!(xored, expected);
+    assert!(app
+        .status_message
+        .contains(&format!("replaced {size} logical bytes")));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, (size - 1) as u64).unwrap(),
+        data
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Redo: visual delete and paste
 // ═══════════════════════════════════════════════════════════════════════════
 

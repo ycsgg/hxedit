@@ -185,6 +185,19 @@ impl Document {
         Ok(offset)
     }
 
+    /// Largest contiguous span (in bytes) that `raw_range` can satisfy in a
+    /// single call. The page cache only materializes the pages spanned by one
+    /// `read_range`; asking for more than `page_size * cache_pages` evicts the
+    /// earlier pages mid-read and returns a short/empty buffer. Chunked readers
+    /// cap their per-read batch to this so they stay correct for any cache
+    /// configuration. Always at least one page.
+    pub(crate) fn max_contiguous_read_len(&self) -> usize {
+        self.page_size
+            .saturating_mul(self.cache_pages)
+            .max(self.page_size)
+            .max(1)
+    }
+
     /// Cheap snapshot of the piece list (small structs, no data).
     pub fn pieces_snapshot(&self) -> Vec<Piece> {
         self.pieces.pieces().to_vec()
