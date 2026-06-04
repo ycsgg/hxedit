@@ -427,6 +427,50 @@ fn bench_search_16mb_file() -> BenchResult {
     Ok(())
 }
 
+fn bench_search_256mb_clean_memmem() -> BenchResult {
+    // Clean document => SIMD memmem path. Worst case: needle at the very tail,
+    // forcing a full scan. This is the headline win over the old byte-at-a-time
+    // KMP loop (~24x on the matching cost at this size).
+    let dir = tempdir()?;
+    let path = dir.path().join("search-256-clean.bin");
+    let size: usize = 256 * 1024 * 1024;
+    let mut data = vec![0u8; size];
+    let needle = [0xde, 0xad, 0xbe, 0xef];
+    let offset = size - needle.len();
+    data[offset..].copy_from_slice(&needle);
+    fs::write(&path, &data)?;
+
+    let mut doc = Document::open(&path, &bench_config())?;
+    let t = Instant::now();
+    let found = doc.search_forward(0, &needle)?;
+    let elapsed = t.elapsed();
+    assert_eq!(found, Some(offset as u64));
+    print("search 256MB clean forward (memmem)", elapsed, 1);
+    Ok(())
+}
+
+fn bench_search_64mb_dirty_kmp() -> BenchResult {
+    // A single tombstone marks the document dirty, so the search takes the KMP
+    // fallback that preserves tombstone gaps. Keeps the slower path observable.
+    let (_dir, path) = write_patterned_file("search-64-dirty.bin", 64 * 1024 * 1024)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let needle = [0xde, 0xad, 0xbe, 0xef];
+    let tail = doc.len() - needle.len() as u64;
+    // Overwrite the tail with the needle via replacements (also marks dirty).
+    for (i, &b) in needle.iter().enumerate() {
+        doc.replace_display_byte(tail + i as u64, b)?;
+    }
+    doc.delete_byte(10)?; // tombstone -> dirty path
+
+    let t = Instant::now();
+    let found = doc.search_forward(0, &needle)?;
+    let elapsed = t.elapsed();
+    // Tombstone shifts the logical match one slot earlier than the raw tail.
+    assert!(found.is_some());
+    print("search 64MB dirty forward (kmp fallback)", elapsed, 1);
+    Ok(())
+}
+
 fn run(label: &str, bench: fn() -> BenchResult) -> bool {
     eprintln!("[bench] running {label}");
     match bench() {
@@ -475,6 +519,8 @@ fn main() {
         ("hash_16mb_with_tombstones", bench_hash_16mb_with_tombstones),
         ("hash_16mb_with_insert", bench_hash_16mb_with_insert),
         ("search_16mb_file", bench_search_16mb_file),
+        ("search_256mb_clean_memmem", bench_search_256mb_clean_memmem),
+        ("search_64mb_dirty_kmp", bench_search_64mb_dirty_kmp),
     ];
 
     let failed = benches

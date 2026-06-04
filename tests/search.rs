@@ -79,3 +79,63 @@ fn searches_across_large_chunk_boundary_with_replacements() {
         Some(start as u64)
     );
 }
+
+#[test]
+fn clean_memmem_scan_finds_match_straddling_read_chunk() {
+    // Clean documents take the SIMD memmem path. With the default config the
+    // per-read chunk caps at page_size * cache_pages (2 MiB), so place a match
+    // straddling that boundary to exercise the `pattern.len() - 1` overlap.
+    let chunk = 16 * 1024 * 128; // 2 MiB
+    let size = chunk + 4096;
+    let mut data = vec![b'x'; size];
+    let start = chunk - 2; // 2 bytes before the boundary, 3 after
+    data[start..start + 5].copy_from_slice(b"hello");
+
+    let (_dir, mut doc) = open_temp(&data);
+    assert!(!doc.is_dirty());
+
+    assert_eq!(doc.search_forward(0, b"hello").unwrap(), Some(start as u64));
+    assert_eq!(
+        doc.search_backward(doc.len(), b"hello").unwrap(),
+        Some(start as u64)
+    );
+    // A pattern absent from the document still returns None across both paths.
+    assert_eq!(doc.search_forward(0, b"zzzzz").unwrap(), None);
+    assert_eq!(doc.search_backward(doc.len(), b"zzzzz").unwrap(), None);
+}
+
+#[test]
+fn clean_memmem_scan_respects_start_and_direction() {
+    // Two occurrences: forward from just past the first should find the
+    // second; backward from before the second should find the first.
+    let mut data = vec![b'.'; 4096];
+    data[100..104].copy_from_slice(b"abcd");
+    data[3000..3004].copy_from_slice(b"abcd");
+
+    let (_dir, mut doc) = open_temp(&data);
+    assert!(!doc.is_dirty());
+
+    assert_eq!(doc.search_forward(0, b"abcd").unwrap(), Some(100));
+    assert_eq!(doc.search_forward(101, b"abcd").unwrap(), Some(3000));
+    assert_eq!(doc.search_backward(doc.len(), b"abcd").unwrap(), Some(3000));
+    assert_eq!(doc.search_backward(3000, b"abcd").unwrap(), Some(100));
+}
+
+#[test]
+fn clean_memmem_scan_handles_match_at_eof_and_bof() {
+    let mut data = vec![b'-'; 8192];
+    data[0..3].copy_from_slice(b"AAA");
+    let last = data.len() - 3;
+    data[last..].copy_from_slice(b"ZZZ");
+
+    let (_dir, mut doc) = open_temp(&data);
+    assert!(!doc.is_dirty());
+
+    assert_eq!(doc.search_forward(0, b"AAA").unwrap(), Some(0));
+    assert_eq!(doc.search_forward(0, b"ZZZ").unwrap(), Some(last as u64));
+    assert_eq!(
+        doc.search_backward(doc.len(), b"ZZZ").unwrap(),
+        Some(last as u64)
+    );
+    assert_eq!(doc.search_backward(doc.len(), b"AAA").unwrap(), Some(0));
+}
