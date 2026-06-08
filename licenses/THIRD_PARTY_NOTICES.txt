@@ -26,3 +26,13 @@ Practical redistribution rule for this repository:
 The bundled Keystone exception text explicitly lists both Apache 2.0 and MIT in
 its FOSS license list, subject to the conditions written in that exception
 file.
+
+## windows-sys in `memory` builds on Windows
+
+The `memory` feature pulls in the optional `windows-sys` crate, but only when
+building for Windows targets (it backs the process-memory backend in
+`src/memory/platform/windows.rs`). `windows-sys` is dual-licensed under
+`MIT OR Apache-2.0`, matching this repository's own license, so it does not
+add new license obligations beyond the existing `MIT`/`Apache-2.0` texts in
+`licenses/LICENSE-MIT` and `licenses/LICENSE-APACHE`. It is not part of the
+`core`, `default`, or `full` feature bundles.
