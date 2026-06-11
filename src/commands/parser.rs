@@ -8,8 +8,6 @@ use crate::copy::{CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
 use crate::util::parse::{parse_hex_bytes, parse_hex_stream, parse_offset};
 
-const DEFAULT_EXPORT_NAME: &str = "selection_bytes";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReplaceInputMode {
     Hex,
@@ -463,7 +461,7 @@ fn parse_export(input: Option<&str>) -> HxResult<Command> {
             }
         }
         "c" | "carray" | "c-array" => {
-            let name = tokens.next().unwrap_or(DEFAULT_EXPORT_NAME);
+            let name = tokens.next().unwrap_or("");
             if let Some(extra) = tokens.next() {
                 return Err(HxError::UnknownCommand(extra.to_owned()));
             }
@@ -472,7 +470,7 @@ fn parse_export(input: Option<&str>) -> HxResult<Command> {
             }
         }
         "py" | "python" => {
-            let name = tokens.next().unwrap_or(DEFAULT_EXPORT_NAME);
+            let name = tokens.next().unwrap_or("");
             if let Some(extra) = tokens.next() {
                 return Err(HxError::UnknownCommand(extra.to_owned()));
             }

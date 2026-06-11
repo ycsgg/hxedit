@@ -26,9 +26,10 @@ fn app_with_len(len: usize) -> App {
         file: Some(file),
         pid: None,
         process: None,
-        bytes_per_line: 16,
-        page_size: 4096,
-        cache_pages: 8,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
         profile: false,
         readonly: false,
         no_color: true,
@@ -48,9 +49,10 @@ fn app_with_bytes(bytes: &[u8]) -> App {
         file: Some(file),
         pid: None,
         process: None,
-        bytes_per_line: 16,
-        page_size: 4096,
-        cache_pages: 8,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
         profile: false,
         readonly: false,
         no_color: true,
@@ -399,9 +401,10 @@ fn app_falls_back_to_readonly_when_write_open_is_denied() {
         file: Some(file.clone()),
         pid: None,
         process: None,
-        bytes_per_line: 16,
-        page_size: 4096,
-        cache_pages: 8,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
         profile: false,
         readonly: false,
         no_color: true,
@@ -428,9 +431,10 @@ fn readonly_mode_allows_save_as_new_path() {
         file: Some(file),
         pid: None,
         process: None,
-        bytes_per_line: 16,
-        page_size: 4096,
-        cache_pages: 8,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
         profile: false,
         readonly: true,
         no_color: true,
@@ -459,9 +463,10 @@ fn readonly_mode_rejects_save_in_place() {
         file: Some(file),
         pid: None,
         process: None,
-        bytes_per_line: 16,
-        page_size: 4096,
-        cache_pages: 8,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
         profile: false,
         readonly: true,
         no_color: true,
@@ -931,6 +936,34 @@ fn search_forward_backward_and_wrap() {
     .unwrap();
     assert_eq!(app3.cursor, 12);
     assert!(app3.status_message.contains("wrapped"));
+}
+
+#[test]
+fn search_wrap_disabled_does_not_wrap() {
+    // Forward: cursor past the only match, wrap off -> not found, cursor stays.
+    let mut app = app_with_bytes(b"hello world");
+    app.config.search_wrap = false;
+    app.cursor = app.document.len() - 1;
+    app.execute_command(Command::SearchAscii {
+        pattern: b"hello".to_vec(),
+        backward: false,
+    })
+    .unwrap();
+    assert_eq!(app.cursor, app.document.len() - 1);
+    assert!(app.status_message.contains("not found"));
+    assert!(app.status_message.contains("wrap off"));
+
+    // Backward: cursor before the only later match, wrap off -> not found.
+    let mut app2 = app_with_bytes(b"hello world hello");
+    app2.config.search_wrap = false;
+    app2.cursor = 0;
+    app2.execute_command(Command::SearchAscii {
+        pattern: b"hello".to_vec(),
+        backward: true,
+    })
+    .unwrap();
+    assert_eq!(app2.cursor, 0);
+    assert!(app2.status_message.contains("wrap off"));
 }
 
 #[test]
@@ -1405,9 +1438,10 @@ fn hash_command_various_algorithms_and_ranges() {
         file: Some(file),
         pid: None,
         process: None,
-        bytes_per_line: 16,
-        page_size: 4096,
-        cache_pages: 8,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
         profile: false,
         readonly: false,
         no_color: true,

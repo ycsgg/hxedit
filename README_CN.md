@@ -73,6 +73,37 @@ hxedit some.bin
 | `--cache-pages <n>` | 页缓存容量，默认 `128` |
 | `--profile` | 退出时向 stderr 输出诊断信息 |
 | `--no-color` | 禁用颜色；`NO_COLOR` 同样生效 |
+| `--config <path>` | 从指定的配置文件（TOML）加载设置 |
+
+## 配置文件
+
+hxedit 启动时会读取一个可选的 TOML 配置文件。解析顺序（取第一个存在的）：
+
+1. `--config <path>`
+2. `$HXEDIT_CONFIG`
+3. `~/.config/hxedit/config.toml`（平台配置目录）
+
+文件不存在不会报错；文件存在但解析失败（或含未知字段）会报错退出。优先级为：CLI 参数 > 配置文件 > 内置默认值。
+
+```toml
+[display]
+bytes_per_line   = 16              # 每行字节数
+data_panel_bytes = 16              # data 面板解码的字节数
+inspector_depth  = 1              # 此深度及更深的 struct 首次默认折叠
+export_c_width   = 12              # `:export c` 每行字节数
+export_py_width  = 16              # `:export py` 每块字节数
+export_name      = "selection_bytes"  # `:export c`/`py` 的默认标识符
+
+[behavior]
+readonly    = false
+inspector   = false                # 启动时显示 inspector 侧栏
+color       = "auto"               # "auto" | "never"（"never" 等价 --no-color）
+search_wrap = true                 # 搜索到边界时是否回绕到另一端
+
+[performance]
+page_size   = 16384                # 页缓存读取大小
+cache_pages = 128                  # 页缓存容量
+```
 
 ## 常用命令
 

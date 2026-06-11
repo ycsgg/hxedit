@@ -3,8 +3,6 @@ use crate::app::{App, DataState};
 use crate::core::document::ByteSlot;
 use crate::mode::Mode;
 
-const DATA_READ_BYTES: usize = 16;
-
 impl App {
     pub(crate) fn data_state(&self) -> Option<&DataState> {
         self.data_state.as_ref()
@@ -126,9 +124,10 @@ impl App {
     }
 
     fn read_data_panel_bytes(&mut self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(DATA_READ_BYTES);
+        let count = self.config.data_panel_bytes;
+        let mut bytes = Vec::with_capacity(count);
         let start = self.cursor_anchor_offset();
-        for offset in start..start.saturating_add(DATA_READ_BYTES as u64) {
+        for offset in start..start.saturating_add(count as u64) {
             match self.document.byte_at(offset) {
                 Ok(ByteSlot::Present(byte)) => bytes.push(byte),
                 Ok(ByteSlot::Deleted | ByteSlot::Empty) | Err(_) => break,

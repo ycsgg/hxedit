@@ -47,13 +47,16 @@ clap = { version = "4.5", features = ["derive"] }
 crc32fast = "1.4"
 crossterm = "0.28"
 digest = "0.10"
+directories = "6.0"
 md-5 = "0.10"
 memchr = "2.7"
 ratatui = "0.29"
+serde = { version = "1.0", features = ["derive"] }
 sha1 = "0.10"
 sha2 = "0.10"
 supports-color = "3"
 thiserror = "2.0"
+toml = "1.1"
 capstone = { version = "0.14", default-features = false, features = ["std"], optional = true }
 object = { version = "0.39", optional = true }
 symbolic-common = { version = "12.18", optional = true }

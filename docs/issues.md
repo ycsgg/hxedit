@@ -34,6 +34,10 @@
 - [ ] **[P2] Inspector 缺少全量展开 / 折叠**
   - 建议：支持 `zR` / `zM`，或 `:insp expand` / `:insp collapse`
 
+- [ ] **[P2] 配置文件后续扩展项**
+  - 现状：已落地 TOML 配置文件（`[display]` / `[behavior]` / `[performance]`），覆盖 bytes_per_line / data_panel_bytes / inspector_depth / export_* / readonly / inspector / color(auto\|never) / search_wrap / page_size / cache_pages
+  - 待评估（按需）：`color` 显式多级（basic/256/truecolor）、`:hash` 默认算法、data panel typed-value 端序（需贯穿改造，风险高、单独立项）、diff `DiffOptions` 暴露、IO chunk 调参
+
 - [ ] **[P2] 命令历史尚未持久化**
   - 建议：按 XDG 路径持久化，限制条数，避免无限增长
 
@@ -44,6 +48,7 @@
   - 现状：copy 以文本表示为主；base64 已可用，但仍不等于真实 raw bytes clipboard
 
 - [ ] **[P3] 运行时修改 bytes-per-line**
+  - 现状：已支持配置文件 `[display].bytes_per_line` 与 `--bytes-per-line`，但仍是启动期生效
   - 目标：支持 `:set bpl <n>`，无需退出重开
 
 - [ ] **[P3] 基于 inspector 字段的跳转 / follow pointer**

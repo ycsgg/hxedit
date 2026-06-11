@@ -73,6 +73,37 @@ Notes:
 | `--cache-pages <n>` | Page-cache capacity, default `128` |
 | `--profile` | Print diagnostics to stderr on exit |
 | `--no-color` | Disable colors; `NO_COLOR` also disables styling |
+| `--config <path>` | Load settings from a specific config file (TOML) |
+
+## Configuration
+
+hxedit reads an optional TOML config file at startup. Resolution order (first match wins):
+
+1. `--config <path>`
+2. `$HXEDIT_CONFIG`
+3. `~/.config/hxedit/config.toml` (platform config dir)
+
+A missing file is fine; an existing file that fails to parse (or has unknown keys) is an error. CLI flags always override the config file, which overrides built-in defaults.
+
+```toml
+[display]
+bytes_per_line   = 16              # bytes per row
+data_panel_bytes = 16              # bytes decoded in the data panel
+inspector_depth  = 1              # structs at this depth and below start collapsed
+export_c_width   = 12              # bytes per line in `:export c`
+export_py_width  = 16              # bytes per chunk in `:export py`
+export_name      = "selection_bytes"  # default identifier for `:export c`/`py`
+
+[behavior]
+readonly    = false
+inspector   = false                # open with the inspector side panel visible
+color       = "auto"               # "auto" | "never" ("never" == --no-color)
+search_wrap = true                 # wrap around to the other end when search reaches a boundary
+
+[performance]
+page_size   = 16384                # page-cache read size
+cache_pages = 128                  # page-cache capacity
+```
 
 ## Common Commands
 

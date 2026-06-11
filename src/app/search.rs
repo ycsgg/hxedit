@@ -80,8 +80,13 @@ impl App {
                     found
                 ));
             }
-        } else {
+        } else if self.config.search_wrap {
             self.set_info_status(format!("{} pattern not found", search.kind.label()));
+        } else {
+            self.set_info_status(format!(
+                "{} pattern not found (wrap off)",
+                search.kind.label()
+            ));
         }
 
         Ok(())
@@ -92,6 +97,7 @@ impl App {
         pattern: &[u8],
         direction: SearchDirection,
     ) -> HxResult<(Option<u64>, bool)> {
+        let wrap = self.config.search_wrap;
         Ok(match direction {
             SearchDirection::Forward => {
                 let start = if self.document.is_empty() {
@@ -101,19 +107,23 @@ impl App {
                 };
                 if let Some(found) = self.document.search_forward(start, pattern)? {
                     (Some(found), false)
-                } else {
+                } else if wrap {
                     (self.document.search_forward(0, pattern)?, start > 0)
+                } else {
+                    (None, false)
                 }
             }
             SearchDirection::Backward => {
                 if let Some(found) = self.document.search_backward(self.cursor, pattern)? {
                     (Some(found), false)
-                } else {
+                } else if wrap {
                     (
                         self.document
                             .search_backward(self.document.len(), pattern)?,
                         self.cursor < self.document.len(),
                     )
+                } else {
+                    (None, false)
                 }
             }
         })
@@ -142,7 +152,7 @@ impl App {
                         && row.text.to_ascii_lowercase().contains(pattern)
                 })? {
                     (Some(found), false)
-                } else {
+                } else if self.config.search_wrap {
                     (
                         self.search_disassembly_forward_from(&state, 0, |row| {
                             row.kind == DisasmRowKind::Instruction
@@ -150,6 +160,8 @@ impl App {
                         })?,
                         start > 0,
                     )
+                } else {
+                    (None, false)
                 }
             }
             SearchDirection::Backward => {
@@ -161,7 +173,7 @@ impl App {
                     })?
                 {
                     (Some(found), false)
-                } else {
+                } else if self.config.search_wrap {
                     (
                         self.search_disassembly_backward_before(
                             &state,
@@ -173,6 +185,8 @@ impl App {
                         )?,
                         limit_exclusive < self.document.len(),
                     )
+                } else {
+                    (None, false)
                 }
             }
         })
@@ -200,13 +214,15 @@ impl App {
                     row_matches_symbol_query(row, pattern)
                 })? {
                     (Some(found), false)
-                } else {
+                } else if self.config.search_wrap {
                     (
                         self.search_disassembly_forward_from(&state, 0, |row| {
                             row_matches_symbol_query(row, pattern)
                         })?,
                         start > 0,
                     )
+                } else {
+                    (None, false)
                 }
             }
             SearchDirection::Backward => {
@@ -217,7 +233,7 @@ impl App {
                     })?
                 {
                     (Some(found), false)
-                } else {
+                } else if self.config.search_wrap {
                     (
                         self.search_disassembly_backward_before(
                             &state,
@@ -226,6 +242,8 @@ impl App {
                         )?,
                         limit_exclusive < self.document.len(),
                     )
+                } else {
+                    (None, false)
                 }
             }
         })

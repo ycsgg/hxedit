@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::config::Config;
+use crate::config::{Config, FileConfig};
 use crate::error::{HxError, HxResult};
 use crate::util::parse::parse_offset;
 
@@ -20,14 +20,17 @@ pub struct Cli {
     #[arg(long, value_name = "NAME")]
     pub process: Option<String>,
 
-    #[arg(long, default_value_t = 16)]
-    pub bytes_per_line: usize,
+    #[arg(long, value_name = "PATH", help = "Path to a config file (TOML)")]
+    pub config: Option<PathBuf>,
 
-    #[arg(long, default_value_t = 16384)]
-    pub page_size: usize,
+    #[arg(long, value_name = "N")]
+    pub bytes_per_line: Option<usize>,
 
-    #[arg(long, default_value_t = 128)]
-    pub cache_pages: usize,
+    #[arg(long, value_name = "N")]
+    pub page_size: Option<usize>,
+
+    #[arg(long, value_name = "N")]
+    pub cache_pages: Option<usize>,
 
     #[arg(long, help = "Print startup and render diagnostics to stderr")]
     pub profile: bool,
@@ -80,19 +83,47 @@ impl Cli {
     }
 
     pub fn config(&self) -> anyhow::Result<Config> {
-        Ok(Config {
-            bytes_per_line: self.bytes_per_line.max(1),
-            page_size: self.page_size.max(256),
-            cache_pages: self.cache_pages.max(4),
-            profile: self.profile,
-            readonly: self.readonly,
-            color_level: ColorLevel::detect(self.no_color),
-            initial_offset: match &self.offset {
-                Some(value) => parse_offset(value)?,
-                None => 0,
-            },
-            inspector: self.inspector,
-        })
+        // Priority: defaults < config file < explicit CLI flags.
+        let mut config = Config::default();
+
+        if let Some(path) = crate::config::resolve_config_path(self.config.as_deref()) {
+            FileConfig::load(&path)?.apply_to(&mut config);
+        }
+
+        if let Some(value) = self.bytes_per_line {
+            config.bytes_per_line = value;
+        }
+        if let Some(value) = self.page_size {
+            config.page_size = value;
+        }
+        if let Some(value) = self.cache_pages {
+            config.cache_pages = value;
+        }
+        if self.profile {
+            config.profile = true;
+        }
+        if self.readonly {
+            config.readonly = true;
+        }
+        if self.no_color {
+            config.color_level = ColorLevel::NoColor;
+        }
+        if self.inspector {
+            config.inspector = true;
+        }
+        if let Some(value) = &self.offset {
+            config.initial_offset = parse_offset(value)?;
+        }
+
+        // Clamp to safe lower bounds regardless of where the value came from.
+        config.bytes_per_line = config.bytes_per_line.max(1);
+        config.page_size = config.page_size.max(256);
+        config.cache_pages = config.cache_pages.max(4);
+        config.data_panel_bytes = config.data_panel_bytes.max(1);
+        config.export_c_width = config.export_c_width.max(1);
+        config.export_py_width = config.export_py_width.max(1);
+
+        Ok(config)
     }
 }
 
@@ -105,9 +136,10 @@ mod tests {
             file: None,
             pid: None,
             process: None,
-            bytes_per_line: 16,
-            page_size: 4096,
-            cache_pages: 8,
+            config: None,
+            bytes_per_line: Some(16),
+            page_size: Some(4096),
+            cache_pages: Some(8),
             profile: false,
             readonly: false,
             no_color: true,

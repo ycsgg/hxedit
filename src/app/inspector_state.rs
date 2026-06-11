@@ -8,11 +8,6 @@ use crate::mode::Mode;
 use crate::view::inspector as inspector_view;
 use crate::view::layout::MIN_SIDE_PANEL_WIDTH;
 
-/// Structs at this depth (and deeper) are collapsed on first build. `1` keeps
-/// top-level structs expanded so the user sees where the file starts, but
-/// hides Program Headers / nested sections behind a `▶` until they click in.
-const DEFAULT_COLLAPSED_DEPTH: usize = 1;
-
 impl App {
     fn should_refresh_inspector(&self) -> bool {
         self.inspector_state.is_some()
@@ -45,8 +40,9 @@ impl App {
         if let Some(def) = detected {
             match format::parse::parse_format(&def, &mut self.document) {
                 Ok(structs) => {
+                    let inspector_depth = self.config.inspector_depth;
                     let collapsed_nodes = previous_collapsed.unwrap_or_else(|| {
-                        format::parse::initial_collapsed_nodes(&structs, DEFAULT_COLLAPSED_DEPTH)
+                        format::parse::initial_collapsed_nodes(&structs, inspector_depth)
                     });
                     let rows = format::parse::flatten(&structs, &collapsed_nodes);
                     let selected_row = previous_selected_offset

@@ -136,8 +136,9 @@ impl App {
         match format {
             ExportFormat::Binary { .. } => unreachable!("binary export handled above"),
             ExportFormat::CArray { name } => {
-                let ident = crate::export::sanitize_identifier(&name);
-                let text = crate::export::format_c_array(&ident, &bytes);
+                let ident = crate::export::sanitize_identifier(&name, &self.config.export_name);
+                let text =
+                    crate::export::format_c_array(&ident, &bytes, self.config.export_c_width);
                 if crate::clipboard::copy_text(&text).is_ok() {
                     self.set_info_status(format!(
                         "exported {} bytes as C array '{}' [copied]",
@@ -153,8 +154,9 @@ impl App {
                 }
             }
             ExportFormat::PythonBytes { name } => {
-                let ident = crate::export::sanitize_identifier(&name);
-                let text = crate::export::format_python_bytes(&ident, &bytes);
+                let ident = crate::export::sanitize_identifier(&name, &self.config.export_name);
+                let text =
+                    crate::export::format_python_bytes(&ident, &bytes, self.config.export_py_width);
                 if crate::clipboard::copy_text(&text).is_ok() {
                     self.set_info_status(format!(
                         "exported {} bytes as Python bytes '{}' [copied]",

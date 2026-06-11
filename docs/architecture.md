@@ -31,6 +31,7 @@
   - `default`：Capstone 驱动的只读反汇编浏览
   - `full`：在 `default` 基础上开放 Keystone inline assemble patch
 - 保存：当前统一走 rewrite-save；同路径保存保留权限位；save-as 允许从 readonly 文档写到新路径
+- 配置：启动时读取可选 TOML 配置文件（`--config` > `$HXEDIT_CONFIG` > `~/.config/hxedit/config.toml`）。优先级 CLI 参数 > 配置文件 > 内置默认值；文件缺失静默用默认，存在但解析失败/含未知字段则报错退出。当前覆盖 `[display]`（bytes_per_line / data_panel_bytes / inspector_depth / export_c_width / export_py_width / export_name）、`[behavior]`（readonly / inspector / color=auto\|never / search_wrap）、`[performance]`（page_size / cache_pages）。runtime `Config` 仍是扁平结构，三段式仅是磁盘 TOML 布局（`FileConfig`）
 - 许可 / 发布：仓库自身源码当前以 `MIT OR Apache-2.0` 双许可发布；`full` 档位当前使用可选 `hexpatch-keystone` 依赖（代码内仍保留 `keystone-engine` 依赖别名），release artifact 需要附带 `licenses/THIRD_PARTY_NOTICES.txt`、`licenses/keystone/FOSS-NOTICE.txt`，以及 Keystone 的 license / exception 文件，不能把 `full` 二进制简单写成 `MIT/Apache-only`
 
 ### 当前明确的行为边界
