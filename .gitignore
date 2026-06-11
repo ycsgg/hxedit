@@ -7,6 +7,9 @@ tgbot
 !README.md
 !README_CN.md
 !CHANGELOG.md
+!AGENTS.md
+!docs/
+!docs/**/*.md
 *.log
 test.png
 test.zip
