@@ -32,6 +32,27 @@ fn save_rewrites_file_when_appended_bytes_exist() {
     assert_eq!(fs::read(&file).unwrap(), b"abcdefXY");
 }
 
+#[test]
+fn save_rewrite_survives_ranges_larger_than_page_cache_capacity() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("small-cache.bin");
+    let data = (0..70_000).map(|idx| (idx % 251) as u8).collect::<Vec<_>>();
+    fs::write(&file, &data).unwrap();
+
+    let config = Config {
+        page_size: 256,
+        cache_pages: 4,
+        ..Config::default()
+    };
+    let mut doc = Document::open(&file, &config).unwrap();
+    doc.replace_display_byte(10, 0xaa).unwrap();
+    doc.save(None).unwrap();
+
+    let mut expected = data;
+    expected[10] = 0xaa;
+    assert_eq!(fs::read(&file).unwrap(), expected);
+}
+
 #[cfg(unix)]
 #[test]
 fn save_rewrite_preserves_existing_permission_bits() {

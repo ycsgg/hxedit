@@ -45,16 +45,16 @@
 - `:hash` 命令使用流式哈希（`hash_logical_bytes`），64 KB 分块读取，不将全部数据加载到内存
 - `:hash` 结果默认拷贝到剪贴板，状态栏显示 `[copied]`；剪贴板不可用时仍正常显示哈希值
 - 文件搜索统一走 `:s [mode]<delim><pattern><delim>` / `:s! ...`；默认 `/text/` 是 UTF-8 bytes，`x/hex/` 是原始 hex bytes，`b` / `u32` / `u64` / `i32` / `i64` typed-value 都在同一入口解析；`:S` 只作为 deprecated hex-search 别名保留，命中时必须提示改用 `:s x/.../`
-- `logical_bytes()` 和 `hash_logical_bytes()` 都使用 piece-walking + 分块策略，与 save 路径一致
+- `save` / `logical_bytes()` / `read_logical_range()` / `hash_logical_bytes()` / `for_each_logical_chunk()` / diff current-source / `transform_visible_range_in_place()` 都必须复用 `src/core/document/walk.rs`；不要在调用方重新手写 Original/Add + tombstone + replacement 分支
 - active selection 不再只等于 Visual；command 从 inspector 进入时，当前字段范围也可作为 copy / export / replace / hash 的选区来源
 - 搜索结果使用 "display 0x{:x}" 明确标注为 display offset
-- 文件 `search_forward` / `search_backward` 按文档脏净分流：clean 文档（无 tombstone / replacement）走 `search_clean_forward` / `_backward` 的 SIMD `memchr::memmem::find` / `rfind`，按 chunk + `pattern.len()-1` overlap 续接跨边界匹配。dirty 文档走 `search_piece_forward` / `_backward`：仍**逐 chunk** 用 `search_overlay_flags` 判脏净，clean chunk 走 `scan_clean_chunk_forward` / `_backward`（memmem + 首尾 `P-1` 字节 KMP 衔接跨边界），只有真正含 tombstone / replacement 的 chunk 才逐字节 KMP（维持 tombstone gap 与 replacement 覆盖语义）。跨 piece / 跨 chunk 边界续接靠跨 piece 共享的 `KmpMatcher`，clean-chunk helper 必须保持"等价于逐字节 feed 整块"语义并在结尾 feed 末尾 `P-1` 字节为下个 chunk 续接。clean 文档快路径单次读用 `read_logical_range`，chunk 取 `min(SEARCH_CHUNK, max_contiguous_read_len())`，别退回整段读或纯 KMP
+- 文件 `search_forward` / `search_backward` 按文档脏净分流：clean 文档（无 tombstone / replacement）走 `search_clean_forward` / `_backward` 的 SIMD `memchr::memmem::find` / `rfind`，按 chunk + `pattern.len()-1` overlap 续接跨边界匹配。dirty 文档走 `walk_visible_cells` / `walk_visible_cells_reverse`：walker 仍逐 chunk 判定脏净，clean chunk 走 `scan_clean_chunk_forward` / `_backward`（memmem + 首尾 `P-1` 字节 KMP 衔接），只有真正含 tombstone / replacement 的 chunk 才逐 cell KMP（维持 tombstone gap 与 replacement 覆盖语义）。跨 piece / 跨 chunk 边界续接靠跨 chunk 共享的 `KmpMatcher`，clean-chunk helper 必须保持"等价于逐字节 feed 整块"语义并在结尾 feed 末尾 `P-1` 字节为下个 chunk 续接。clean 文档快路径单次读用 `read_logical_range`，chunk 取 `min(SEARCH_CHUNK, max_contiguous_read_len())`，别退回整段读或纯 KMP
 - `:g` 成功反馈当前使用 `moved ±0x... → 0x...`，别退回成只显示目标 offset
 - copy 在 display span 与 logical bytes 不同时同时显示两者
 - `:fill` / `:zero` 当前采用 overwrite 语义，不做 append；越过 EOF 时要明确提示 truncation；走 `Document::overwrite_run_positional` 按 64 KB chunk 流式写 replacement，不要回退成先生成完整 pattern buffer 再 paste
 - `:export` 始终导出 logical bytes；如果 display span 与逻辑字节数不同，状态栏文案要区分清楚；binary 导出走 `Document::for_each_logical_chunk` 边读边写 `BufWriter`，不要回退成 `logical_bytes` 整段物化（C array / Python bytes 文本导出仍可整段）
 - `:xor` 只复制 active selection 的 XOR 后 logical bytes；`:xor!` 是 replacement 语义原地覆盖，不做 real delete / insert；key 不带 `0x` 时按十进制解析；`:xor!` 走 `Document::transform_visible_range_in_place` 按 chunk 读→xor→写回，不要回退成整段读出
-- 任何按 chunk 读 original 的路径（`logical_bytes` / `hash_logical_bytes` / `for_each_logical_chunk` / `transform_visible_range_in_place`）单次读长度都要用 `Document::max_contiguous_read_len()` 裁剪：`read_range` 不能跨越超过 `page_size * cache_pages` 的范围，否则返回空
+- 任何按 chunk 读 original 的路径都应通过 `Document` walker，或显式复用 `Document::max_contiguous_read_len()` 裁剪单次读长，避免小 cache 配置下过度换页；`PageCache::read_range` 本身必须能安全组装跨 cache-capacity 的范围
 - `:re` 默认只能做等长 replacement；`:re!` 才允许 real delete + insert，别把两者写混
 - `:re!` 在 visual selection 上执行后应退出 Visual，避免旧 display range 在长度变化后继续悬空
 - 当前 `:diff` 已落地，并且必须继续保持为“只读同步滚动 side panel”：current side 是 current logical bytes，other side 是对比文件 raw bytes；打开时不要全文件预扫描，不要写入 `Document`，不要进入 undo / save

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 mod edit;
 mod read;
 mod search;
+pub(crate) mod walk;
 
 use crate::config::Config;
 use crate::core::file_view::FileView;
@@ -185,12 +186,10 @@ impl Document {
         Ok(offset)
     }
 
-    /// Largest contiguous span (in bytes) that `raw_range` can satisfy in a
-    /// single call. The page cache only materializes the pages spanned by one
-    /// `read_range`; asking for more than `page_size * cache_pages` evicts the
-    /// earlier pages mid-read and returns a short/empty buffer. Chunked readers
-    /// cap their per-read batch to this so they stay correct for any cache
-    /// configuration. Always at least one page.
+    /// Preferred chunk size for piece-walking readers. Keeping reads within the
+    /// configured page-cache footprint avoids excessive churn for small cache
+    /// configurations, even though the cache itself can now assemble larger
+    /// ranges safely.
     pub(crate) fn max_contiguous_read_len(&self) -> usize {
         self.page_size
             .saturating_mul(self.cache_pages)
@@ -388,15 +387,6 @@ impl Document {
 }
 
 impl Document {
-    /// Resolve a single cell to its display slot given the base byte.
-    fn resolve_slot(&self, id: CellId, base: u8) -> ByteSlot {
-        if self.tombstones.contains(&id) {
-            return ByteSlot::Deleted;
-        }
-        let byte = self.replacements.get(&id).copied().unwrap_or(base);
-        ByteSlot::Present(byte)
-    }
-
     /// Resolve a display offset to (CellId, current display byte) for editing.
     fn display_byte_for_edit(&mut self, offset: u64) -> HxResult<(CellId, u8)> {
         let id = self.cell_id_at(offset).ok_or(HxError::OffsetOutOfRange)?;
@@ -449,27 +439,6 @@ impl Document {
             PieceSource::Original => self.raw_range(offset, len),
             PieceSource::Add => Ok(self.add_slice(offset, len as u64).to_vec()),
         }
-    }
-
-    fn search_overlay_flags(
-        &self,
-        source: PieceSource,
-        source_offset: u64,
-        len: u64,
-        has_tombstones: bool,
-        has_replacements: bool,
-    ) -> (bool, bool) {
-        if len == 0 {
-            return (false, false);
-        }
-
-        let lo = CellId::from_source(source, source_offset);
-        let hi = CellId::from_source(source, source_offset + len - 1);
-
-        (
-            has_tombstones && self.has_tombstone_in_range(lo, hi),
-            has_replacements && self.has_replacement_in_range(lo, hi),
-        )
     }
 }
 

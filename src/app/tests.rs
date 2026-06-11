@@ -115,6 +115,24 @@ fn app_with_fixed_size_bytes(bytes: &[u8]) -> App {
     app
 }
 
+#[test]
+fn side_panel_visible_rows_use_actual_panel_body_height() {
+    let mut app = app_with_len(16);
+    app.view_rows = 9;
+    app.last_columns = Some(crate::view::layout::MainColumns {
+        main_pane_kind: crate::view::layout::MainPaneKind::Hex,
+        gutter: ratatui::layout::Rect::new(0, 0, 8, 10),
+        sep1: ratatui::layout::Rect::new(8, 0, 1, 10),
+        hex: ratatui::layout::Rect::new(9, 0, 48, 10),
+        sep2: ratatui::layout::Rect::new(57, 0, 1, 10),
+        ascii: ratatui::layout::Rect::new(58, 0, 16, 10),
+        side_panel_sep: Some(ratatui::layout::Rect::new(74, 0, 1, 10)),
+        side_panel: Some(ratatui::layout::Rect::new(75, 0, 40, 10)),
+    });
+
+    assert_eq!(app.side_panel_visible_rows(), 9);
+}
+
 #[cfg(feature = "disasm-capstone")]
 fn build_disassembly_elf64(code: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0_u8; 0x200];
@@ -2707,11 +2725,14 @@ fn mem_maps_scroll_clamps_and_click_uses_clamped_offset() {
     let (mut app, _control) = app_with_two_fake_regions();
 
     app.scroll_memory_panel(100);
-    assert_eq!(app.memory_state().unwrap().scroll_offset, 6);
+    let expected_scroll = super::memory_state::MEMORY_MAPS_HEADER_ROWS
+        + super::memory_state::MEMORY_MAPS_REGION_ROWS * 2
+        - app.side_panel_visible_rows();
+    assert_eq!(app.memory_state().unwrap().scroll_offset, expected_scroll);
 
-    // With scroll clamped to 6, visible row 1 maps to absolute line 7, which is
+    // With scroll clamped to the max, visible row 2 maps to absolute line 7:
     // region 1's summary line.
-    app.handle_memory_panel_click(1);
+    app.handle_memory_panel_click(2);
     assert_eq!(app.memory_runtime().unwrap().selected_region, 1);
     assert_eq!(app.memory_runtime().unwrap().opened_region, 0);
 }

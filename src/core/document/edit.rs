@@ -3,6 +3,8 @@ use crate::core::piece_table::CellId;
 use crate::error::{HxError, HxResult};
 use crate::mode::NibblePhase;
 
+use super::walk::WalkControl;
+
 /// A single cell's replacement change: `(cell, before, after)` where each
 /// replacement value is `None` when the cell shows its base byte. Returned by
 /// the streaming in-place transforms so callers can build an undo record.
@@ -148,68 +150,24 @@ impl Document {
             return Ok((0, Vec::new()));
         }
 
-        // Cap per-read batches to what the page cache can serve in one call
-        // (see `max_contiguous_read_len`); 64 KB is just an upper bound.
-        let transform_chunk = self.max_contiguous_read_len().min(64 * 1024);
-        let end = end_inclusive.min(len - 1) + 1;
-        let pieces = self.pieces_snapshot();
         let mut changes = Vec::new();
         let mut visited = 0_u64;
-        let mut cursor = 0_u64;
-
-        for piece in &pieces {
-            if cursor >= end {
-                break;
-            }
-            let piece_end = cursor + piece.len;
-            if piece_end <= start {
-                cursor = piece_end;
-                continue;
-            }
-
-            let overlap_start = start.max(cursor);
-            let overlap_end = end.min(piece_end);
-            if overlap_start >= overlap_end {
-                cursor = piece_end;
-                continue;
-            }
-
-            let source_start = piece.start + (overlap_start - cursor);
-            let mut remaining = overlap_end - overlap_start;
-            let mut source_off = source_start;
-
-            while remaining > 0 {
-                let batch = (remaining as usize).min(transform_chunk);
-                // Owned buffer so we can freely mutate replacements afterwards
-                // without holding an immutable borrow of the add-buffer.
-                let raw = self.read_chunk(piece.source, source_off, batch)?;
-                if raw.is_empty() {
-                    break;
+        self.walk_visible_cells(start, end_inclusive, 64 * 1024, |document, chunk| {
+            for cell in chunk.cells {
+                if cell.deleted {
+                    continue;
                 }
-                let read_len = raw.len() as u64;
-
-                for (i, &base) in raw.iter().enumerate() {
-                    let id = CellId::from_source(piece.source, source_off + i as u64);
-                    if self.is_tombstone(id) {
-                        continue;
-                    }
-                    visited += 1;
-                    let current = self.replacement_for(id).unwrap_or(base);
-                    let updated = transform(current);
-                    let before = self.replacement_state(id);
-                    self.set_display_byte_by_id(id, updated)?;
-                    let after = self.replacement_state(id);
-                    if after != before {
-                        changes.push((id, before, after));
-                    }
+                visited += 1;
+                let updated = transform(cell.byte);
+                let before = document.replacement_state(cell.id);
+                document.set_display_byte_by_id(cell.id, updated)?;
+                let after = document.replacement_state(cell.id);
+                if after != before {
+                    changes.push((cell.id, before, after));
                 }
-
-                source_off += read_len;
-                remaining -= read_len;
             }
-
-            cursor = piece_end;
-        }
+            Ok(WalkControl::Continue)
+        })?;
 
         Ok((visited, changes))
     }

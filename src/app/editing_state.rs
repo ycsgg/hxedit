@@ -269,6 +269,8 @@ impl App {
         self.mark_document_changed();
         self.cursor = pending.offset;
         self.mode = Mode::InsertHex { pending: None };
+        self.invalidate_disassembly_cache();
+        self.refresh_inspector();
         self.set_info_status("undid 1 action");
         Ok(true)
     }

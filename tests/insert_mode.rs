@@ -4,20 +4,28 @@
 //! Tests are consolidated by category to reduce total count while maintaining coverage.
 
 use std::fs;
+use std::path::PathBuf;
 
 use hxedit::config::Config;
 use hxedit::core::document::{ByteSlot, Document};
+use hxedit::diff::{DiffSource, DocumentLogicalCursor};
 use hxedit::mode::NibblePhase;
+use sha2::Digest;
 use tempfile::tempdir;
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 fn tmp_doc(data: &[u8]) -> (tempfile::TempDir, Document) {
+    let (dir, _path, doc) = tmp_doc_with_config(data, &Config::default());
+    (dir, doc)
+}
+
+fn tmp_doc_with_config(data: &[u8], config: &Config) -> (tempfile::TempDir, PathBuf, Document) {
     let dir = tempdir().unwrap();
     let path = dir.path().join("test.bin");
     fs::write(&path, data).unwrap();
-    let doc = Document::open(&path, &Config::default()).unwrap();
-    (dir, doc)
+    let doc = Document::open(&path, config).unwrap();
+    (dir, path, doc)
 }
 
 fn read_all(doc: &mut Document) -> Vec<u8> {
@@ -266,6 +274,59 @@ fn logical_bytes_various_cases() {
     doc2.insert_bytes(2, &[0xAA, 0xBB]).unwrap();
     let bytes = doc2.logical_bytes(0, 5).unwrap();
     assert_eq!(bytes, vec![b'a', b'b', 0xAA, 0xBB, b'c', b'd']);
+}
+
+#[test]
+fn logical_stream_paths_agree_for_mixed_piece_overlays() {
+    let config = Config {
+        page_size: 4,
+        cache_pages: 2,
+        ..Config::default()
+    };
+    let (_dir, path, mut doc) = tmp_doc_with_config(b"0123456789", &config);
+
+    doc.replace_display_byte(1, b'A').unwrap(); // Original replacement.
+    doc.delete_byte(3).unwrap(); // Original tombstone.
+    doc.insert_bytes(5, b"XY").unwrap(); // Add piece.
+    doc.delete_byte(5).unwrap(); // Add tombstone.
+    doc.replace_display_byte(6, b'y').unwrap(); // Add replacement.
+    doc.delete_range_real(8, 1).unwrap(); // Real delete from original piece.
+
+    let expected = b"0A24y5789";
+    assert_eq!(doc.visible_len(), expected.len() as u64);
+    assert_eq!(doc.logical_bytes(0, doc.len() - 1).unwrap(), expected);
+
+    let mut streamed = Vec::new();
+    let streamed_len = doc
+        .for_each_logical_chunk(0, doc.len() - 1, |chunk| {
+            streamed.extend_from_slice(chunk);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(streamed_len, expected.len() as u64);
+    assert_eq!(streamed, expected);
+
+    let (hashed_len, digest) = doc
+        .hash_logical_bytes(0, doc.len() - 1, Box::new(sha2::Sha256::new()))
+        .unwrap();
+    let mut expected_hasher = sha2::Sha256::new();
+    expected_hasher.update(expected);
+    assert_eq!(hashed_len, expected.len() as u64);
+    assert_eq!(digest, expected_hasher.finalize().to_vec());
+
+    let mut cursor = DocumentLogicalCursor::new(&doc);
+    let mut diff_stream = Vec::new();
+    loop {
+        let chunk = (&mut cursor, &mut doc).read_next(3).unwrap();
+        if chunk.is_empty() {
+            break;
+        }
+        diff_stream.extend(chunk.into_iter().map(|byte| byte.byte));
+    }
+    assert_eq!(diff_stream, expected);
+
+    doc.save(None).unwrap();
+    assert_eq!(fs::read(path).unwrap(), expected);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -130,7 +130,7 @@
 
 - [ ] **[P2] `:s` 大文件搜索后台 job + 进度/取消（阶段二，待办，按需）**
   - 已完成（阶段一）：clean 文档扫描换成 `memchr::memmem::find` / `rfind`（`search_clean_forward` / `_backward`），按 chunk + `pattern.len()-1` overlap 续接。256MB worst-case 从 ~307ms 降到 ~53ms，卡顿拐点从 ~256MB 推到 ~2GB
-  - 已完成（选项 B）：dirty 文档不再整篇退回逐字节 KMP——`search_piece_forward` / `_backward` 的 clean chunk 改走 `scan_clean_chunk_forward` / `_backward`（memmem + 首尾 `P-1` 字节 KMP 衔接），只有含 tombstone / replacement 的 chunk 才逐字节。256MB + 单 tombstone worst-case 从 ~333ms 降到 ~38ms（~8×），消除"GB 文件改几字节就退回 KMP"的退化
+  - 已完成（选项 B）：dirty 文档不再整篇退回逐字节 KMP——`walk_visible_cells` / `_reverse` 逐 chunk 判定脏净，clean chunk 走 `scan_clean_chunk_forward` / `_backward`（memmem + 首尾 `P-1` 字节 KMP 衔接），只有含 tombstone / replacement 的 chunk 才逐 cell。256MB + 单 tombstone worst-case 从 ~333ms 降到 ~38ms（~8×），消除"GB 文件改几字节就退回 KMP"的退化
   - 阶段二（降级为按需）：评测显示换 memmem 后 I/O 成主导（1GB ~120ms 热缓存），主流场景已无明显卡顿；完整后台 job（`std::thread + mpsc + Arc<AtomicBool>`、进度、`Esc` 取消）只为多 GB / 冷盘 / 编辑极密集场景，待出现真实诉求再做
   - 同步项（阶段二）：搜索测试补 cancel / progress 覆盖；hint / README 说明搜索可中断
 

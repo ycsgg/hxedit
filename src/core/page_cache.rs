@@ -49,8 +49,8 @@ pub struct PageCache {
 impl PageCache {
     pub fn new(page_size: usize, capacity: usize) -> Self {
         Self {
-            page_size,
-            capacity,
+            page_size: page_size.max(1),
+            capacity: capacity.max(1),
             entries: HashMap::new(),
             generation: 0,
             stats: CacheStats::default(),
@@ -73,16 +73,14 @@ impl PageCache {
         self.stats.read_range_calls += 1;
 
         let start_page = offset / self.page_size as u64;
-        let end_page = (offset + len.saturating_sub(1) as u64) / self.page_size as u64;
-
-        for page_idx in start_page..=end_page {
-            self.ensure_loaded(file, page_idx)?;
-        }
+        let end_page = offset.saturating_add(len.saturating_sub(1) as u64) / self.page_size as u64;
+        let requested_end = offset.saturating_add(len as u64);
 
         let mut out = Vec::with_capacity(len);
         for page_idx in start_page..=end_page {
+            self.ensure_loaded(file, page_idx)?;
             let Some(entry) = self.entries.get(&page_idx) else {
-                break;
+                continue;
             };
             let page = &entry.data;
             let page_start = page_idx * self.page_size as u64;
@@ -91,7 +89,7 @@ impl PageCache {
             } else {
                 0
             };
-            let wanted_end = (offset + len as u64).min(page_start + page.len() as u64);
+            let wanted_end = requested_end.min(page_start.saturating_add(page.len() as u64));
             let slice_end = wanted_end.saturating_sub(page_start) as usize;
             if slice_start < slice_end && slice_end <= page.len() {
                 out.extend_from_slice(&page[slice_start..slice_end]);
@@ -138,5 +136,39 @@ impl PageCache {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use tempfile::NamedTempFile;
+
+    use super::PageCache;
+
+    #[test]
+    fn read_range_can_span_more_pages_than_cache_capacity() {
+        let mut temp = NamedTempFile::new().unwrap();
+        let data = (0..64).collect::<Vec<u8>>();
+        temp.write_all(&data).unwrap();
+
+        let mut file = temp.reopen().unwrap();
+        let mut cache = PageCache::new(4, 2);
+        let read = cache.read_range(&mut file, 0, data.len()).unwrap();
+
+        assert_eq!(read, data);
+    }
+
+    #[test]
+    fn zero_sized_cache_configuration_is_clamped() {
+        let mut temp = NamedTempFile::new().unwrap();
+        temp.write_all(b"abc").unwrap();
+
+        let mut file = temp.reopen().unwrap();
+        let mut cache = PageCache::new(0, 0);
+        let read = cache.read_range(&mut file, 0, 3).unwrap();
+
+        assert_eq!(read, b"abc");
     }
 }

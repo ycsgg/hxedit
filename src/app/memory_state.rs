@@ -29,7 +29,7 @@ pub(crate) const MEMORY_MAPS_HEADER_ROWS: usize = 5;
 /// Each region occupies two body rows in the maps view: one for the address /
 /// permissions summary and one for the label / path.
 #[cfg(feature = "memory")]
-const MEMORY_MAPS_REGION_ROWS: usize = 2;
+pub(crate) const MEMORY_MAPS_REGION_ROWS: usize = 2;
 
 #[cfg(feature = "memory")]
 pub(crate) struct MemoryRuntime {

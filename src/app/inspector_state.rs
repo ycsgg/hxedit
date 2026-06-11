@@ -293,7 +293,10 @@ impl App {
     }
 
     pub(crate) fn side_panel_visible_rows(&self) -> usize {
-        self.view_rows.saturating_sub(1).max(1)
+        self.last_columns
+            .and_then(|columns| columns.side_panel)
+            .map(|area| area.height.saturating_sub(1).max(1) as usize)
+            .unwrap_or_else(|| self.view_rows.max(1))
     }
 
     pub(crate) fn current_side_panel_width(&self) -> u16 {

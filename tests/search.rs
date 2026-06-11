@@ -18,6 +18,14 @@ fn open_temp(data: &[u8]) -> (tempfile::TempDir, Document) {
     (dir, doc)
 }
 
+fn open_temp_with_config(data: &[u8], config: &Config) -> (tempfile::TempDir, Document) {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("search.bin");
+    fs::write(&path, data).unwrap();
+    let doc = Document::open(&path, config).unwrap();
+    (dir, doc)
+}
+
 #[test]
 fn searches_ascii_forward() {
     let mut doc = open_fixture("tests/fixtures/mixed.bin");
@@ -161,6 +169,27 @@ fn dirty_doc_clean_chunk_uses_memmem_for_far_match() {
     assert_eq!(
         doc.search_backward(doc.len(), b"hello").unwrap(),
         Some(expected)
+    );
+}
+
+#[test]
+fn dirty_search_survives_ranges_larger_than_page_cache_capacity() {
+    let mut data = vec![b'x'; 70_000];
+    let at = 50_000usize;
+    data[at..at + 5].copy_from_slice(b"hello");
+    let config = Config {
+        page_size: 256,
+        cache_pages: 4,
+        ..Config::default()
+    };
+    let (_dir, mut doc) = open_temp_with_config(&data, &config);
+
+    doc.delete_byte(3).unwrap();
+
+    assert_eq!(doc.search_forward(0, b"hello").unwrap(), Some(at as u64));
+    assert_eq!(
+        doc.search_backward(doc.len(), b"hello").unwrap(),
+        Some(at as u64)
     );
 }
 
