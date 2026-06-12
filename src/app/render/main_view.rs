@@ -154,6 +154,7 @@ impl App {
                 message_level: self.status_level,
                 readonly: self.document.is_readonly(),
             },
+            area.width,
             &self.palette,
         );
         frame.render_widget(Paragraph::new(line), area);
