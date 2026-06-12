@@ -22,14 +22,15 @@
 - 搜索：统一 `:s [mode]<delim><pattern><delim>` / `:s! ...` 入口覆盖 UTF-8 bytes、hex bytes、单字节与整数 typed-value，支持前后向、自动 wrap-around、同屏命中高亮；`:S` 过渡期仅作为 deprecated hex-search 别名保留。底层 `search_forward` / `search_backward` 用 SIMD `memchr::memmem` 加速：clean 文档全程 memmem；dirty 文档（tombstone / replacement）仍逐 chunk 判脏净，**clean chunk 也走 memmem**（`scan_clean_chunk_forward` / `_backward`，首尾 `P-1` 字节用共享 `KmpMatcher` 衔接跨 chunk/piece 边界），只有含编辑的 chunk 才逐字节 KMP。实测 256MB worst-case：clean ~53ms、dirty(单 tombstone) ~38ms（旧版全 KMP ~330ms，约 8× 提升）。`default` / `full` 额外支持指令文本与 symbol 搜索；`memory` feature 下 `:ms` / `:ms!` 跨 region 搜索用同类 mode 前缀语法与 `memchr::memmem`，命中后 `gn` / `gN` 重放（独立于文件 `n` / `p`）
 - 主 hex 视图顶部固定显示 byte 列头（默认 `00 01 02 ... 0F`），列头不随 viewport 滚动；鼠标命中与 `view_rows` 只计算列头下方的数据行
 - 选区：Visual 选区，或 inspector 当前字段范围作为 active selection
-- 命令：`:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`；`memory` feature 下额外支持 `:mem freeze` / `:mem thaw` 暂停与恢复目标进程，`:mem commit` / `:mem commit-all` 写回 replacement（后者按 VA 升序遍历所有 dirty region），`:w` 等价 `:mem commit` 且 `:w <path>` 被拒绝（改用 `:export`）；`MemorySession` 按 region 持久化未提交 replacement / undo / redo，切换 region 不丢失编辑，`:q` 在任意 region dirty 时拒绝并汇总
+- 命令：`:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`；`sagitta-analysis` feature 下额外支持 `:ana` / `:ana status` / `:ana off`，对当前 logical bytes 后台运行 crates.io `sagitta-rs` 并用 ready snapshot 覆盖 symbol panel 数据源；`memory` feature 下额外支持 `:mem freeze` / `:mem thaw` 暂停与恢复目标进程，`:mem commit` / `:mem commit-all` 写回 replacement（后者按 VA 升序遍历所有 dirty region），`:w` 等价 `:mem commit` 且 `:w <path>` 被拒绝（改用 `:export`）；`MemorySession` 按 region 持久化未提交 replacement / undo / redo，切换 region 不丢失编辑，`:q` 在任意 region dirty 时拒绝并汇总
 - Inspector / side panel：
   - Inspector：ELF、PE/COFF、Mach-O、PNG、ZIP、GZIP、GIF、BMP、WAV、TAR、JPEG
-  - Symbol panel：可执行文件 symbol / import 列表与跳转
+  - Symbol panel：可执行文件 symbol / import 列表与跳转；`sagitta-analysis` ready 后使用 Sagitta recovered functions 覆盖 native entries
   - Data panel：cursor-relative primitive decode
 - Disassembly：
   - `default`：Capstone 驱动的只读反汇编浏览
   - `full`：在 `default` 基础上开放 Keystone inline assemble patch
+  - `sagitta-analysis`：可选后台分析层，只读消费 current logical bytes，ready snapshot 覆盖 symbol panel，并为反汇编行补充函数入口 label / direct branch target 名称
 - 保存：当前统一走 rewrite-save；同路径保存保留权限位；save-as 允许从 readonly 文档写到新路径
 - 配置：启动时读取可选 TOML 配置文件（`--config` > `$HXEDIT_CONFIG` > `~/.config/hxedit/config.toml`）。优先级 CLI 参数 > 配置文件 > 内置默认值；文件缺失静默用默认，存在但解析失败/含未知字段则报错退出。当前覆盖 `[display]`（bytes_per_line / data_panel_bytes / inspector_depth / export_c_width / export_py_width / export_name）、`[behavior]`（readonly / inspector / color=auto\|never / search_wrap）、`[performance]`（page_size / cache_pages）。runtime `Config` 仍是扁平结构，三段式仅是磁盘 TOML 布局（`FileConfig`）
 - 许可 / 发布：仓库自身源码当前以 `MIT OR Apache-2.0` 双许可发布；`full` 档位当前使用可选 `hexpatch-keystone` 依赖（代码内仍保留 `keystone-engine` 依赖别名），release artifact 需要附带 `licenses/THIRD_PARTY_NOTICES.txt`、`licenses/keystone/FOSS-NOTICE.txt`，以及 Keystone 的 license / exception 文件，不能把 `full` 二进制简单写成 `MIT/Apache-only`
@@ -141,6 +142,7 @@
 - `:dis` 应是主视图切换，不应把 `Mode` 直接扩成 instruction 语义状态机
 - 反汇编结果始终只是当前 bytes 的投影，不应改写 `Document` 的 real delete / tombstone / replacement 语义
 - 当前已经实现 backend 抽象、`CapstoneBackend`、symbol panel、data panel 与 `full` 档位下的 Keystone inline patch；后续继续扩展时仍不要把 App / render / cache 逻辑绑死到单一 backend API
+- `sagitta-analysis` 走 `src/app/analysis_state.rs` 的后台线程 + mpsc result channel，worker 只持有物化后的 logical bytes / job id / revision / sender；主线程安装 owned snapshot。编辑 invalidation 只标记 `Current` / `OutdatedBytes` / `InvalidLayout`，不把 Sagitta 写入 `Document`
 
 ### 2.9 Assembler backend 维护风险仍需持续关注
 

@@ -21,7 +21,7 @@
 - 只读同步滚动 diff 页面，可用 `:diff` 对比另一个文件
 - 进程内存编辑：通过 PID 或进程名附加到运行中的进程，浏览和编辑内存区域，冻结/解冻目标进程，并将修改写回
 - 分页 I/O 和缓存，适合大文件
-- 可选的反汇编浏览、symbol 搜索、内联汇编 patch
+- 可选的反汇编浏览、symbol 搜索、Sagitta 后台分析、内联汇编 patch
 
 ## 快速开始
 
@@ -52,11 +52,13 @@ hxedit some.bin
 | `core` | `cargo build --release --no-default-features` | Hex editor、inspector、search、diff、hash、copy/paste、export |
 | `default` | `cargo build --release` | `core` + 反汇编视图、指令搜索、symbol panel |
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone 驱动的内联汇编 patch |
+| `sagitta-analysis` 附加项 | `cargo build --release --features sagitta-analysis` | `default` + 基于 crates.io `sagitta-rs` 的 `:ana` 分析 |
 
 说明：
 
 - `default` 是常规构建档位。
 - `full` 会启用可选的 `hexpatch-keystone` 依赖（在本仓库里仍使用 `keystone-engine` 这个本地依赖别名），并开启 `:dis` 内的 inline assembly patch。
+- `sagitta-analysis` 启用可选的 `sagitta-rs` 分析，面向 x86/x64 ELF/PE；分析输入是当前 logical bytes，不参与 undo / save / search 的核心 byte 语义。
 - 当前没有单独的 `:asm` 命令。
 
 ## CLI 参数
@@ -144,6 +146,12 @@ cache_pages = 128                  # 页缓存容量
 | `:sym` / `:sym off` | 打开 / 关闭 symbol panel |
 | `:data` / `:data off` | 打开 / 关闭 cursor-relative data panel |
 
+`sagitta-analysis` 构建下的 Sagitta 分析命令：
+
+| 命令 | 说明 |
+|------|------|
+| `:ana` / `:ana status` / `:ana off` | 对当前 logical bytes 运行 Sagitta、查看分析状态或清除 Sagitta snapshot。分析 ready 后覆盖 symbol panel 数据源；等长编辑会标记 analysis outdated，长度或布局变化后必须重新 `:ana` 才允许 Sagitta symbol 跳转。 |
+
 ## Release 产物
 
 tag release 会按明确的 `OS * arch * feature` 矩阵发布。
@@ -173,3 +181,5 @@ tag release 会按明确的 `OS * arch * feature` 矩阵发布。
 `core` 与 `default` 构建不会启用下面单独说明的可选 Keystone 汇编依赖。
 
 `full` 构建会启用可选的 Keystone 内联汇编依赖。再分发这个仓库产出的 `full` 源码包或二进制时，还应一并附带仓库内提供的第三方 notice，以及 Keystone 的 FOSS notice / license / exception 文件；见 [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt)。
+
+显式启用 `sagitta-analysis` 的构建还会包含 MIT 许可的可选依赖 `sagitta-rs`；再分发相关 artifact 时也应保留 [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt) 中的 Sagitta notice。

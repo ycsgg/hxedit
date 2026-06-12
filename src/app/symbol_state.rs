@@ -8,41 +8,101 @@ use crate::mode::Mode;
 pub(crate) struct SymbolPanelEntry {
     pub address: u64,
     pub name: String,
+    pub name_kind: SymbolNameKind,
     pub size: u64,
     pub symbol_type: SymbolType,
-    pub source: SymbolSource,
+    pub source: SymbolPanelEntrySource,
+    pub logical_offset: Option<u64>,
     pub file_offset: Option<u64>,
+    pub confidence_label: Option<String>,
 }
 
-impl SymbolState {
-    pub(crate) fn entries(&self) -> Vec<SymbolPanelEntry> {
-        let mut entries = Vec::with_capacity(self.row_count());
-        for (&address, symbol) in &self.info.symbols_by_va {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SymbolNameKind {
+    Real,
+    Synthetic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SymbolPanelSource {
+    Native,
+    Sagitta,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(feature = "sagitta-analysis"), allow(dead_code))]
+pub(crate) enum SymbolPanelEntrySource {
+    Object,
+    Dynamic,
+    Export,
+    Sagitta,
+}
+
+impl From<SymbolSource> for SymbolPanelEntrySource {
+    fn from(source: SymbolSource) -> Self {
+        match source {
+            SymbolSource::Object => Self::Object,
+            SymbolSource::Dynamic => Self::Dynamic,
+            SymbolSource::Export => Self::Export,
+        }
+    }
+}
+
+impl SymbolPanelEntry {
+    pub(crate) fn native_entries(info: &crate::executable::ExecutableInfo) -> Vec<Self> {
+        let mut entries =
+            Vec::with_capacity(info.symbols_by_va.len() + info.target_names_by_va.len());
+        for (&address, symbol) in &info.symbols_by_va {
             entries.push(SymbolPanelEntry {
                 address,
                 name: symbol.display_name.clone(),
+                name_kind: SymbolNameKind::Real,
                 size: symbol.size,
                 symbol_type: symbol.symbol_type,
-                source: symbol.source,
-                file_offset: self.info.file_offset_for_virtual(address),
+                source: symbol.source.into(),
+                logical_offset: None,
+                file_offset: info.file_offset_for_virtual(address),
+                confidence_label: None,
             });
         }
-        for (&address, name) in self.info.target_names_by_va.iter() {
+        for (&address, name) in info.target_names_by_va.iter() {
             entries.push(SymbolPanelEntry {
                 address,
                 name: name.clone(),
+                name_kind: SymbolNameKind::Real,
                 size: 0,
                 symbol_type: SymbolType::Function,
-                source: SymbolSource::Dynamic,
-                file_offset: self.info.file_offset_for_virtual(address),
+                source: SymbolPanelEntrySource::Dynamic,
+                logical_offset: None,
+                file_offset: info.file_offset_for_virtual(address),
+                confidence_label: None,
             });
         }
         entries.sort_by_key(|entry| entry.address);
         entries
     }
+}
+
+impl SymbolState {
+    pub(crate) fn native(info: crate::executable::ExecutableInfo) -> Self {
+        Self::from_entries(
+            SymbolPanelEntry::native_entries(&info),
+            SymbolPanelSource::Native,
+        )
+    }
+
+    pub(crate) fn from_entries(entries: Vec<SymbolPanelEntry>, source: SymbolPanelSource) -> Self {
+        Self {
+            entries,
+            source,
+            scroll_offset: 0,
+            selected_row: 0,
+            detail_scroll_offset: 0,
+        }
+    }
 
     pub(crate) fn row_count(&self) -> usize {
-        self.info.symbols_by_va.len() + self.info.target_names_by_va.len()
+        self.entries.len()
     }
 }
 
@@ -154,47 +214,51 @@ impl App {
 
     /// Enter key navigates to the selected symbol's location.
     pub(crate) fn navigate_to_selected_symbol(&mut self) -> HxResult<()> {
-        // Extract necessary data first to avoid borrowing issues
-        let info = self.symbol_state().map(|state| state.info.clone());
-        let selected_row = self.symbol_state().map(|s| s.selected_row);
-
-        let (Some(info), Some(selected_row)) = (info, selected_row) else {
+        let Some(entry) = self
+            .symbol_state()
+            .and_then(|state| state.entries.get(state.selected_row))
+            .cloned()
+        else {
             return Ok(());
         };
-
-        let state = SymbolState {
-            info: info.clone(),
-            scroll_offset: 0,
-            selected_row,
-            detail_scroll_offset: 0,
-        };
-        let entries = state.entries();
-        let total = entries.len();
-
-        if selected_row >= total {
-            return Ok(());
+        #[cfg(feature = "sagitta-analysis")]
+        if self.sagitta_symbol_offsets_invalid() {
+            return Err(crate::error::HxError::CommandError(
+                "analysis offsets changed; rerun :ana".to_owned(),
+            ));
         }
 
-        let entry = &entries[selected_row];
-        let address = entry.address;
-        let name = entry.name.clone();
-
-        // Convert virtual address to file offset
-        let Some(offset) = info.file_offset_for_virtual(address) else {
+        let Some(offset) = entry.logical_offset.or(entry.file_offset) else {
             return Err(crate::error::HxError::CommandError(
                 "symbol address not in mapped section".to_owned(),
             ));
         };
+        let offset = if entry.logical_offset.is_some() {
+            self.document
+                .display_offset_for_logical_offset(offset)
+                .ok_or_else(|| {
+                    crate::error::HxError::CommandError(
+                        "analysis target is unavailable; rerun :ana".to_owned(),
+                    )
+                })?
+        } else {
+            offset
+        };
 
-        // Navigate to the location
         let target_offset = self.clamp_offset(offset);
         self.cursor = target_offset;
         self.center_cursor_in_view();
-
-        // Sync inspector (if switching back to inspector)
         self.sync_inspector_to_cursor();
 
-        self.set_info_status(format!("jumped to {} @ 0x{:x}", name, offset));
+        #[cfg(feature = "sagitta-analysis")]
+        if self.sagitta_symbol_bytes_outdated() {
+            self.set_warning_status(format!(
+                "jumped to {} @ 0x{:x}; analysis outdated; rerun :ana",
+                entry.name, offset
+            ));
+            return Ok(());
+        }
+        self.set_info_status(format!("jumped to {} @ 0x{:x}", entry.name, offset));
         Ok(())
     }
 }

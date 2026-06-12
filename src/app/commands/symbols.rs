@@ -3,6 +3,11 @@ use super::*;
 impl App {
     #[cfg(feature = "symbols")]
     pub(super) fn execute_symbols_command(&mut self) -> HxResult<()> {
+        #[cfg(feature = "sagitta-analysis")]
+        if self.open_sagitta_symbol_panel_if_ready() {
+            return Ok(());
+        }
+
         // Need ExecutableInfo to display symbols
         let info = match &self.main_view {
             crate::app::MainView::Disassembly(state) => state.info.clone(),
@@ -16,12 +21,7 @@ impl App {
 
         // Create symbol panel state
         let count = info.symbols_by_va.len() + info.target_names_by_va.len();
-        self.symbol_state = Some(SymbolState {
-            info,
-            scroll_offset: 0,
-            selected_row: 0,
-            detail_scroll_offset: 0,
-        });
+        self.symbol_state = Some(SymbolState::native(info));
         self.show_side_panel = true;
         self.focus_symbol_panel();
         self.set_info_status(format!("symbol view ({count} symbols)"));

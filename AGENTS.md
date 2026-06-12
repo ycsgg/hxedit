@@ -32,6 +32,7 @@
 | [`docs/architecture.md`](docs/architecture.md) | 当前快照、产品定位、已落地用户面、行为边界、代码地图、CI/Release、仍需关注的点 |
 | [`docs/editing-model.md`](docs/editing-model.md) | 三类编辑语义、长度 / offset、光标与 mode 规则、inspector / save 不变量 |
 | [`docs/modules.md`](docs/modules.md) | 各高风险模块的改动须知（document / piece_table / app / commands / events / render / palette / format / memory） |
+| [`docs/sagitta-integration-design.md`](docs/sagitta-integration-design.md) | Sagitta 后台分析、symbol panel 覆盖、offset 有效性与失效规则 |
 | [`docs/workflow.md`](docs/workflow.md) | 推荐工作方式、常见改动路径、提交前自检清单、优先级共识 |
 | [`docs/testing.md`](docs/testing.md) | 测试要求与文档同步要求 |
 | [`docs/issues.md`](docs/issues.md) | 仍有行动价值的 backlog |

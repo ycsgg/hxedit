@@ -73,6 +73,14 @@ pub enum MemoryCommand {
     CommitAll,
 }
 
+#[cfg(feature = "sagitta-analysis")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnalysisCommand {
+    Run,
+    Status,
+    Off,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Quit {
@@ -163,6 +171,8 @@ pub enum Command {
         algorithm: HashAlgorithm,
     },
     Diff(DiffCommand),
+    #[cfg(feature = "sagitta-analysis")]
+    Analysis(AnalysisCommand),
     #[cfg(feature = "memory")]
     Memory(MemoryCommand),
     #[cfg(feature = "disasm")]

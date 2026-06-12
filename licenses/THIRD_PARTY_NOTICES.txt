@@ -26,3 +26,17 @@ Practical redistribution rule for this repository:
 The bundled Keystone exception text explicitly lists both Apache 2.0 and MIT in
 its FOSS license list, subject to the conditions written in that exception
 file.
+
+## Sagitta in `sagitta-analysis` builds
+
+The optional `sagitta-analysis` feature enables binary analysis through the
+crates.io package `sagitta-rs`.
+
+- Package: `sagitta-rs`
+- Version: `0.0.2`
+- License: MIT
+- Repository: https://github.com/ycsgg/sagitta
+
+`core`, `default`, and `full` release bundles do not enable this feature unless
+they are explicitly built with `--features sagitta-analysis`. Redistributed
+artifacts that do enable it should keep this notice with the artifact.

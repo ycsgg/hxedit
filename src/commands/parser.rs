@@ -112,6 +112,8 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             Ok(Command::Hash { algorithm: algo })
         }
         "diff" => parse_diff(rest),
+        #[cfg(feature = "sagitta-analysis")]
+        "ana" | "analysis" => parse_analysis(rest),
         #[cfg(feature = "memory")]
         "mem" => parse_memory(rest),
         #[cfg(feature = "disasm")]
@@ -149,6 +151,17 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         },
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
+}
+
+#[cfg(feature = "sagitta-analysis")]
+fn parse_analysis(rest: Option<&str>) -> HxResult<Command> {
+    let command = match rest.map(str::trim) {
+        None | Some("") => crate::commands::types::AnalysisCommand::Run,
+        Some("status") => crate::commands::types::AnalysisCommand::Status,
+        Some("off") => crate::commands::types::AnalysisCommand::Off,
+        Some(other) => return Err(HxError::UnknownCommand(format!("ana {other}"))),
+    };
+    Ok(Command::Analysis(command))
 }
 
 #[cfg(feature = "memory")]
@@ -936,6 +949,34 @@ mod tests {
         assert!(matches!(
             parse_command("symbol entry"),
             Err(HxError::UnknownCommand(name)) if name == "symbol"
+        ));
+    }
+
+    #[cfg(feature = "sagitta-analysis")]
+    #[test]
+    fn analysis_commands_parse_when_feature_enabled() {
+        use crate::commands::types::AnalysisCommand;
+
+        assert_eq!(
+            parse_command("ana").unwrap(),
+            Command::Analysis(AnalysisCommand::Run)
+        );
+        assert_eq!(
+            parse_command("ana status").unwrap(),
+            Command::Analysis(AnalysisCommand::Status)
+        );
+        assert_eq!(
+            parse_command("analysis off").unwrap(),
+            Command::Analysis(AnalysisCommand::Off)
+        );
+    }
+
+    #[cfg(not(feature = "sagitta-analysis"))]
+    #[test]
+    fn analysis_commands_are_unknown_when_feature_disabled() {
+        assert!(matches!(
+            parse_command("ana"),
+            Err(HxError::UnknownCommand(name)) if name == "ana"
         ));
     }
 }

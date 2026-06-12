@@ -96,6 +96,8 @@ impl App {
             }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
             Command::Diff(diff) => self.execute_diff_command(diff),
+            #[cfg(feature = "sagitta-analysis")]
+            Command::Analysis(command) => self.execute_analysis_command(command),
             #[cfg(feature = "memory")]
             Command::Memory(command) => self.execute_memory_command(command),
             #[cfg(feature = "disasm")]
@@ -190,6 +192,8 @@ impl App {
     }
 }
 
+#[cfg(feature = "sagitta-analysis")]
+mod analysis;
 mod file_nav;
 mod hash_diff;
 mod inspector;

@@ -1,8 +1,10 @@
 use ratatui::text::{Line, Span};
 
-use crate::app::symbol_state::SymbolPanelEntry;
+use crate::app::symbol_state::{
+    SymbolNameKind, SymbolPanelEntry, SymbolPanelEntrySource, SymbolPanelSource,
+};
 use crate::app::SymbolState;
-use crate::executable::{SymbolSource, SymbolType};
+use crate::executable::SymbolType;
 use crate::view::palette::Palette;
 
 const MIN_DETAIL_ROWS: usize = 4;
@@ -21,7 +23,7 @@ pub(crate) fn build_lines(
 ) -> Vec<SymbolLine> {
     let width = width.max(1) as usize;
     state
-        .entries()
+        .entries
         .iter()
         .enumerate()
         .map(|(row_index, entry)| {
@@ -61,22 +63,22 @@ pub(crate) fn detail_lines(
     palette: &Palette,
 ) -> Vec<Line<'static>> {
     let width = width.max(1) as usize;
-    let entries = state.entries();
-    let Some(entry) = entries.get(state.selected_row) else {
+    let Some(entry) = state.entries.get(state.selected_row) else {
         return vec![Line::styled("No symbols", palette.inspector_value)];
     };
 
     let mut lines = Vec::with_capacity(MIN_DETAIL_ROWS);
     lines.extend(wrap_detail("symbol", &entry.name, width, palette));
+    let source_label = source_label(entry.source);
     lines.push(detail_line(
         "meta",
         &format!(
             "{}/{}  {}  size {}  {}",
             state.selected_row + 1,
-            entries.len(),
+            state.entries.len(),
             symbol_type_label(entry.symbol_type),
             size_label(entry.size),
-            source_label(entry.source)
+            source_label
         ),
         width,
         palette,
@@ -87,25 +89,43 @@ pub(crate) fn detail_lines(
         width,
         palette,
     ));
-    lines.push(detail_line(
-        "file",
-        &entry
-            .file_offset
-            .map(|offset| format!("0x{offset:x}"))
-            .unwrap_or_else(|| "unmapped".to_owned()),
-        width,
-        palette,
-    ));
+    if state.source == SymbolPanelSource::Sagitta {
+        lines.push(detail_line(
+            "logical",
+            &entry
+                .logical_offset
+                .map(|offset| format!("0x{offset:x}"))
+                .unwrap_or_else(|| "unmapped".to_owned()),
+            width,
+            palette,
+        ));
+    } else {
+        lines.push(detail_line(
+            "file",
+            &entry
+                .file_offset
+                .map(|offset| format!("0x{offset:x}"))
+                .unwrap_or_else(|| "unmapped".to_owned()),
+            width,
+            palette,
+        ));
+    }
+    if let Some(confidence) = &entry.confidence_label {
+        lines.push(detail_line("conf", confidence, width, palette));
+    }
     lines
 }
 
 pub(crate) fn detail_line_count(state: &SymbolState, width: u16) -> usize {
     let width = width.max(1) as usize;
-    let entries = state.entries();
-    let Some(entry) = entries.get(state.selected_row) else {
+    let Some(entry) = state.entries.get(state.selected_row) else {
         return 1;
     };
-    3 + wrap_value(&entry.name, detail_value_width(width)).len()
+    let mut count = 3 + wrap_value(&entry.name, detail_value_width(width)).len();
+    if entry.confidence_label.is_some() {
+        count += 1;
+    }
+    count
 }
 
 fn list_line(
@@ -118,6 +138,8 @@ fn list_line(
     let addr = format!("0x{:08x}", entry.address);
     let name_style = if selected {
         palette.inspector_active
+    } else if entry.name_kind == SymbolNameKind::Synthetic {
+        palette.disasm_virtual
     } else {
         palette.inspector_field
     };
@@ -192,11 +214,12 @@ fn symbol_type_label(t: SymbolType) -> &'static str {
     }
 }
 
-fn source_label(s: SymbolSource) -> &'static str {
+fn source_label(s: SymbolPanelEntrySource) -> &'static str {
     match s {
-        SymbolSource::Object => "static",
-        SymbolSource::Dynamic => "dyn",
-        SymbolSource::Export => "export",
+        SymbolPanelEntrySource::Object => "static",
+        SymbolPanelEntrySource::Dynamic => "dyn",
+        SymbolPanelEntrySource::Export => "export",
+        SymbolPanelEntrySource::Sagitta => "sagitta",
     }
 }
 
@@ -247,4 +270,47 @@ fn truncate_with_ellipsis(value: &str, width: usize) -> String {
     let mut output: String = value.chars().take(width - 1).collect();
     output.push('…');
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::symbol_state::{
+        SymbolNameKind, SymbolPanelEntry, SymbolPanelEntrySource, SymbolPanelSource,
+    };
+    use crate::executable::SymbolType;
+    use crate::view::palette::{ColorLevel, Palette};
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn sagitta_detail_uses_logical_label_instead_of_file_label() {
+        let state = SymbolState::from_entries(
+            vec![SymbolPanelEntry {
+                address: 0x401000,
+                name: "sub_401000".to_owned(),
+                name_kind: SymbolNameKind::Synthetic,
+                size: 0,
+                symbol_type: SymbolType::Function,
+                source: SymbolPanelEntrySource::Sagitta,
+                logical_offset: Some(0x100),
+                file_offset: Some(0x100),
+                confidence_label: Some("heuristic".to_owned()),
+            }],
+            SymbolPanelSource::Sagitta,
+        );
+        let palette = Palette::new(ColorLevel::NoColor);
+
+        let lines = detail_lines(&state, 40, &palette);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("logical"));
+        assert!(!text.contains("file"));
+        assert_eq!(detail_line_count(&state, 40), lines.len());
+    }
 }

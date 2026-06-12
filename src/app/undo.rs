@@ -32,6 +32,16 @@ impl App {
 
         if undone > 0 {
             self.mark_document_changed();
+            #[cfg(feature = "sagitta-analysis")]
+            self.mark_sagitta_edit_ops(
+                &self
+                    .redo_stack
+                    .iter()
+                    .rev()
+                    .take(undone)
+                    .flat_map(|step| step.ops.iter().cloned())
+                    .collect::<Vec<_>>(),
+            );
             self.invalidate_disassembly_cache();
         }
         self.refresh_inspector();
@@ -66,6 +76,16 @@ impl App {
 
         if redone > 0 {
             self.mark_document_changed();
+            #[cfg(feature = "sagitta-analysis")]
+            self.mark_sagitta_edit_ops(
+                &self
+                    .undo_stack
+                    .iter()
+                    .rev()
+                    .take(redone)
+                    .flat_map(|step| step.ops.iter().cloned())
+                    .collect::<Vec<_>>(),
+            );
             self.invalidate_disassembly_cache();
         }
         self.refresh_inspector();
@@ -149,6 +169,8 @@ impl App {
         if !ops.iter().any(edit_op_has_effect) {
             return;
         }
+        #[cfg(feature = "sagitta-analysis")]
+        self.mark_sagitta_edit_ops(&ops);
         self.undo_stack.push(UndoStep {
             cursor_before,
             mode_before,

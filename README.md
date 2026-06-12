@@ -21,7 +21,7 @@ A terminal hex editor for large files, written in Rust.
 - Read-only synchronized diff page against another file (`:diff`)
 - Process memory editing: attach to a running process by PID or name, browse and edit memory regions, freeze/thaw the target, and commit changes back
 - Large-file support through paged I/O and cache
-- Optional disassembly browsing, symbol search, and inline assemble patching
+- Optional disassembly browsing, symbol search, Sagitta-backed analysis, and inline assemble patching
 
 ## Quick Start
 
@@ -52,11 +52,13 @@ hxedit some.bin
 | `core` | `cargo build --release --no-default-features` | Hex editor, inspector, search, diff, hash, copy/paste, export |
 | `default` | `cargo build --release` | `core` + disassembly view, instruction search, symbol panel |
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching |
+| `sagitta-analysis` add-on | `cargo build --release --features sagitta-analysis` | `default` + Sagitta-backed `:ana` analysis from crates.io `sagitta-rs` |
 
 Notes:
 
 - `default` is the normal build.
 - `full` enables the optional `hexpatch-keystone` dependency (under the local crate alias `keystone-engine`) for inline assembly patching inside `:dis`.
+- `sagitta-analysis` enables optional `sagitta-rs` analysis for x86/x64 ELF/PE inputs; analysis runs on current logical bytes and does not participate in undo/save/search byte semantics.
 - There is no separate `:asm` command.
 
 ## CLI Flags
@@ -144,6 +146,12 @@ Disassembly-related commands in `default` / `full` builds:
 | `:sym` / `:sym off` | Open / close the symbol panel |
 | `:data` / `:data off` | Open / close the cursor-relative data panel |
 
+Sagitta analysis commands in `sagitta-analysis` builds:
+
+| Command | Description |
+|---------|-------------|
+| `:ana` / `:ana status` / `:ana off` | Run Sagitta on current logical bytes, show analysis state, or clear the Sagitta snapshot. Ready snapshots replace the symbol panel source; equal-length edits mark analysis outdated, while layout-changing edits require rerunning `:ana` before symbol jumps. |
+
 ## Release Bundles
 
 Tagged releases publish an explicit `OS * arch * feature` matrix.
@@ -175,3 +183,5 @@ at your option.
 `core` and `default` builds do not enable the optional Keystone-assembler dependency described below.
 
 `full` builds enable the optional Keystone-assembler dependency for inline assembly patching. When redistributing `full` source bundles or binaries from this repository, ship the included third-party notices and Keystone FOSS notice / license / exception files as well; see [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt).
+
+Builds that explicitly enable `sagitta-analysis` also include the optional MIT-licensed `sagitta-rs` dependency; keep the Sagitta notice in [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt) with redistributed artifacts.

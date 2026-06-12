@@ -178,6 +178,18 @@ pub fn hint_for(input: &str) -> CommandHint {
                         .to_owned(),
             }
         }
+        #[cfg(feature = "sagitta-analysis")]
+        "ana" | "analysis" => {
+            let syntax = match rest.map(str::trim) {
+                Some("status") => "ana status".to_owned(),
+                Some("off") => "ana off".to_owned(),
+                _ => "ana | ana status | ana off".to_owned(),
+            };
+            CommandHint {
+                syntax,
+                details: "run Sagitta analysis on current logical bytes, inspect analysis status, or clear the Sagitta snapshot".to_owned(),
+            }
+        }
         #[cfg(feature = "disasm")]
         "dis" | "disassemble" => {
             let syntax = match rest.map(str::trim) {
@@ -400,6 +412,10 @@ fn known_commands() -> Vec<&'static str> {
     {
         commands.extend(["sym", "symbols", "symbol", "symbol!"]);
     }
+    #[cfg(feature = "sagitta-analysis")]
+    {
+        commands.extend(["ana", "analysis"]);
+    }
     #[cfg(feature = "memory")]
     {
         commands.extend(["mem", "ms", "ms!"]);
@@ -481,6 +497,15 @@ mod tests {
     fn symbol_hint_hidden_when_feature_disabled() {
         let hint = hint_for("sym");
         assert_eq!(hint.syntax, "unknown command");
+    }
+
+    #[cfg(feature = "sagitta-analysis")]
+    #[test]
+    fn analysis_hint_mentions_status_and_off() {
+        let hint = hint_for("ana");
+        assert!(hint.syntax.contains("ana status"));
+        assert!(hint.syntax.contains("ana off"));
+        assert!(hint.details.contains("Sagitta"));
     }
 
     #[test]

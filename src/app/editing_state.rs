@@ -156,6 +156,8 @@ impl App {
                 self.redo_stack.clear();
                 self.document.insert_byte(offset, value << 4)?;
                 self.mark_document_changed();
+                #[cfg(feature = "sagitta-analysis")]
+                self.mark_sagitta_invalid_layout();
                 self.cursor = offset;
                 self.mode = Mode::InsertHex {
                     pending: Some(PendingInsert {
@@ -189,6 +191,8 @@ impl App {
                     self.redo_stack.clear();
                     self.document.delete_range_real(pending.offset, 1)?;
                     self.mark_document_changed();
+                    #[cfg(feature = "sagitta-analysis")]
+                    self.mark_sagitta_invalid_layout();
                     self.cursor = pending.offset;
                     self.mode = Mode::InsertHex { pending: None };
                     self.invalidate_disassembly_cache();
@@ -267,6 +271,8 @@ impl App {
 
         self.document.delete_range_real(pending.offset, 1)?;
         self.mark_document_changed();
+        #[cfg(feature = "sagitta-analysis")]
+        self.mark_sagitta_invalid_layout();
         self.cursor = pending.offset;
         self.mode = Mode::InsertHex { pending: None };
         self.invalidate_disassembly_cache();

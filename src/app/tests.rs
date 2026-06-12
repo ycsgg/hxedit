@@ -115,6 +115,65 @@ fn app_with_fixed_size_bytes(bytes: &[u8]) -> App {
     app
 }
 
+#[cfg(feature = "sagitta-analysis")]
+fn sagitta_test_snapshot() -> super::analysis_state::SagittaSnapshot {
+    sagitta_test_snapshot_for(0x401000, Some(1), "sub_401000")
+}
+
+#[cfg(feature = "sagitta-analysis")]
+fn sagitta_test_snapshot_for(
+    entry_va: u64,
+    entry_logical_offset: Option<u64>,
+    name: &str,
+) -> super::analysis_state::SagittaSnapshot {
+    use super::analysis_state::{
+        RecoveredConfidence, RecoveredFunction, SagittaSnapshot, SagittaSummary,
+    };
+
+    SagittaSnapshot {
+        summary: SagittaSummary {
+            functions: 1,
+            blocks: 0,
+            cfg_edges: 0,
+            call_edges: 0,
+            diagnostics: 0,
+        },
+        functions: vec![RecoveredFunction {
+            entry_va,
+            entry_logical_offset,
+            name: name.to_owned(),
+            name_kind: crate::app::symbol_state::SymbolNameKind::Synthetic,
+            confidence: RecoveredConfidence::Heuristic,
+            provenance: Vec::new(),
+            blocks: Vec::new(),
+            callers: Vec::new(),
+            callees: Vec::new(),
+        }],
+        blocks: Vec::new(),
+        cfg_edges: Vec::new(),
+        call_edges: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+#[cfg(feature = "sagitta-analysis")]
+fn native_test_symbol_state(name: &str) -> crate::app::SymbolState {
+    crate::app::SymbolState::from_entries(
+        vec![crate::app::symbol_state::SymbolPanelEntry {
+            address: 0x401000,
+            name: name.to_owned(),
+            name_kind: crate::app::symbol_state::SymbolNameKind::Real,
+            size: 0,
+            symbol_type: crate::executable::SymbolType::Function,
+            source: crate::app::symbol_state::SymbolPanelEntrySource::Object,
+            logical_offset: None,
+            file_offset: Some(0),
+            confidence_label: None,
+        }],
+        crate::app::symbol_state::SymbolPanelSource::Native,
+    )
+}
+
 #[test]
 fn side_panel_visible_rows_use_actual_panel_body_height() {
     let mut app = app_with_len(16);
@@ -133,7 +192,7 @@ fn side_panel_visible_rows_use_actual_panel_body_height() {
     assert_eq!(app.side_panel_visible_rows(), 9);
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(any(feature = "disasm-capstone", feature = "sagitta-analysis"))]
 fn build_disassembly_elf64(code: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0_u8; 0x200];
     bytes[0..4].copy_from_slice(b"\x7fELF");
@@ -1681,6 +1740,386 @@ fn hex_edit_does_not_replace_symbol_panel_with_inspector() {
     assert!(app.inspector().is_some() || app.inspector_error.is_some());
 }
 
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_analysis_rejects_input_over_128_mib() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("large.bin");
+    let handle = fs::File::create(&file).unwrap();
+    handle.set_len(128 * 1024 * 1024 + 1).unwrap();
+    drop(handle);
+    let cli = Cli {
+        file: Some(file),
+        pid: None,
+        process: None,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let mut app = App::from_cli(cli).unwrap();
+
+    let err = app
+        .execute_command(Command::Analysis(
+            crate::commands::types::AnalysisCommand::Run,
+        ))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("128 MiB"));
+    assert!(app.analysis_state.is_none());
+}
+
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_analysis_repeated_run_while_running_is_ignored() {
+    let bytes = build_disassembly_elf64(&[0x90, 0xc3]);
+    let mut app = app_with_bytes(&bytes);
+
+    app.execute_command(Command::Analysis(
+        crate::commands::types::AnalysisCommand::Run,
+    ))
+    .unwrap();
+    let job_id = app.analysis_job_id;
+    assert!(matches!(
+        app.analysis_state.as_ref().map(|state| &state.status),
+        Some(super::analysis_state::SagittaStatus::Running)
+    ));
+
+    app.execute_command(Command::Analysis(
+        crate::commands::types::AnalysisCommand::Run,
+    ))
+    .unwrap();
+
+    assert_eq!(app.analysis_job_id, job_id);
+}
+
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_analysis_rejects_unsupported_input_without_replacing_symbols() {
+    let mut app = app_with_bytes(&[0, 1, 2, 3]);
+    app.symbol_state = Some(native_test_symbol_state("native_entry"));
+
+    let err = app
+        .execute_command(Command::Analysis(
+            crate::commands::types::AnalysisCommand::Run,
+        ))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("unsupported format"));
+    assert!(app.analysis_state.is_none());
+    let state = app.symbol_state().unwrap();
+    assert_eq!(
+        state.source,
+        crate::app::symbol_state::SymbolPanelSource::Native
+    );
+    assert_eq!(state.entries[0].name, "native_entry");
+
+    let mut aarch64_elf = build_disassembly_elf64(&[0x90, 0xc3]);
+    aarch64_elf[18..20].copy_from_slice(&183u16.to_le_bytes());
+    let mut app2 = app_with_bytes(&aarch64_elf);
+    let err = app2
+        .execute_command(Command::Analysis(
+            crate::commands::types::AnalysisCommand::Run,
+        ))
+        .unwrap_err();
+
+    assert!(err.to_string().contains("unsupported arch"));
+    assert!(app2.analysis_state.is_none());
+}
+
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_result_opens_symbol_panel_without_stealing_command_focus() {
+    let mut app = app_with_bytes(&[0x7f, b'E', b'L', b'F']);
+    app.mode = Mode::Command;
+    app.analysis_job_id = 7;
+    app.background_tx
+        .send(crate::app::BackgroundJobResult::SagittaAnalysis {
+            job_id: 7,
+            revision: app.document_revision,
+            result: Ok(sagitta_test_snapshot()),
+        })
+        .unwrap();
+
+    app.drain_background_results();
+
+    assert_eq!(app.mode, Mode::Command);
+    assert!(app.show_side_panel);
+    assert_eq!(app.active_side_panel, crate::app::SidePanelKind::Symbol);
+    let state = app.symbol_state().unwrap();
+    assert_eq!(
+        state.source,
+        crate::app::symbol_state::SymbolPanelSource::Sagitta
+    );
+    assert_eq!(state.entries[0].name, "sub_401000");
+    assert_eq!(
+        state.entries[0].name_kind,
+        crate::app::symbol_state::SymbolNameKind::Synthetic
+    );
+    assert_eq!(state.entries[0].logical_offset, Some(1));
+}
+
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_failed_result_does_not_replace_symbol_panel() {
+    let mut app = app_with_bytes(&[0, 1, 2, 3]);
+    app.analysis_job_id = 9;
+    app.symbol_state = Some(native_test_symbol_state("native_entry"));
+
+    app.background_tx
+        .send(crate::app::BackgroundJobResult::SagittaAnalysis {
+            job_id: 9,
+            revision: app.document_revision,
+            result: Err("Sagitta panic: boom".to_owned()),
+        })
+        .unwrap();
+    app.drain_background_results();
+
+    assert!(matches!(
+        app.analysis_state.as_ref().map(|state| &state.status),
+        Some(super::analysis_state::SagittaStatus::Failed(message))
+            if message.contains("Sagitta panic")
+    ));
+    let state = app.symbol_state().unwrap();
+    assert_eq!(
+        state.source,
+        crate::app::symbol_state::SymbolPanelSource::Native
+    );
+    assert_eq!(state.entries[0].name, "native_entry");
+}
+
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_symbols_command_prefers_ready_snapshot() {
+    let mut app = app_with_bytes(&[0, 1, 2, 3]);
+    app.symbol_state = Some(native_test_symbol_state("native_entry"));
+    app.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: app.document_revision,
+        snapshot: Some(sagitta_test_snapshot()),
+    });
+
+    app.execute_command(Command::Symbols).unwrap();
+
+    let state = app.symbol_state().unwrap();
+    assert_eq!(
+        state.source,
+        crate::app::symbol_state::SymbolPanelSource::Sagitta
+    );
+    assert_eq!(state.entries[0].name, "sub_401000");
+}
+
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_off_ignores_late_running_result() {
+    let mut app = app_with_bytes(&[0, 1, 2, 3]);
+    let cancelled_job = 7;
+    app.analysis_job_id = cancelled_job;
+    app.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Running,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: app.document_revision,
+        snapshot: None,
+    });
+
+    app.execute_command(Command::Analysis(
+        crate::commands::types::AnalysisCommand::Off,
+    ))
+    .unwrap();
+    assert!(app.analysis_state.is_none());
+    assert_ne!(app.analysis_job_id, cancelled_job);
+
+    app.background_tx
+        .send(crate::app::BackgroundJobResult::SagittaAnalysis {
+            job_id: cancelled_job,
+            revision: app.document_revision,
+            result: Ok(sagitta_test_snapshot()),
+        })
+        .unwrap();
+    app.drain_background_results();
+
+    assert!(app.analysis_state.is_none());
+    assert!(app.symbol_state().is_none());
+}
+
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_validity_tracks_replacement_vs_layout_edits() {
+    let mut app = app_with_bytes(&[0, 1, 2, 3]);
+    app.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: app.document_revision,
+        snapshot: Some(sagitta_test_snapshot_for(0, Some(0x100), "sub_0")),
+    });
+
+    app.apply_paste_overwrite(&[0xff]).unwrap();
+    assert_eq!(
+        app.analysis_state.as_ref().unwrap().validity,
+        super::analysis_state::AnalysisValidity::OutdatedBytes
+    );
+
+    app.apply_paste_insert(&[0xee]).unwrap();
+    assert_eq!(
+        app.analysis_state.as_ref().unwrap().validity,
+        super::analysis_state::AnalysisValidity::InvalidLayout
+    );
+}
+
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_invalidates_tombstone_real_delete_and_resize_replace() {
+    let mut tombstone = app_with_bytes(&[0, 1, 2, 3]);
+    tombstone.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: tombstone.document_revision,
+        snapshot: Some(sagitta_test_snapshot()),
+    });
+    tombstone.delete_current().unwrap();
+    assert_eq!(
+        tombstone.analysis_state.as_ref().unwrap().validity,
+        super::analysis_state::AnalysisValidity::InvalidLayout
+    );
+
+    let mut real_delete = app_with_bytes(&[0, 1, 2, 3]);
+    real_delete.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: real_delete.document_revision,
+        snapshot: Some(sagitta_test_snapshot()),
+    });
+    real_delete.mode = Mode::InsertHex { pending: None };
+    real_delete.cursor = 1;
+    real_delete.edit_backspace().unwrap();
+    assert_eq!(
+        real_delete.analysis_state.as_ref().unwrap().validity,
+        super::analysis_state::AnalysisValidity::InvalidLayout
+    );
+
+    let mut resize = app_with_bytes(&[0, 1, 2, 3]);
+    resize.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: resize.document_revision,
+        snapshot: Some(sagitta_test_snapshot()),
+    });
+    resize
+        .execute_command(Command::Replace {
+            needle: vec![1],
+            replacement: vec![0xaa, 0xbb],
+            allow_resize: true,
+        })
+        .unwrap();
+    assert_eq!(
+        resize.analysis_state.as_ref().unwrap().validity,
+        super::analysis_state::AnalysisValidity::InvalidLayout
+    );
+}
+
+#[cfg(feature = "sagitta-analysis")]
+#[test]
+fn sagitta_symbol_jump_outdated_allowed_invalid_layout_rejected() {
+    let mut app = app_with_bytes(&[0, 1, 2, 3]);
+    app.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: app.document_revision,
+        snapshot: Some(sagitta_test_snapshot_for(0x401000, Some(1), "sub_401000")),
+    });
+    assert!(app.open_sagitta_symbol_panel_if_ready());
+    app.apply_paste_overwrite(&[0xff]).unwrap();
+
+    app.navigate_to_selected_symbol().unwrap();
+
+    assert_eq!(app.cursor, 1);
+    assert_eq!(app.status_level, StatusLevel::Warning);
+    assert!(app.status_message.contains("analysis outdated; rerun :ana"));
+
+    let mut invalid = app_with_bytes(&[0, 1, 2, 3]);
+    invalid.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: invalid.document_revision,
+        snapshot: Some(sagitta_test_snapshot_for(0x401000, Some(1), "sub_401000")),
+    });
+    assert!(invalid.open_sagitta_symbol_panel_if_ready());
+    invalid.apply_paste_insert(&[0xee]).unwrap();
+
+    let err = invalid.navigate_to_selected_symbol().unwrap_err();
+
+    assert!(err.to_string().contains("analysis offsets changed"));
+}
+
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[test]
+fn sagitta_snapshot_annotates_disassembly_rows_and_symbol_search() {
+    let bytes =
+        build_disassembly_elf64_with_symbol(&[0x90, 0xE8, 0xFA, 0xFF, 0xFF, 0xFF, 0xC3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: app.document_revision,
+        snapshot: Some(sagitta_test_snapshot()),
+    });
+
+    let state = app.current_disassembly_state().unwrap();
+    let rows = app.collect_disassembly_rows(&state, 0x100, 3).unwrap();
+
+    assert_eq!(rows[0].symbol_label.as_deref(), Some("sub_401000"));
+    assert_eq!(
+        rows[1]
+            .direct_target
+            .as_ref()
+            .and_then(|target| target.display_name.as_deref()),
+        Some("sub_401000")
+    );
+
+    app.execute_command(Command::SearchSymbol {
+        pattern: "sub_401000".to_owned(),
+        backward: false,
+    })
+    .unwrap();
+    assert_eq!(app.cursor, 0x101);
+}
+
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[test]
+fn sagitta_invalid_layout_disables_disassembly_annotations() {
+    let bytes =
+        build_disassembly_elf64_with_symbol(&[0x90, 0xE8, 0xFA, 0xFF, 0xFF, 0xFF, 0xC3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::InvalidLayout,
+        revision: app.document_revision,
+        snapshot: Some(sagitta_test_snapshot()),
+    });
+
+    let state = app.current_disassembly_state().unwrap();
+    let rows = app.collect_disassembly_rows(&state, 0x100, 3).unwrap();
+
+    assert_eq!(rows[0].symbol_label.as_deref(), Some("entry"));
+    assert_eq!(
+        rows[1]
+            .direct_target
+            .as_ref()
+            .and_then(|target| target.display_name.as_deref()),
+        Some("entry")
+    );
+}
+
 #[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
 #[test]
 fn symbol_panel_scrolls_and_mouse_click_navigates() {
@@ -1691,27 +2130,34 @@ fn symbol_panel_scrolls_and_mouse_click_navigates() {
     app.execute_command(Command::Symbols).unwrap();
 
     if let Some(state) = app.symbol_state_mut() {
-        for index in 1..5 {
-            let name = format!("target_{index}");
+        for index in 1..4 {
             state
-                .info
-                .target_names_by_va
-                .insert(0x401000 + index, name.clone());
-            state
-                .info
-                .target_names_by_name
-                .entry(name)
-                .or_default()
-                .push(0x401000 + index);
+                .entries
+                .push(crate::app::symbol_state::SymbolPanelEntry {
+                    address: 0x401000 + index,
+                    name: format!("target_{index}"),
+                    name_kind: crate::app::symbol_state::SymbolNameKind::Real,
+                    size: 0,
+                    symbol_type: crate::executable::SymbolType::Function,
+                    source: crate::app::symbol_state::SymbolPanelEntrySource::Dynamic,
+                    logical_offset: None,
+                    file_offset: Some(0x100 + index),
+                    confidence_label: None,
+                });
         }
-        state.info.target_names_by_va.insert(
-            0x401004,
-            "very_long_symbol_name_that_wraps_across_multiple_detail_rows".to_owned(),
-        );
-        state.info.target_names_by_name.insert(
-            "very_long_symbol_name_that_wraps_across_multiple_detail_rows".to_owned(),
-            vec![0x401004],
-        );
+        state
+            .entries
+            .push(crate::app::symbol_state::SymbolPanelEntry {
+                address: 0x401004,
+                name: "very_long_symbol_name_that_wraps_across_multiple_detail_rows".to_owned(),
+                name_kind: crate::app::symbol_state::SymbolNameKind::Real,
+                size: 0,
+                symbol_type: crate::executable::SymbolType::Function,
+                source: crate::app::symbol_state::SymbolPanelEntrySource::Dynamic,
+                logical_offset: None,
+                file_offset: Some(0x104),
+                confidence_label: None,
+            });
     }
 
     app.view_rows = 8;

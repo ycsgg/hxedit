@@ -35,6 +35,7 @@ memory = []
 symbols = ["disasm", "dep:object", "dep:symbolic-common", "dep:symbolic-demangle"]
 asm = ["disasm", "dep:keystone-engine"]
 full = ["default-bundle", "asm"]
+sagitta-analysis = ["symbols", "disasm", "dep:sagitta-rs"]
 disasm-capstone = ["disasm", "dep:capstone"]
 disasm-capstone-full = ["disasm-capstone", "capstone/full"]
 disasm-capstone-x86 = ["disasm-capstone", "capstone/arch_x86"]
@@ -62,6 +63,7 @@ object = { version = "0.39", optional = true }
 symbolic-common = { version = "12.18", optional = true }
 symbolic-demangle = { version = "12.18", optional = true }
 keystone-engine = { package = "hexpatch-keystone", version = "0.9.4", optional = true, features = ["build_keystone_cmake"] }
+sagitta-rs = { version = "0.0.2", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

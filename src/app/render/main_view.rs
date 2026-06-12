@@ -345,7 +345,18 @@ impl App {
             .disasm_backend
             .as_deref()
             .expect("disassembly backend should be initialized");
-        cache.collect_rows(&mut self.document, &state.info, backend, start, row_count)
+        let rows =
+            cache.collect_rows(&mut self.document, &state.info, backend, start, row_count)?;
+        #[cfg(feature = "sagitta-analysis")]
+        {
+            let mut rows = rows;
+            self.apply_sagitta_annotations(&mut rows);
+            Ok(rows)
+        }
+        #[cfg(not(feature = "sagitta-analysis"))]
+        {
+            Ok(rows)
+        }
     }
 
     fn main_lines_from_disassembly_rows(

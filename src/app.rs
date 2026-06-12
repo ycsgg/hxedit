@@ -1,7 +1,11 @@
 use std::collections::BTreeSet;
 use std::io;
+#[cfg(feature = "sagitta-analysis")]
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "sagitta-analysis")]
+mod analysis_state;
 mod clipboard_ops;
 mod command_input;
 mod commands;
@@ -39,13 +43,14 @@ use crate::config::Config;
 use crate::core::document::Document;
 use crate::core::piece_table::CellId;
 use crate::disasm::{DisasmCache, DisassemblyState};
-use crate::executable::ExecutableInfo;
 use crate::format::parse::{InspectorRow, NodePath};
 use crate::input::keymap::map_key;
 use crate::mode::Mode;
 use crate::profile::{Profiler, StartupStats};
 use crate::view::layout::MainPaneKind;
 use crate::view::{layout, palette::Palette};
+#[cfg(feature = "sagitta-analysis")]
+pub(crate) use analysis_state::{BackgroundJobResult, SagittaAnalysisState};
 pub(crate) use diff_state::DiffState;
 use navigation::align_offset;
 
@@ -80,7 +85,8 @@ pub(crate) struct DataState {
 /// Symbol panel state.
 #[derive(Debug)]
 pub(crate) struct SymbolState {
-    pub info: ExecutableInfo,
+    pub entries: Vec<symbol_state::SymbolPanelEntry>,
+    pub source: symbol_state::SymbolPanelSource,
     pub scroll_offset: usize,
     pub selected_row: usize,
     pub detail_scroll_offset: usize,
@@ -144,6 +150,14 @@ pub struct App {
     data_state: Option<DataState>,
     /// Cached diff side panel state.
     diff_state: Option<DiffState>,
+    #[cfg(feature = "sagitta-analysis")]
+    analysis_job_id: u64,
+    #[cfg(feature = "sagitta-analysis")]
+    analysis_state: Option<SagittaAnalysisState>,
+    #[cfg(feature = "sagitta-analysis")]
+    background_tx: mpsc::Sender<BackgroundJobResult>,
+    #[cfg(feature = "sagitta-analysis")]
+    background_rx: mpsc::Receiver<BackgroundJobResult>,
     /// Active process-memory session and selected region.
     #[cfg(feature = "memory")]
     memory_runtime: Option<memory_state::MemoryRuntime>,
@@ -519,6 +533,8 @@ impl App {
         let cursor =
             memory_initial_cursor(&document, &config, memory_runtime.as_ref()).unwrap_or(cursor);
         let after_init = Instant::now();
+        #[cfg(feature = "sagitta-analysis")]
+        let (background_tx, background_rx) = mpsc::channel();
 
         let show_side_panel = config.inspector;
         let mut app = Self {
@@ -579,6 +595,14 @@ impl App {
             symbol_state: None,
             data_state: None,
             diff_state: None,
+            #[cfg(feature = "sagitta-analysis")]
+            analysis_job_id: 0,
+            #[cfg(feature = "sagitta-analysis")]
+            analysis_state: None,
+            #[cfg(feature = "sagitta-analysis")]
+            background_tx,
+            #[cfg(feature = "sagitta-analysis")]
+            background_rx,
             #[cfg(feature = "memory")]
             memory_runtime,
             memory_state: None,
@@ -721,7 +745,11 @@ impl App {
 
     fn run_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         while !self.should_quit {
+            #[cfg(feature = "sagitta-analysis")]
+            self.drain_background_results();
             terminal.draw(|frame| self.render(frame))?;
+            #[cfg(feature = "sagitta-analysis")]
+            self.drain_background_results();
             let poll_start = self.profiler.as_ref().map(|_| Instant::now());
             let has_event = event::poll(Duration::from_millis(250))?;
             if let (Some(start), Some(profiler)) = (poll_start, self.profiler.as_mut()) {
@@ -735,13 +763,17 @@ impl App {
                         }
                         if let Some(action) = self.map_key_with_prefix(key) {
                             self.handle_action(action);
+                            #[cfg(feature = "sagitta-analysis")]
+                            self.drain_background_results();
                         }
                     }
                     Event::Mouse(mouse) => {
                         if let Some(profiler) = self.profiler.as_mut() {
                             profiler.record_mouse_event();
                         }
-                        self.handle_mouse(mouse)
+                        self.handle_mouse(mouse);
+                        #[cfg(feature = "sagitta-analysis")]
+                        self.drain_background_results();
                     }
                     _ => {
                         if let Some(profiler) = self.profiler.as_mut() {
