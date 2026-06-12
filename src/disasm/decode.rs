@@ -51,18 +51,23 @@ fn current_span(info: &ExecutableInfo, doc: &Document, offset: u64) -> Option<Co
         .or_else(|| {
             info.code_spans
                 .iter()
-                .find(|span| span.start >= offset)
-                .cloned()
-                .map(|mut span| {
-                    span.start = offset;
-                    span.end_inclusive = span.end_inclusive.min(doc.len().saturating_sub(1)).min(
-                        span.start
-                            .saturating_add(DATA_ROW_BYTES as u64)
-                            .saturating_sub(1),
-                    );
-                    span.executable = false;
-                    span.name = Some("<raw>".to_owned());
-                    span
+                .filter(|span| span.start > offset)
+                .min_by_key(|span| span.start)
+                .map(|span| CodeSpan {
+                    start: offset,
+                    end_inclusive: span
+                        .start
+                        .saturating_sub(1)
+                        .min(doc.len().saturating_sub(1))
+                        .min(
+                            offset
+                                .saturating_add(DATA_ROW_BYTES as u64)
+                                .saturating_sub(1),
+                        ),
+                    virtual_start: None,
+                    virtual_end_inclusive: None,
+                    name: Some("<raw>".to_owned()),
+                    executable: false,
                 })
         })
         .or_else(|| {
@@ -205,6 +210,7 @@ fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> (String, Vec
 
 #[cfg(all(test, feature = "disasm-capstone"))]
 mod tests {
+    use std::collections::{BTreeMap, HashMap};
     use std::fs;
 
     use tempfile::tempdir;
@@ -215,7 +221,10 @@ mod tests {
     use crate::disasm::backend::{resolve_backend, resolve_backend_kind, BackendKind};
     use crate::disasm::{DirectBranchKind, DisasmRowKind};
     use crate::executable::detect_executable_info;
-    use crate::executable::types::{SymbolInfo, SymbolSource, SymbolType};
+    use crate::executable::types::{
+        Bitness, CodeSpan, Endian, ExecutableArch, ExecutableInfo, ExecutableKind, SymbolInfo,
+        SymbolSource, SymbolType,
+    };
 
     fn doc_with_bytes(bytes: &[u8]) -> Document {
         let dir = tempdir().unwrap();
@@ -236,6 +245,23 @@ mod tests {
             inspector: false,
         };
         Document::open(cli.file.as_ref().unwrap(), &cli.config().unwrap()).unwrap()
+    }
+
+    fn info_with_spans(spans: Vec<CodeSpan>) -> ExecutableInfo {
+        ExecutableInfo {
+            kind: ExecutableKind::Raw,
+            arch: ExecutableArch::X86_64,
+            bitness: Bitness::Bit64,
+            endian: Endian::Little,
+            entry_offset: None,
+            entry_virtual_address: None,
+            code_spans: spans,
+            symbols_by_va: BTreeMap::new(),
+            target_names_by_va: Box::new(BTreeMap::new()),
+            symbols_by_name: HashMap::new(),
+            target_names_by_name: HashMap::new(),
+            imports: Vec::new(),
+        }
     }
 
     fn x86_64_elf(code: &[u8]) -> Vec<u8> {
@@ -584,6 +610,32 @@ mod tests {
         assert_eq!(rows[0].kind, DisasmRowKind::Data);
         assert_eq!(rows[0].span_name.as_deref(), Some(".rdata"));
         assert_eq!(rows[0].text, ".db 0x41, 0x42, 0x43");
+    }
+
+    #[test]
+    fn decode_region_rows_does_not_merge_raw_gap_into_next_executable_span() {
+        let mut doc = doc_with_bytes(&[0x00, 0x00, 0x00, 0x00, 0x55, 0x48, 0x89, 0xe5, 0xc3]);
+        let info = info_with_spans(vec![CodeSpan {
+            start: 4,
+            end_inclusive: 8,
+            virtual_start: Some(0x401004),
+            virtual_end_inclusive: Some(0x401008),
+            name: Some(".text".to_owned()),
+            executable: true,
+        }]);
+        let backend = resolve_backend(&info, None).unwrap();
+        let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0, 3).unwrap();
+
+        assert_eq!(rows[0].kind, DisasmRowKind::Data);
+        assert_eq!(rows[0].offset, 0);
+        assert_eq!(rows[0].virtual_address, None);
+        assert_eq!(rows[0].span_name.as_deref(), Some("<raw>"));
+        assert_eq!(rows[0].text, ".db 0x00, 0x00, 0x00, 0x00");
+        assert_eq!(rows[1].kind, DisasmRowKind::Instruction);
+        assert_eq!(rows[1].offset, 4);
+        assert_eq!(rows[1].virtual_address, Some(0x401004));
+        assert_eq!(rows[1].span_name.as_deref(), Some(".text"));
+        assert!(rows[1].text.contains("push"));
     }
 
     #[test]
