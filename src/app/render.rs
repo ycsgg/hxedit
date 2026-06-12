@@ -50,6 +50,7 @@ enum MainPaneLines {
     Disassembly {
         bytes: Vec<Line<'static>>,
         text: Vec<Line<'static>>,
+        jump_rail: Option<Vec<Line<'static>>>,
     },
 }
 

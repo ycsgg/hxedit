@@ -330,12 +330,14 @@ impl App {
                 let editing = self
                     .disasm_edit()
                     .map(|edit| (edit.row_offset, edit.buffer.as_str()));
+                let rail_width = self.disassembly_jump_rail_width(columns).unwrap_or(0);
+                let text_width = columns.ascii.width.saturating_sub(rail_width as u16);
                 let display = crate::view::disasm_grid::build_display(
                     &rows,
                     columns.gutter.width as usize,
                     self.cursor_anchor_offset(),
                     editing,
-                    columns.ascii.width as usize,
+                    text_width as usize,
                     &self.palette,
                 );
                 crate::input::mouse::disassembly_hit_test(

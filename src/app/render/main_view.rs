@@ -374,6 +374,7 @@ impl App {
                         "no decodable instructions in current view",
                         self.palette.separator,
                     )],
+                    jump_rail: None,
                 },
             };
         }
@@ -382,9 +383,16 @@ impl App {
         let editing = self
             .disasm_edit()
             .map(|edit| (edit.row_offset, edit.buffer.as_str()));
-        let text_width = self
+        let rail_width = self
+            .last_columns
+            .and_then(|columns| self.disassembly_jump_rail_width(columns));
+        let ascii_width = self
             .last_columns
             .map(|columns| columns.ascii.width as usize)
+            .unwrap_or(80);
+        let text_width = self
+            .last_columns
+            .map(|_| ascii_width.saturating_sub(rail_width.unwrap_or(0)))
             .unwrap_or(80);
         let display = disasm_grid::build_display(
             rows,
@@ -394,11 +402,26 @@ impl App {
             text_width,
             &self.palette,
         );
+        let jump_rail = rail_width.map(|width| {
+            disasm_grid::build_jump_rail(
+                rows,
+                &display.row_sources,
+                &display.text,
+                ascii_width.max(width),
+                &self.palette,
+            )
+        });
+        let text = if let Some(jump_rail) = jump_rail.as_ref() {
+            disasm_grid::merge_jump_rail(display.text, jump_rail, &self.palette)
+        } else {
+            display.text
+        };
         MainLines {
             gutter: display.gutter,
             pane: MainPaneLines::Disassembly {
                 bytes: display.bytes,
-                text: display.text,
+                text,
+                jump_rail,
             },
         }
     }
@@ -409,8 +432,21 @@ impl App {
             pane: MainPaneLines::Disassembly {
                 bytes: vec![Line::styled("--", self.palette.separator)],
                 text: vec![Line::styled(message.to_owned(), self.palette.error)],
+                jump_rail: None,
             },
         }
+    }
+
+    pub(crate) fn disassembly_jump_rail_width(
+        &self,
+        columns: layout::MainColumns,
+    ) -> Option<usize> {
+        if self.show_side_panel && self.active_side_panel == SidePanelKind::Symbol {
+            return None;
+        }
+        let width = columns.ascii.width as usize;
+        (width >= disasm_grid::JUMP_RAIL_MIN_TEXT_WIDTH + disasm_grid::JUMP_RAIL_WIDTH)
+            .then_some(disasm_grid::JUMP_RAIL_WIDTH)
     }
 
     fn set_disassembly_render_error(&mut self, error: Option<String>) {
@@ -502,7 +538,12 @@ impl App {
                 );
                 frame.render_widget(Paragraph::new(ascii), ascii_area);
             }
-            MainPaneLines::Disassembly { bytes, text } => {
+            MainPaneLines::Disassembly {
+                bytes,
+                text,
+                jump_rail,
+            } => {
+                let _has_jump_rail = jump_rail.as_ref().is_some_and(|rail| !rail.is_empty());
                 frame.render_widget(Paragraph::new(bytes), hex_area);
                 frame.render_widget(
                     separator_widget(columns.sep2.height, &self.palette),
@@ -544,12 +585,14 @@ impl App {
         let editing = self
             .disasm_edit()
             .map(|edit| (edit.row_offset, edit.buffer.as_str()));
+        let rail_width = self.disassembly_jump_rail_width(columns).unwrap_or(0);
+        let text_width = columns.ascii.width.saturating_sub(rail_width as u16);
         let display = disasm_grid::build_display(
             &rows,
             columns.gutter.width as usize,
             self.cursor_anchor_offset(),
             editing,
-            columns.ascii.width as usize,
+            text_width as usize,
             &self.palette,
         );
         let visible_row = match display
@@ -564,7 +607,7 @@ impl App {
             return;
         };
         let cursor_col = edit.buffer[..cursor_pos.min(buffer_len)].chars().count() as u16;
-        if visible_row < columns.ascii.height as usize && cursor_col < columns.ascii.width {
+        if visible_row < columns.ascii.height as usize && cursor_col < text_width {
             frame.set_cursor_position((
                 columns.ascii.x + cursor_col,
                 columns.ascii.y + visible_row as u16,

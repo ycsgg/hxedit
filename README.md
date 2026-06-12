@@ -138,7 +138,7 @@ Disassembly-related commands in `default` / `full` builds:
 
 | Command | Description |
 |---------|-------------|
-| `:dis [arch]` | Enter read-only disassembly view for recognized ELF / PE / Mach-O executables |
+| `:dis [arch]` | Enter read-only disassembly view for recognized ELF / PE / Mach-O executables; direct branch jump rails are shown when the text pane is wide enough |
 | `:dis! <arch> <offset>` | Force raw disassembly from a display offset |
 | `:dis off` | Leave disassembly view |
 | `:si` / `:si!` | Search decoded instruction text |

@@ -138,7 +138,7 @@ cache_pages = 128                  # 页缓存容量
 
 | 命令 | 说明 |
 |------|------|
-| `:dis [arch]` | 进入已识别 ELF / PE / Mach-O 的只读反汇编视图 |
+| `:dis [arch]` | 进入已识别 ELF / PE / Mach-O 的只读反汇编视图；文本区足够宽时显示直接分支 jump rail |
 | `:dis! <arch> <offset>` | 从 display offset 强制做 raw disassembly |
 | `:dis off` | 退出反汇编视图 |
 | `:si` / `:si!` | 按指令文本搜索 |

@@ -378,7 +378,7 @@ analysis offsets changed; rerun :ana
 现有 `:dis` 仍使用 Capstone backend 解码。Sagitta 只补充标注：
 
 - 函数入口 label。
-- direct/indirect target display name。
+- direct target display name。
 - 当前 row 所属函数。
 - call target name。
 
@@ -398,7 +398,47 @@ analysis offsets changed; rerun :ana
 
 ---
 
-## 13. Tests
+## 13. Future Sagitta Jump / CFG Annotation
+
+当前 disassembly jump rail 的边来自 Capstone 解码得到的 `DisasmRow::direct_target`，不依赖
+Sagitta。Sagitta 已经以 `AnalysisDepth::Indirects` 运行，并在 API 中暴露 block-level CFG、
+resolved indirect sites、switch/jump-table、callgraph 等更高级的控制流信息；这些能力后续可以
+作为 Capstone direct branch rail 的补充，而不是替换现有 disassembly backend。
+
+可接入的数据：
+
+- `Analysis::cfg_edges()`：block-level CFG，`EdgeKind` 可区分 `BranchTaken`、
+  `BranchFall`、`Jump`、`IndirectResolved`、`TailCall`、`Call`。
+- `Analysis::indirect_sites()`：间接 jump/call 位置、解析状态、resolver kind 与 resolved targets。
+- `Analysis::switches()`：jump table dispatch、table、default 与 cases。
+- `FunctionView::{callers, callees}` / `Analysis::call_edges()`：direct / indirect / tail call callgraph。
+- `BlockView::terminator()` 与 `BlockView::instructions()`：把 block-level edge 映射回具体
+  instruction source site 时需要这些信息。
+
+推荐接入顺序：
+
+1. 在 `SagittaSnapshot` 中补 owned 的 indirect-site / switch / block-terminator 视图，保留
+   site VA、targets、resolver kind、block start 与 block 最后一条指令 VA。
+2. 生成独立的 Sagitta jump edges，只接入 `IndirectResolved` jump 与 switch case/default；
+   direct branch/call 继续优先使用 Capstone `direct_target`，同 source/target 去重。
+3. 对 `call rax`、tail call、PLT thunk 这类 resolved call edge 先做文本标注，例如
+   `[indirect]` / `[tail]` 与 target name；是否画 call rail 另行评估。
+4. switch/jump-table target 较多时只画当前 viewport 内可见 targets，屏外 target 用 `⋮` 或
+   `+N` 提示，避免 case 过多导致右侧 rail 失控。
+5. rail 的 hit test 与 wrap 继续以 disassembly row display source 为准，不能让 Sagitta edge
+   overlay 吞掉函数 rail、长指令 wrap 或鼠标定位。
+
+约束：
+
+- `Current` 与 `OutdatedBytes` 可以展示 Sagitta jump/CFG annotation；`OutdatedBytes` 需要复用
+  stale 样式或状态提示。
+- `InvalidLayout` 禁用 Sagitta jump/CFG annotation，因为 logical offset/VA 对应关系不再可信。
+- raw forced disassembly、unsupported arch / format 不使用 Sagitta edge。
+- 不把 Sagitta CFG 写回 `Document`，也不让它参与 undo / save / search 语义。
+
+---
+
+## 14. Tests
 
 最低测试覆盖：
 
@@ -422,7 +462,7 @@ analysis offsets changed; rerun :ana
 
 ---
 
-## 14. Implementation Order
+## 15. Implementation Order
 
 推荐小步实现：
 

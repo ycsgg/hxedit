@@ -1,5 +1,7 @@
 use std::fs;
 
+#[cfg(feature = "disasm-capstone")]
+use ratatui::layout::Rect;
 use tempfile::tempdir;
 
 use super::App;
@@ -27,6 +29,44 @@ pub(super) fn app_with_bytes(bytes: &[u8]) -> App {
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 2;
     app
+}
+
+#[cfg(feature = "disasm-capstone")]
+fn elf64_with_executable_code(code: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0_u8; 0x200];
+    bytes[0..4].copy_from_slice(b"ELF");
+    bytes[4] = 2;
+    bytes[5] = 1;
+    bytes[6] = 1;
+    bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+    bytes[18..20].copy_from_slice(&0x3eu16.to_le_bytes());
+    bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
+    bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
+    bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+    bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
+    bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
+    let ph = 64usize;
+    bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
+    bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
+    bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
+    bytes[ph + 32..ph + 40].copy_from_slice(&(code.len() as u64).to_le_bytes());
+    bytes[0x100..0x100 + code.len()].copy_from_slice(code);
+    bytes
+}
+
+#[cfg(feature = "disasm-capstone")]
+fn disassembly_test_columns(width: u16) -> crate::view::layout::MainColumns {
+    crate::view::layout::MainColumns {
+        main_pane_kind: crate::view::layout::MainPaneKind::Disassembly,
+        gutter: Rect::new(0, 0, 18, 12),
+        sep1: Rect::new(18, 0, 1, 12),
+        hex: Rect::new(19, 0, 24, 12),
+        sep2: Rect::new(43, 0, 1, 12),
+        ascii: Rect::new(44, 0, width, 12),
+        side_panel_sep: None,
+        side_panel: None,
+    }
 }
 
 #[test]
@@ -243,28 +283,9 @@ fn diff_overlay_is_removed_when_diff_side_panel_is_not_active() {
 #[cfg(feature = "disasm-capstone")]
 #[test]
 fn disassembly_main_view_renders_decoded_instruction_lines() {
-    let mut app = app_with_bytes(&{
-        let mut bytes = vec![0_u8; 0x200];
-        bytes[0..4].copy_from_slice(b"ELF");
-        bytes[4] = 2;
-        bytes[5] = 1;
-        bytes[6] = 1;
-        bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
-        bytes[18..20].copy_from_slice(&0x3eu16.to_le_bytes());
-        bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
-        bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
-        bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
-        bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
-        bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
-        bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
-        let ph = 64usize;
-        bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
-        bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
-        bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
-        bytes[ph + 32..ph + 40].copy_from_slice(&6u64.to_le_bytes());
-        bytes[0x100..0x106].copy_from_slice(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
-        bytes
-    });
+    let mut app = app_with_bytes(&elf64_with_executable_code(&[
+        0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3,
+    ]));
     app.execute_command(Command::Disassemble { arch: None })
         .unwrap();
     let lines = app.build_disassembly_lines(4);
@@ -277,6 +298,41 @@ fn disassembly_main_view_renders_decoded_instruction_lines() {
             assert!(joined.contains("push"));
             assert!(joined.contains("mov"));
             assert!(joined.contains("ret"));
+        }
+        _ => panic!("expected disassembly pane"),
+    }
+}
+
+#[cfg(feature = "disasm-capstone")]
+#[test]
+fn disassembly_jump_rail_hides_when_symbol_panel_is_open() {
+    let mut app = app_with_bytes(&elf64_with_executable_code(&[0xeb, 0x02, 0x90, 0x90, 0xc3]));
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.last_columns = Some(disassembly_test_columns(96));
+
+    let lines = app.build_disassembly_lines(4);
+    match lines.pane {
+        super::MainPaneLines::Disassembly {
+            jump_rail: Some(jump_rail),
+            ..
+        } => {
+            let text = jump_rail
+                .iter()
+                .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+                .collect::<String>();
+            assert!(text.contains('◀'));
+            assert!(text.contains('┐'));
+        }
+        _ => panic!("expected visible jump rail"),
+    }
+
+    app.show_side_panel = true;
+    app.active_side_panel = crate::app::SidePanelKind::Symbol;
+    let lines = app.build_disassembly_lines(4);
+    match lines.pane {
+        super::MainPaneLines::Disassembly { jump_rail, .. } => {
+            assert!(jump_rail.is_none());
         }
         _ => panic!("expected disassembly pane"),
     }

@@ -142,12 +142,17 @@ impl App {
         let editing = self
             .disasm_edit()
             .map(|edit| (edit.row_offset, edit.buffer.as_str()));
+        let rail_width = columns
+            .and_then(|columns| self.disassembly_jump_rail_width(columns))
+            .unwrap_or(0);
         let display = crate::view::disasm_grid::build_display(
             rows,
             columns.map(|c| c.gutter.width as usize).unwrap_or(18),
             self.cursor_anchor_offset(),
             editing,
-            columns.map(|c| c.ascii.width as usize).unwrap_or(80),
+            columns
+                .map(|c| c.ascii.width.saturating_sub(rail_width as u16) as usize)
+                .unwrap_or(80),
             &self.palette,
         );
         let mut visible_rows = display
