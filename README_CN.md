@@ -150,7 +150,7 @@ cache_pages = 128                  # 页缓存容量
 
 | 命令 | 说明 |
 |------|------|
-| `:ana` / `:ana status` / `:ana off` | 对当前 logical bytes 运行 Sagitta、查看分析状态或清除 Sagitta snapshot。分析 ready 后覆盖 symbol panel 数据源；等长编辑会标记 analysis outdated，长度或布局变化后必须重新 `:ana` 才允许 Sagitta symbol 跳转。 |
+| `:ana` / `:ana status` / `:ana off` | 对当前 logical bytes 运行 Sagitta、查看分析状态或清除 Sagitta snapshot。分析 ready 后覆盖 symbol panel 数据源，并为 disassembly 补充函数 label、target name 与函数体 rail；等长编辑会标记 analysis outdated，长度或布局变化后必须重新 `:ana` 才允许 Sagitta symbol 跳转。 |
 
 ## Release 产物
 

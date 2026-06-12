@@ -127,6 +127,7 @@ fn decode_instruction_row(
                 symbolized_names,
                 symbol_label,
                 direct_target,
+                function_scope: None,
                 span_name: span.name.clone(),
                 kind: DisasmRowKind::Instruction,
             }

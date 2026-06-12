@@ -113,6 +113,7 @@ mod tests {
             symbolized_names: Vec::new(),
             symbol_label: None,
             direct_target: None,
+            function_scope: None,
             span_name: Some(".text".to_owned()),
             kind: DisasmRowKind::Instruction,
         }

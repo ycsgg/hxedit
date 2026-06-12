@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 use crate::disasm::DisasmRow;
 use crate::mode::NibblePhase;
 use crate::util::geometry::rect_contains;
+use crate::view::disasm_grid::DisasmHitSource;
 use crate::view::layout::MainColumns;
 
 /// Result of translating a terminal click into a byte selection.
@@ -25,6 +26,7 @@ pub fn disassembly_hit_test(
     x: u16,
     y: u16,
     rows: &[DisasmRow],
+    visual_row_sources: &[Option<DisasmHitSource>],
 ) -> Option<MouseHit> {
     if let Some(side_panel) = columns.side_panel {
         if rect_contains(side_panel, x, y) {
@@ -35,17 +37,20 @@ pub fn disassembly_hit_test(
     let row_idx = row_from_point(columns.gutter, x, y)
         .or_else(|| row_from_point(columns.hex, x, y))
         .or_else(|| row_from_point(columns.ascii, x, y))?;
-    let row = rows.get(row_idx)?;
+    let source = visual_row_sources.get(row_idx).copied().flatten()?;
+    let row = rows.get(source.row_index)?;
 
-    let (offset, phase) =
-        if rect_contains(columns.gutter, x, y) || rect_contains(columns.ascii, x, y) {
-            (row.offset, None)
-        } else if rect_contains(columns.hex, x, y) {
-            let (byte_idx, phase) = disasm_hex_col_from_x(x - columns.hex.x, row.bytes.len())?;
-            (row.offset + byte_idx as u64, phase)
-        } else {
-            return None;
-        };
+    let (offset, phase) = if source.row_start_only
+        || rect_contains(columns.gutter, x, y)
+        || rect_contains(columns.ascii, x, y)
+    {
+        (row.offset, None)
+    } else if rect_contains(columns.hex, x, y) {
+        let (byte_idx, phase) = disasm_hex_col_from_x(x - columns.hex.x, row.bytes.len())?;
+        (row.offset + byte_idx as u64, phase)
+    } else {
+        return None;
+    };
 
     Some(MouseHit {
         offset,
@@ -252,7 +257,7 @@ fn disasm_hex_col_from_x(x: u16, byte_count: usize) -> Option<(usize, Option<Nib
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::disasm::{DisasmRow, DisasmRowKind};
+    use crate::disasm::{DisasmFunctionBoundary, DisasmFunctionScope, DisasmRow, DisasmRowKind};
 
     fn columns() -> MainColumns {
         MainColumns {
@@ -291,6 +296,7 @@ mod tests {
                 symbolized_names: Vec::new(),
                 symbol_label: None,
                 direct_target: None,
+                function_scope: None,
                 span_name: Some(".text".to_owned()),
                 kind: DisasmRowKind::Instruction,
             },
@@ -303,6 +309,7 @@ mod tests {
                 symbolized_names: Vec::new(),
                 symbol_label: None,
                 direct_target: None,
+                function_scope: None,
                 span_name: Some(".text".to_owned()),
                 kind: DisasmRowKind::Instruction,
             },
@@ -315,10 +322,22 @@ mod tests {
                 symbolized_names: Vec::new(),
                 symbol_label: None,
                 direct_target: None,
+                function_scope: None,
                 span_name: Some(".rodata".to_owned()),
                 kind: DisasmRowKind::Data,
             },
         ]
+    }
+
+    fn disassembly_visual_row_sources(rows: &[DisasmRow]) -> Vec<Option<DisasmHitSource>> {
+        (0..rows.len())
+            .map(|row_index| {
+                Some(DisasmHitSource {
+                    row_index,
+                    row_start_only: false,
+                })
+            })
+            .collect()
     }
 
     #[test]
@@ -406,22 +425,79 @@ mod tests {
 
     #[test]
     fn disassembly_gutter_click_selects_row_start() {
-        let hit = disassembly_hit_test(disassembly_columns(), 2, 1, &disassembly_rows()).unwrap();
+        let rows = disassembly_rows();
+        let sources = disassembly_visual_row_sources(&rows);
+        let hit = disassembly_hit_test(disassembly_columns(), 2, 1, &rows, &sources).unwrap();
         assert_eq!(hit.offset, 0x101);
         assert_eq!(hit.phase, None);
     }
 
     #[test]
     fn disassembly_hex_click_selects_byte_and_nibble() {
-        let hit = disassembly_hit_test(disassembly_columns(), 22, 1, &disassembly_rows()).unwrap();
+        let rows = disassembly_rows();
+        let sources = disassembly_visual_row_sources(&rows);
+        let hit = disassembly_hit_test(disassembly_columns(), 22, 1, &rows, &sources).unwrap();
         assert_eq!(hit.offset, 0x102);
         assert_eq!(hit.phase, Some(NibblePhase::High));
     }
 
     #[test]
     fn disassembly_text_click_selects_row_start() {
-        let hit = disassembly_hit_test(disassembly_columns(), 50, 2, &disassembly_rows()).unwrap();
+        let rows = disassembly_rows();
+        let sources = disassembly_visual_row_sources(&rows);
+        let hit = disassembly_hit_test(disassembly_columns(), 50, 2, &rows, &sources).unwrap();
         assert_eq!(hit.offset, 0x200);
         assert_eq!(hit.phase, None);
+    }
+
+    #[test]
+    fn disassembly_function_boundary_rows_select_function_edges() {
+        let mut rows = disassembly_rows();
+        rows[0].function_scope = Some(DisasmFunctionScope {
+            name: "sub_401000".to_owned(),
+            entry_va: 0x401000,
+            boundary: DisasmFunctionBoundary::Entry,
+            stale: false,
+        });
+        rows[1].function_scope = Some(DisasmFunctionScope {
+            name: "sub_401000".to_owned(),
+            entry_va: 0x401000,
+            boundary: DisasmFunctionBoundary::Exit,
+            stale: false,
+        });
+        let sources = vec![
+            Some(DisasmHitSource {
+                row_index: 0,
+                row_start_only: true,
+            }),
+            Some(DisasmHitSource {
+                row_index: 0,
+                row_start_only: false,
+            }),
+            Some(DisasmHitSource {
+                row_index: 1,
+                row_start_only: false,
+            }),
+            Some(DisasmHitSource {
+                row_index: 1,
+                row_start_only: true,
+            }),
+            Some(DisasmHitSource {
+                row_index: 2,
+                row_start_only: false,
+            }),
+        ];
+
+        let start_hit =
+            disassembly_hit_test(disassembly_columns(), 50, 0, &rows, &sources).unwrap();
+        assert_eq!(start_hit.offset, 0x100);
+        assert_eq!(start_hit.phase, None);
+        let start_hex_hit =
+            disassembly_hit_test(disassembly_columns(), 22, 0, &rows, &sources).unwrap();
+        assert_eq!(start_hex_hit.offset, 0x100);
+        assert_eq!(start_hex_hit.phase, None);
+        let end_hit = disassembly_hit_test(disassembly_columns(), 50, 3, &rows, &sources).unwrap();
+        assert_eq!(end_hit.offset, 0x101);
+        assert_eq!(end_hit.phase, None);
     }
 }

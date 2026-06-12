@@ -1,6 +1,6 @@
 use crate::app::{App, MainView};
 use crate::disasm::regions::{data_row_offsets_before, data_row_start, visible_regions};
-use crate::disasm::DisassemblyState;
+use crate::disasm::{DisasmRow, DisassemblyState};
 use crate::executable::CodeSpan;
 use crate::mode::Mode;
 
@@ -41,8 +41,11 @@ impl App {
         if rows.is_empty() {
             return Ok(());
         }
-        let first = rows.first().map(|row| row.offset).unwrap_or(cursor_row);
-        let last = rows.last().map(|row| row.offset).unwrap_or(cursor_row);
+        let (first, last) = self
+            .visible_disassembly_display_bounds(&rows)
+            .unwrap_or_else(|| (&rows[0], rows.last().unwrap_or(&rows[0])));
+        let first = first.offset;
+        let last = last.offset;
         if cursor_row < first {
             self.set_disassembly_viewport_top(cursor_row);
         } else if cursor_row > last {
@@ -117,10 +120,7 @@ impl App {
             state.viewport_top,
             self.visible_rows().max(1) as usize,
         )?;
-        let Some(first) = rows.first() else {
-            return Ok(());
-        };
-        let Some(last) = rows.last() else {
+        let Some((first, last)) = self.visible_disassembly_display_bounds(&rows) else {
             return Ok(());
         };
         let visible_start = first.offset;
@@ -131,6 +131,33 @@ impl App {
             self.cursor = self.clamp_cursor_for_mode(last.offset, self.mode);
         }
         Ok(())
+    }
+
+    fn visible_disassembly_display_bounds<'a>(
+        &self,
+        rows: &'a [DisasmRow],
+    ) -> Option<(&'a DisasmRow, &'a DisasmRow)> {
+        let display_rows = self.visible_rows().max(1) as usize;
+        let columns = self.last_columns;
+        let editing = self
+            .disasm_edit()
+            .map(|edit| (edit.row_offset, edit.buffer.as_str()));
+        let display = crate::view::disasm_grid::build_display(
+            rows,
+            columns.map(|c| c.gutter.width as usize).unwrap_or(18),
+            self.cursor_anchor_offset(),
+            editing,
+            columns.map(|c| c.ascii.width as usize).unwrap_or(80),
+            &self.palette,
+        );
+        let mut visible_rows = display
+            .row_sources
+            .into_iter()
+            .take(display_rows)
+            .filter_map(|source| source.and_then(|index| rows.get(index)));
+        let first = visible_rows.next()?;
+        let last = visible_rows.next_back().unwrap_or(first);
+        Some((first, last))
     }
 
     pub(crate) fn current_disassembly_state(&self) -> Option<DisassemblyState> {

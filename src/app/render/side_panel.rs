@@ -320,17 +320,20 @@ impl App {
         area: Rect,
         state: &crate::app::SymbolState,
     ) {
-        let lines = symbol_panel::build_lines(state, state.selected_row, area.width, &self.palette);
         let list_height = symbol_panel::list_height(area.height);
-        let visible_start = state.scroll_offset.min(lines.len());
-        let visible_end = (visible_start + list_height.saturating_sub(1)).min(lines.len());
+        let visible_start = state.scroll_offset.min(state.entries.len());
+        let visible_end = (visible_start + list_height.saturating_sub(1)).min(state.entries.len());
+        let lines = symbol_panel::build_visible_lines(
+            state,
+            state.selected_row,
+            visible_start,
+            visible_end,
+            area.width,
+            &self.palette,
+        );
 
         let mut render_lines = vec![symbol_panel::header_line(area.width, &self.palette)];
-        render_lines.extend(
-            lines[visible_start..visible_end]
-                .iter()
-                .map(|line| line.line.clone()),
-        );
+        render_lines.extend(lines.into_iter().map(|line| line.line));
         render_lines.push(Line::raw(""));
         let detail_lines = symbol_panel::detail_lines(state, area.width, &self.palette);
         let detail_height = symbol_panel::detail_height(area.height);

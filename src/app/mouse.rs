@@ -327,7 +327,24 @@ impl App {
                         self.visible_rows() as usize,
                     )
                     .ok()?;
-                crate::input::mouse::disassembly_hit_test(columns, x, y, &rows)
+                let editing = self
+                    .disasm_edit()
+                    .map(|edit| (edit.row_offset, edit.buffer.as_str()));
+                let display = crate::view::disasm_grid::build_display(
+                    &rows,
+                    columns.gutter.width as usize,
+                    self.cursor_anchor_offset(),
+                    editing,
+                    columns.ascii.width as usize,
+                    &self.palette,
+                );
+                crate::input::mouse::disassembly_hit_test(
+                    columns,
+                    x,
+                    y,
+                    &rows,
+                    &display.hit_sources,
+                )
             }
         }
     }

@@ -130,15 +130,15 @@ fn sagitta_test_snapshot_for(
         RecoveredConfidence, RecoveredFunction, SagittaSnapshot, SagittaSummary,
     };
 
-    SagittaSnapshot {
-        summary: SagittaSummary {
+    SagittaSnapshot::new(
+        SagittaSummary {
             functions: 1,
             blocks: 0,
             cfg_edges: 0,
             call_edges: 0,
             diagnostics: 0,
         },
-        functions: vec![RecoveredFunction {
+        vec![RecoveredFunction {
             entry_va,
             entry_logical_offset,
             name: name.to_owned(),
@@ -149,11 +149,141 @@ fn sagitta_test_snapshot_for(
             callers: Vec::new(),
             callees: Vec::new(),
         }],
-        blocks: Vec::new(),
-        cfg_edges: Vec::new(),
-        call_edges: Vec::new(),
-        diagnostics: Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+fn sagitta_test_snapshot_with_block(
+    entry_va: u64,
+    entry_logical_offset: Option<u64>,
+    name: &str,
+    block_end_va: u64,
+) -> super::analysis_state::SagittaSnapshot {
+    sagitta_test_snapshot_with_blocks(
+        entry_va,
+        entry_logical_offset,
+        name,
+        vec![(entry_va, block_end_va, entry_logical_offset)],
+    )
+}
+
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+fn sagitta_test_snapshot_with_blocks(
+    entry_va: u64,
+    entry_logical_offset: Option<u64>,
+    name: &str,
+    block_ranges: Vec<(u64, u64, Option<u64>)>,
+) -> super::analysis_state::SagittaSnapshot {
+    use super::analysis_state::{
+        RecoveredBlock, RecoveredConfidence, RecoveredFunction, SagittaSnapshot, SagittaSummary,
+    };
+    let block_starts = block_ranges
+        .iter()
+        .map(|(start_va, _, _)| *start_va)
+        .collect::<Vec<_>>();
+    let blocks = block_ranges
+        .into_iter()
+        .map(|(start_va, end_va, logical_offset)| RecoveredBlock {
+            start_va,
+            end_va,
+            logical_offset,
+            size: end_va.saturating_sub(start_va) as u32,
+        })
+        .collect::<Vec<_>>();
+
+    SagittaSnapshot::new(
+        SagittaSummary {
+            functions: 1,
+            blocks: blocks.len(),
+            cfg_edges: 0,
+            call_edges: 0,
+            diagnostics: 0,
+        },
+        vec![RecoveredFunction {
+            entry_va,
+            entry_logical_offset,
+            name: name.to_owned(),
+            name_kind: crate::app::symbol_state::SymbolNameKind::Synthetic,
+            confidence: RecoveredConfidence::Heuristic,
+            provenance: Vec::new(),
+            blocks: block_starts,
+            callers: Vec::new(),
+            callees: Vec::new(),
+        }],
+        blocks,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+fn sagitta_large_test_snapshot_with_target(
+    function_count: usize,
+) -> super::analysis_state::SagittaSnapshot {
+    use super::analysis_state::{
+        RecoveredBlock, RecoveredConfidence, RecoveredFunction, SagittaSnapshot, SagittaSummary,
+    };
+
+    let mut functions = Vec::with_capacity(function_count + 1);
+    let mut blocks = Vec::with_capacity(function_count + 1);
+    for index in 0..function_count {
+        let entry_va = 0x300000 + (index as u64 * 0x10);
+        functions.push(RecoveredFunction {
+            entry_va,
+            entry_logical_offset: Some(index as u64),
+            name: format!("sub_{entry_va:x}"),
+            name_kind: crate::app::symbol_state::SymbolNameKind::Synthetic,
+            confidence: RecoveredConfidence::Heuristic,
+            provenance: Vec::new(),
+            blocks: vec![entry_va],
+            callers: Vec::new(),
+            callees: Vec::new(),
+        });
+        blocks.push(RecoveredBlock {
+            start_va: entry_va,
+            end_va: entry_va + 1,
+            logical_offset: Some(index as u64),
+            size: 1,
+        });
     }
+
+    functions.push(RecoveredFunction {
+        entry_va: 0x401000,
+        entry_logical_offset: Some(0x100),
+        name: "sub_401000".to_owned(),
+        name_kind: crate::app::symbol_state::SymbolNameKind::Synthetic,
+        confidence: RecoveredConfidence::Heuristic,
+        provenance: Vec::new(),
+        blocks: vec![0x401000],
+        callers: Vec::new(),
+        callees: Vec::new(),
+    });
+    blocks.push(RecoveredBlock {
+        start_va: 0x401000,
+        end_va: 0x401003,
+        logical_offset: Some(0x100),
+        size: 3,
+    });
+
+    SagittaSnapshot::new(
+        SagittaSummary {
+            functions: functions.len(),
+            blocks: blocks.len(),
+            cfg_edges: 0,
+            call_edges: 0,
+            diagnostics: 0,
+        },
+        functions,
+        blocks,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
 }
 
 #[cfg(feature = "sagitta-analysis")]
@@ -2094,6 +2224,168 @@ fn sagitta_snapshot_annotates_disassembly_rows_and_symbol_search() {
 
 #[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
 #[test]
+fn sagitta_result_adds_function_rail_to_cached_disassembly_rows() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0xC3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    let state = app.current_disassembly_state().unwrap();
+    let rows_before = app.collect_disassembly_rows(&state, 0x100, 3).unwrap();
+    assert_eq!(rows_before.len(), 3);
+    assert!(rows_before.iter().all(|row| row.function_scope.is_none()));
+
+    app.analysis_job_id = 11;
+    app.background_tx
+        .send(crate::app::BackgroundJobResult::SagittaAnalysis {
+            job_id: 11,
+            revision: app.document_revision,
+            result: Ok(sagitta_test_snapshot_with_block(
+                0x401000,
+                Some(0x100),
+                "sub_401000",
+                0x401003,
+            )),
+        })
+        .unwrap();
+    app.drain_background_results();
+
+    let rows_after = app.collect_disassembly_rows(&state, 0x100, 3).unwrap();
+
+    assert_eq!(
+        rows_after[0]
+            .function_scope
+            .as_ref()
+            .map(|scope| scope.boundary),
+        Some(crate::disasm::DisasmFunctionBoundary::Entry)
+    );
+    assert_eq!(
+        rows_after[1]
+            .function_scope
+            .as_ref()
+            .map(|scope| scope.boundary),
+        Some(crate::disasm::DisasmFunctionBoundary::Body)
+    );
+    assert_eq!(
+        rows_after[2]
+            .function_scope
+            .as_ref()
+            .map(|scope| scope.boundary),
+        Some(crate::disasm::DisasmFunctionBoundary::Exit)
+    );
+    assert_eq!(
+        rows_after[0]
+            .function_scope
+            .as_ref()
+            .map(|scope| scope.name.as_str()),
+        Some("sub_401000")
+    );
+}
+
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[test]
+fn sagitta_large_snapshot_annotations_do_not_scan_all_functions_per_row() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0xC3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: app.document_revision,
+        snapshot: Some(sagitta_large_test_snapshot_with_target(8192)),
+    });
+
+    let state = app.current_disassembly_state().unwrap();
+    for _ in 0..8 {
+        let rows = app.collect_disassembly_rows(&state, 0x100, 3).unwrap();
+        assert_eq!(
+            rows[0].function_scope.as_ref().map(|scope| scope.boundary),
+            Some(crate::disasm::DisasmFunctionBoundary::Entry)
+        );
+        assert_eq!(
+            rows[1].function_scope.as_ref().map(|scope| scope.boundary),
+            Some(crate::disasm::DisasmFunctionBoundary::Body)
+        );
+        assert_eq!(
+            rows[2].function_scope.as_ref().map(|scope| scope.boundary),
+            Some(crate::disasm::DisasmFunctionBoundary::Exit)
+        );
+        assert_eq!(rows[0].symbol_label.as_deref(), Some("sub_401000"));
+    }
+}
+
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[test]
+fn sagitta_function_rail_spans_alignment_gap_between_blocks() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0x90, 0xC3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: app.document_revision,
+        snapshot: Some(sagitta_test_snapshot_with_blocks(
+            0x401000,
+            Some(0x100),
+            "sub_401000",
+            vec![
+                (0x401000, 0x401001, Some(0x100)),
+                (0x401003, 0x401004, Some(0x103)),
+            ],
+        )),
+    });
+
+    let state = app.current_disassembly_state().unwrap();
+    let rows = app.collect_disassembly_rows(&state, 0x100, 4).unwrap();
+
+    assert_eq!(
+        rows[0].function_scope.as_ref().map(|scope| scope.boundary),
+        Some(crate::disasm::DisasmFunctionBoundary::Entry)
+    );
+    assert_eq!(
+        rows[1].function_scope.as_ref().map(|scope| scope.boundary),
+        Some(crate::disasm::DisasmFunctionBoundary::Body)
+    );
+    assert_eq!(
+        rows[2].function_scope.as_ref().map(|scope| scope.boundary),
+        Some(crate::disasm::DisasmFunctionBoundary::Body)
+    );
+    assert_eq!(
+        rows[3].function_scope.as_ref().map(|scope| scope.boundary),
+        Some(crate::disasm::DisasmFunctionBoundary::Exit)
+    );
+}
+
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[test]
+fn sagitta_outdated_bytes_keep_function_rail_marked_stale() {
+    let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0xC3], "entry");
+    let mut app = app_with_bytes(&bytes);
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::OutdatedBytes,
+        revision: app.document_revision,
+        snapshot: Some(sagitta_test_snapshot_with_block(
+            0x401000,
+            Some(0x100),
+            "sub_401000",
+            0x401003,
+        )),
+    });
+
+    let state = app.current_disassembly_state().unwrap();
+    let rows = app.collect_disassembly_rows(&state, 0x100, 3).unwrap();
+
+    assert!(rows
+        .iter()
+        .all(|row| row.function_scope.as_ref().is_some_and(|scope| scope.stale)));
+}
+
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[test]
 fn sagitta_invalid_layout_disables_disassembly_annotations() {
     let bytes =
         build_disassembly_elf64_with_symbol(&[0x90, 0xE8, 0xFA, 0xFF, 0xFF, 0xFF, 0xC3], "entry");
@@ -2104,7 +2396,12 @@ fn sagitta_invalid_layout_disables_disassembly_annotations() {
         status: super::analysis_state::SagittaStatus::Ready,
         validity: super::analysis_state::AnalysisValidity::InvalidLayout,
         revision: app.document_revision,
-        snapshot: Some(sagitta_test_snapshot()),
+        snapshot: Some(sagitta_test_snapshot_with_block(
+            0x401000,
+            Some(0x100),
+            "sub_401000",
+            0x401007,
+        )),
     });
 
     let state = app.current_disassembly_state().unwrap();
@@ -2118,6 +2415,7 @@ fn sagitta_invalid_layout_disables_disassembly_annotations() {
             .and_then(|target| target.display_name.as_deref()),
         Some("entry")
     );
+    assert!(rows.iter().all(|row| row.function_scope.is_none()));
 }
 
 #[cfg(all(feature = "disasm-capstone", feature = "symbols"))]

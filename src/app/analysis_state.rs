@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::panic;
 use std::thread;
 
@@ -6,7 +7,7 @@ use crate::app::symbol_state::{
 };
 use crate::app::{App, EditOp, SidePanelKind, SymbolState};
 use crate::core::document::Document;
-use crate::disasm::DisasmRow;
+use crate::disasm::{DisasmFunctionBoundary, DisasmFunctionScope, DisasmRow, DisasmRowKind};
 use crate::error::{HxError, HxResult};
 use crate::executable::SymbolType;
 
@@ -53,6 +54,17 @@ pub(crate) struct SagittaSnapshot {
     pub cfg_edges: Vec<RecoveredCfgEdge>,
     pub call_edges: Vec<RecoveredCallEdge>,
     pub diagnostics: Vec<RecoveredDiagnostic>,
+    function_entry_index: Vec<(u64, usize)>,
+    function_scope_index: Vec<FunctionScopeIndexEntry>,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionScopeIndexEntry {
+    start_va: u64,
+    end_va: u64,
+    function_start: u64,
+    function_end: u64,
+    function_idx: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -151,6 +163,28 @@ pub(crate) enum RecoveredFunctionSource {
 }
 
 impl SagittaSnapshot {
+    pub(crate) fn new(
+        summary: SagittaSummary,
+        functions: Vec<RecoveredFunction>,
+        blocks: Vec<RecoveredBlock>,
+        cfg_edges: Vec<RecoveredCfgEdge>,
+        call_edges: Vec<RecoveredCallEdge>,
+        diagnostics: Vec<RecoveredDiagnostic>,
+    ) -> Self {
+        let function_entry_index = build_function_entry_index(&functions);
+        let function_scope_index = build_function_scope_index(&functions, &blocks);
+        Self {
+            summary,
+            functions,
+            blocks,
+            cfg_edges,
+            call_edges,
+            diagnostics,
+            function_entry_index,
+            function_scope_index,
+        }
+    }
+
     pub(crate) fn symbol_entries(&self) -> Vec<SymbolPanelEntry> {
         let mut entries = self
             .functions
@@ -262,19 +296,20 @@ impl App {
     }
 
     pub(crate) fn open_sagitta_symbol_panel_if_ready(&mut self) -> bool {
-        let Some(snapshot) = self.ready_sagitta_snapshot().cloned() else {
+        let Some(entries) = self
+            .ready_sagitta_snapshot()
+            .map(SagittaSnapshot::symbol_entries)
+        else {
             return false;
         };
+        let functions = entries.len();
         self.symbol_state = Some(SymbolState::from_entries(
-            snapshot.symbol_entries(),
+            entries,
             SymbolPanelSource::Sagitta,
         ));
         self.show_side_panel = true;
         self.focus_symbol_panel();
-        self.set_info_status(format!(
-            "symbol view (Sagitta, {} functions)",
-            snapshot.summary.functions
-        ));
+        self.set_info_status(format!("symbol view (Sagitta, {functions} functions)"));
         true
     }
 
@@ -322,10 +357,14 @@ impl App {
             return;
         };
 
+        let stale = state.validity == AnalysisValidity::OutdatedBytes;
         for row in rows {
             if let Some(va) = row.virtual_address {
                 if let Some(function) = snapshot.function_at_entry(va) {
                     row.symbol_label = Some(function.name.clone());
+                }
+                if row.kind == DisasmRowKind::Instruction {
+                    row.function_scope = snapshot.function_scope_for_row(va, row.len(), stale);
                 }
             }
             if let Some(target) = row.direct_target.as_mut() {
@@ -401,11 +440,14 @@ impl App {
     }
 
     fn install_sagitta_symbol_panel_without_focus(&mut self) {
-        let Some(snapshot) = self.ready_sagitta_snapshot().cloned() else {
+        let Some(entries) = self
+            .ready_sagitta_snapshot()
+            .map(SagittaSnapshot::symbol_entries)
+        else {
             return;
         };
         self.symbol_state = Some(SymbolState::from_entries(
-            snapshot.symbol_entries(),
+            entries,
             SymbolPanelSource::Sagitta,
         ));
         if !self.show_side_panel {
@@ -439,9 +481,133 @@ impl App {
 
 impl SagittaSnapshot {
     fn function_at_entry(&self, va: u64) -> Option<&RecoveredFunction> {
-        self.functions
-            .iter()
-            .find(|function| function.entry_va == va)
+        let idx = self
+            .function_entry_index
+            .partition_point(|(entry_va, _)| *entry_va < va);
+        let (_, function_idx) = self
+            .function_entry_index
+            .get(idx)
+            .filter(|(entry_va, _)| *entry_va == va)?;
+        self.functions.get(*function_idx)
+    }
+
+    fn function_scope_for_row(
+        &self,
+        va: u64,
+        row_len: usize,
+        stale: bool,
+    ) -> Option<DisasmFunctionScope> {
+        let row_start = va;
+        let row_end = va.saturating_add(row_len.max(1) as u64);
+        let scope = self.scope_index_entry_for_va(va)?;
+        let function = self.functions.get(scope.function_idx)?;
+        let is_entry = function.entry_va >= row_start && function.entry_va < row_end;
+        let is_exit = row_start < scope.function_end && row_end >= scope.function_end;
+        let boundary = match (is_entry, is_exit) {
+            (true, true) => DisasmFunctionBoundary::EntryExit,
+            (true, false) => DisasmFunctionBoundary::Entry,
+            (false, true) => DisasmFunctionBoundary::Exit,
+            (false, false) => {
+                if row_start >= scope.function_start && row_start < scope.function_end {
+                    DisasmFunctionBoundary::Body
+                } else {
+                    return None;
+                }
+            }
+        };
+        Some(DisasmFunctionScope {
+            name: function.name.clone(),
+            entry_va: function.entry_va,
+            boundary,
+            stale,
+        })
+    }
+
+    fn scope_index_entry_for_va(&self, va: u64) -> Option<&FunctionScopeIndexEntry> {
+        let idx = self
+            .function_scope_index
+            .partition_point(|entry| entry.start_va <= va);
+        let candidate_start = self.function_scope_index.get(idx.checked_sub(1)?)?.start_va;
+        let mut best: Option<&FunctionScopeIndexEntry> = None;
+        let mut idx = idx;
+        while idx > 0 {
+            idx -= 1;
+            let entry = &self.function_scope_index[idx];
+            if entry.start_va != candidate_start {
+                break;
+            }
+            if entry.end_va > va {
+                best = match best {
+                    Some(current) if current.function_len() <= entry.function_len() => {
+                        Some(current)
+                    }
+                    _ => Some(entry),
+                };
+            }
+        }
+        best
+    }
+}
+
+impl FunctionScopeIndexEntry {
+    fn function_len(&self) -> u64 {
+        self.function_end.saturating_sub(self.function_start)
+    }
+}
+
+fn build_function_entry_index(functions: &[RecoveredFunction]) -> Vec<(u64, usize)> {
+    let mut index = functions
+        .iter()
+        .enumerate()
+        .map(|(idx, function)| (function.entry_va, idx))
+        .collect::<Vec<_>>();
+    index.sort_unstable();
+    index
+}
+
+fn build_function_scope_index(
+    functions: &[RecoveredFunction],
+    blocks: &[RecoveredBlock],
+) -> Vec<FunctionScopeIndexEntry> {
+    let block_by_start = blocks
+        .iter()
+        .map(|block| (block.start_va, block))
+        .collect::<HashMap<_, _>>();
+    let function_ranges = functions
+        .iter()
+        .map(|function| function_range_from_blocks(function, &block_by_start))
+        .collect::<Vec<_>>();
+    let mut index = Vec::new();
+    for (function_idx, &(function_start, function_end)) in function_ranges.iter().enumerate() {
+        index.push(FunctionScopeIndexEntry {
+            start_va: function_start,
+            end_va: function_end,
+            function_start,
+            function_end,
+            function_idx,
+        });
+    }
+    index.sort_unstable_by_key(|entry| (entry.start_va, entry.end_va, entry.function_idx));
+    index
+}
+
+fn function_range_from_blocks(
+    function: &RecoveredFunction,
+    block_by_start: &HashMap<u64, &RecoveredBlock>,
+) -> (u64, u64) {
+    let mut start = None;
+    let mut end = None;
+    for block_start in &function.blocks {
+        let Some(block) = block_by_start.get(block_start) else {
+            continue;
+        };
+        let block_end = block.end_va.max(block.start_va.saturating_add(1));
+        start = Some(start.map_or(block.start_va, |current: u64| current.min(block.start_va)));
+        end = Some(end.map_or(block_end, |current: u64| current.max(block_end)));
+    }
+    match (start, end) {
+        (Some(start), Some(end)) => (start, end),
+        _ => (function.entry_va, function.entry_va.saturating_add(1)),
     }
 }
 
@@ -598,8 +764,8 @@ fn snapshot_from_analysis(analysis: &sagitta::Analysis) -> SagittaSnapshot {
             message: diagnostic.message,
         })
         .collect::<Vec<_>>();
-    SagittaSnapshot {
-        summary: SagittaSummary {
+    SagittaSnapshot::new(
+        SagittaSummary {
             functions: functions.len(),
             blocks: blocks.len(),
             cfg_edges: cfg_edges.len(),
@@ -611,7 +777,7 @@ fn snapshot_from_analysis(analysis: &sagitta::Analysis) -> SagittaSnapshot {
         cfg_edges,
         call_edges,
         diagnostics,
-    }
+    )
 }
 
 fn validity_for_edit_ops(ops: &[EditOp]) -> Option<AnalysisValidity> {

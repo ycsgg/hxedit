@@ -15,18 +15,24 @@ pub(crate) struct SymbolLine {
     pub line: Line<'static>,
 }
 
-pub(crate) fn build_lines(
+pub(crate) fn build_visible_lines(
     state: &SymbolState,
     selected_row: usize,
+    start: usize,
+    end: usize,
     width: u16,
     palette: &Palette,
 ) -> Vec<SymbolLine> {
     let width = width.max(1) as usize;
-    state
-        .entries
+    let end = end.min(state.entries.len());
+    if start >= end {
+        return Vec::new();
+    }
+    state.entries[start..end]
         .iter()
         .enumerate()
         .map(|(row_index, entry)| {
+            let row_index = start + row_index;
             let selected = row_index == selected_row;
             SymbolLine {
                 line: list_line(entry, selected, width, palette),
@@ -312,5 +318,40 @@ mod tests {
         assert!(text.contains("logical"));
         assert!(!text.contains("file"));
         assert_eq!(detail_line_count(&state, 40), lines.len());
+    }
+
+    #[test]
+    fn visible_lines_only_formats_requested_symbol_rows() {
+        let state = SymbolState::from_entries(
+            (0..10)
+                .map(|index| SymbolPanelEntry {
+                    address: 0x401000 + index,
+                    name: format!("sub_{index}"),
+                    name_kind: SymbolNameKind::Synthetic,
+                    size: 0,
+                    symbol_type: SymbolType::Function,
+                    source: SymbolPanelEntrySource::Sagitta,
+                    logical_offset: Some(index),
+                    file_offset: Some(index),
+                    confidence_label: None,
+                })
+                .collect(),
+            SymbolPanelSource::Sagitta,
+        );
+        let palette = Palette::new(ColorLevel::NoColor);
+
+        let lines = build_visible_lines(&state, 4, 3, 6, 40, &palette);
+        let text = lines
+            .iter()
+            .map(|line| line_text(&line.line))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(lines.len(), 3);
+        assert!(text.contains("sub_3"));
+        assert!(text.contains("sub_4"));
+        assert!(text.contains("sub_5"));
+        assert!(!text.contains("sub_2"));
+        assert!(!text.contains("sub_6"));
     }
 }

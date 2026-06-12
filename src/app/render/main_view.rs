@@ -381,11 +381,23 @@ impl App {
         let editing = self
             .disasm_edit()
             .map(|edit| (edit.row_offset, edit.buffer.as_str()));
+        let text_width = self
+            .last_columns
+            .map(|columns| columns.ascii.width as usize)
+            .unwrap_or(80);
+        let display = disasm_grid::build_display(
+            rows,
+            gutter_width,
+            cursor,
+            editing,
+            text_width,
+            &self.palette,
+        );
         MainLines {
-            gutter: disasm_grid::build_gutter(rows, gutter_width, cursor, &self.palette),
+            gutter: display.gutter,
             pane: MainPaneLines::Disassembly {
-                bytes: disasm_grid::build_bytes(rows, cursor, &self.palette),
-                text: disasm_grid::build_text(rows, cursor, editing, &self.palette),
+                bytes: display.bytes,
+                text: display.text,
             },
         }
     }
@@ -490,12 +502,12 @@ impl App {
                 frame.render_widget(Paragraph::new(ascii), ascii_area);
             }
             MainPaneLines::Disassembly { bytes, text } => {
-                frame.render_widget(Paragraph::new(bytes).wrap(Wrap { trim: false }), hex_area);
+                frame.render_widget(Paragraph::new(bytes), hex_area);
                 frame.render_widget(
                     separator_widget(columns.sep2.height, &self.palette),
                     columns.sep2,
                 );
-                frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), ascii_area);
+                frame.render_widget(Paragraph::new(text), ascii_area);
                 self.render_disassembly_edit_cursor(frame, columns);
             }
         }
@@ -524,7 +536,26 @@ impl App {
         else {
             return;
         };
-        let visible_row = match rows.iter().position(|row| row.offset == row_offset) {
+        let row_index = match rows.iter().position(|row| row.offset == row_offset) {
+            Some(index) => index,
+            None => return,
+        };
+        let editing = self
+            .disasm_edit()
+            .map(|edit| (edit.row_offset, edit.buffer.as_str()));
+        let display = disasm_grid::build_display(
+            &rows,
+            columns.gutter.width as usize,
+            self.cursor_anchor_offset(),
+            editing,
+            columns.ascii.width as usize,
+            &self.palette,
+        );
+        let visible_row = match display
+            .row_sources
+            .iter()
+            .position(|source| *source == Some(row_index))
+        {
             Some(row) => row,
             None => return,
         };

@@ -394,7 +394,7 @@ analysis offsets changed; rerun :ana
 - unsupported arch / format。
 - raw forced disassembly。
 
-函数体高亮可以后做；第一阶段只做 symbol label 和 target name。
+第一阶段做 symbol label、target name 和函数体 rail；完整函数体高亮 / CFG graph 后续再做。
 
 ---
 

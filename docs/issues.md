@@ -118,8 +118,8 @@
   - 当前只覆盖 direct branch/call 的单 token symbol/import 名
 
 - [ ] **[P2] Sagitta snapshot 继续增强 disassembly annotation**
-  - 现状：`sagitta-analysis` feature 已能通过 crates.io `sagitta-rs` 后台分析 current logical bytes，并用 recovered functions 覆盖 symbol panel、函数入口 label、direct branch target name 和 `:symbol` 搜索
-  - 缺口：后续应按 `docs/sagitta-integration-design.md` 继续接入 row 所属函数、indirect target name、call graph / CFG 提示和更细的失效提示
+  - 现状：`sagitta-analysis` feature 已能通过 crates.io `sagitta-rs` 后台分析 current logical bytes，并用 recovered functions 覆盖 symbol panel、函数入口 label、direct branch target name、函数体 rail 和 `:symbol` 搜索
+  - 缺口：后续应按 `docs/sagitta-integration-design.md` 继续接入 indirect target name、call graph / CFG 提示和更细的失效提示
 
 - [ ] **[P2] 首批架构之外的 decoder 支持**
   - 后续再评估 `x86`、`arm`、`riscv64` 与替代 backend

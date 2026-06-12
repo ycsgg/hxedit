@@ -25,6 +25,22 @@ pub enum DisasmRowKind {
     Invalid,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisasmFunctionBoundary {
+    Entry,
+    Body,
+    Exit,
+    EntryExit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisasmFunctionScope {
+    pub name: String,
+    pub entry_va: u64,
+    pub boundary: DisasmFunctionBoundary,
+    pub stale: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisasmRow {
     pub offset: u64,
@@ -35,6 +51,7 @@ pub struct DisasmRow {
     pub symbolized_names: Vec<String>,
     pub symbol_label: Option<String>,
     pub direct_target: Option<DirectBranchTarget>,
+    pub function_scope: Option<DisasmFunctionScope>,
     pub span_name: Option<String>,
     pub kind: DisasmRowKind,
 }
@@ -56,6 +73,7 @@ impl DisasmRow {
             symbolized_names: Vec::new(),
             symbol_label,
             direct_target: None,
+            function_scope: None,
             span_name,
             kind: DisasmRowKind::Data,
         }
@@ -77,6 +95,7 @@ impl DisasmRow {
             symbolized_names: Vec::new(),
             symbol_label,
             direct_target: None,
+            function_scope: None,
             span_name,
             kind: DisasmRowKind::Invalid,
         }

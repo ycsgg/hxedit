@@ -150,7 +150,7 @@ Sagitta analysis commands in `sagitta-analysis` builds:
 
 | Command | Description |
 |---------|-------------|
-| `:ana` / `:ana status` / `:ana off` | Run Sagitta on current logical bytes, show analysis state, or clear the Sagitta snapshot. Ready snapshots replace the symbol panel source; equal-length edits mark analysis outdated, while layout-changing edits require rerunning `:ana` before symbol jumps. |
+| `:ana` / `:ana status` / `:ana off` | Run Sagitta on current logical bytes, show analysis state, or clear the Sagitta snapshot. Ready snapshots replace the symbol panel source and annotate disassembly with function labels, target names, and function body rails; equal-length edits mark analysis outdated, while layout-changing edits require rerunning `:ana` before symbol jumps. |
 
 ## Release Bundles
 

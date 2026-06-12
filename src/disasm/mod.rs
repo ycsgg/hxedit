@@ -15,5 +15,6 @@ pub use decode::decode_region_rows;
 pub use patch::{plan_assembly_patch, AssemblyPatchPlan};
 pub use state::DisassemblyState;
 pub use types::{
-    DecodedInstruction, DirectBranchKind, DirectBranchTarget, DisasmRow, DisasmRowKind,
+    DecodedInstruction, DirectBranchKind, DirectBranchTarget, DisasmFunctionBoundary,
+    DisasmFunctionScope, DisasmRow, DisasmRowKind,
 };
