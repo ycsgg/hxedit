@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "symbols"), allow(dead_code))]
+
 use crate::app::SidePanelKind;
 use crate::app::{App, SymbolState};
 use crate::error::HxResult;

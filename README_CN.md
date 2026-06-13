@@ -50,14 +50,14 @@ hxedit some.bin
 | 档位 | 构建命令 | 包含内容 |
 |------|------|------|
 | `core` | `cargo build --release --no-default-features` | Hex editor、inspector、search、diff、hash、copy/paste、export |
-| `default` | `cargo build --release` | `core` + 反汇编视图、指令搜索、symbol panel |
-| `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone 驱动的内联汇编 patch |
+| `default` | `cargo build --release` | `core` + 进程内存编辑、反汇编视图、指令搜索、symbol panel |
+| `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone 驱动的内联汇编 patch + Sagitta `:ana` 分析 |
 | `sagitta-analysis` 附加项 | `cargo build --release --features sagitta-analysis` | `default` + 基于 crates.io `sagitta-rs` 的 `:ana` 分析 |
 
 说明：
 
-- `default` 是常规构建档位。
-- `full` 会启用可选的 `hexpatch-keystone` 依赖（在本仓库里仍使用 `keystone-engine` 这个本地依赖别名），并开启 `:dis` 内的 inline assembly patch。
+- `default` 是常规构建档位，并包含进程内存编辑。
+- `full` 会启用可选的 `hexpatch-keystone` 依赖（在本仓库里仍使用 `keystone-engine` 这个本地依赖别名），开启 `:dis` 内的 inline assembly patch，并包含 Sagitta 分析。
 - `sagitta-analysis` 启用可选的 `sagitta-rs` 分析，面向 x86/x64 ELF/PE；分析输入是当前 logical bytes，不参与 undo / save / search 的核心 byte 语义。
 - 当前没有单独的 `:asm` 命令。
 
@@ -126,7 +126,7 @@ cache_pages = 128                  # 页缓存容量
 | `:insp` / `:insp more` | 打开 inspector / 加载更多分页项 |
 | `:format ...` | 强制格式 |
 
-`memory` 档位下的内存编辑命令：
+`default`、`full` 或其他启用 `memory` feature 的构建下的内存编辑命令：
 
 | 命令 | 说明 |
 |------|------|
@@ -180,6 +180,6 @@ tag release 会按明确的 `OS * arch * feature` 矩阵发布。
 
 `core` 与 `default` 构建不会启用下面单独说明的可选 Keystone 汇编依赖。
 
-`full` 构建会启用可选的 Keystone 内联汇编依赖。再分发这个仓库产出的 `full` 源码包或二进制时，还应一并附带仓库内提供的第三方 notice，以及 Keystone 的 FOSS notice / license / exception 文件；见 [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt)。
+`full` 构建会启用可选的 Keystone 内联汇编依赖，并包含可选 MIT 许可的 `sagitta-rs` 分析依赖。再分发这个仓库产出的 `full` 源码包或二进制时，还应一并附带仓库内提供的第三方 notice，以及 Keystone 的 FOSS notice / license / exception 文件；见 [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt)。
 
-显式启用 `sagitta-analysis` 的构建还会包含 MIT 许可的可选依赖 `sagitta-rs`；再分发相关 artifact 时也应保留 [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt) 中的 Sagitta notice。
+直接启用 `sagitta-analysis` 的构建也会包含 `sagitta-rs`；再分发相关 artifact 时也应保留 [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt) 中的 Sagitta notice。

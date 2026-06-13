@@ -119,11 +119,11 @@ impl App {
         let path_display = self.document.path().to_string_lossy().into_owned();
         let (selection_span, selection_logical_len) = match self.selection_range() {
             Some((start, end)) => {
-                let logical_len = match self.document.logical_bytes(start, end) {
-                    Ok(bytes) => Some(bytes.len() as u64),
+                let logical_len = match self.document.logical_byte_count(start, end) {
+                    Ok(count) => Some(count),
                     Err(err) => {
                         self.report_render_error(format!(
-                            "status selection read failed at 0x{start:x}..0x{end:x}: {err}"
+                            "status selection count failed at 0x{start:x}..0x{end:x}: {err}"
                         ));
                         None
                     }

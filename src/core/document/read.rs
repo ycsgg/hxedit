@@ -106,6 +106,22 @@ impl Document {
         Ok(out)
     }
 
+    /// Count logical bytes in a display range without materializing them.
+    pub fn logical_byte_count(&mut self, start: u64, end_inclusive: u64) -> HxResult<u64> {
+        let len = self.len();
+        if len == 0 || start > end_inclusive || start >= len {
+            return Ok(0);
+        }
+
+        let mut count = 0_u64;
+        self.walk_logical_chunks(start, end_inclusive, LOGICAL_CHUNK, |chunk| {
+            count += chunk.bytes.len() as u64;
+            Ok(WalkControl::Continue)
+        })?;
+
+        Ok(count)
+    }
+
     /// Walk the logical bytes in a display range, invoking `sink` with each
     /// 64 KB chunk (tombstones skipped, replacements applied) without
     /// materializing the entire byte vector in memory.

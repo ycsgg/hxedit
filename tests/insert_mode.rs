@@ -268,12 +268,14 @@ fn logical_bytes_various_cases() {
     doc.delete_byte(2).unwrap();
     let bytes = doc.logical_bytes(0, 5).unwrap();
     assert_eq!(bytes, vec![b'a', b'b', b'd', b'e', b'f']);
+    assert_eq!(doc.logical_byte_count(0, 5).unwrap(), bytes.len() as u64);
 
     // Includes inserted bytes
     let (_dir, mut doc2) = tmp_doc(b"abcd");
     doc2.insert_bytes(2, &[0xAA, 0xBB]).unwrap();
     let bytes = doc2.logical_bytes(0, 5).unwrap();
     assert_eq!(bytes, vec![b'a', b'b', 0xAA, 0xBB, b'c', b'd']);
+    assert_eq!(doc2.logical_byte_count(0, 5).unwrap(), bytes.len() as u64);
 }
 
 #[test]
@@ -303,6 +305,10 @@ fn logical_stream_paths_agree_for_mixed_piece_overlays() {
             Ok(())
         })
         .unwrap();
+    assert_eq!(
+        doc.logical_byte_count(0, doc.len() - 1).unwrap(),
+        expected.len() as u64
+    );
     assert_eq!(streamed_len, expected.len() as u64);
     assert_eq!(streamed, expected);
 

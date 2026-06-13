@@ -50,14 +50,14 @@ hxedit some.bin
 | Bundle | Build command | Includes |
 |------|------|------|
 | `core` | `cargo build --release --no-default-features` | Hex editor, inspector, search, diff, hash, copy/paste, export |
-| `default` | `cargo build --release` | `core` + disassembly view, instruction search, symbol panel |
-| `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching |
+| `default` | `cargo build --release` | `core` + process memory editing, disassembly view, instruction search, symbol panel |
+| `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching + Sagitta-backed `:ana` analysis |
 | `sagitta-analysis` add-on | `cargo build --release --features sagitta-analysis` | `default` + Sagitta-backed `:ana` analysis from crates.io `sagitta-rs` |
 
 Notes:
 
-- `default` is the normal build.
-- `full` enables the optional `hexpatch-keystone` dependency (under the local crate alias `keystone-engine`) for inline assembly patching inside `:dis`.
+- `default` is the normal build and includes process memory editing.
+- `full` enables the optional `hexpatch-keystone` dependency (under the local crate alias `keystone-engine`) for inline assembly patching inside `:dis`, and includes Sagitta analysis.
 - `sagitta-analysis` enables optional `sagitta-rs` analysis for x86/x64 ELF/PE inputs; analysis runs on current logical bytes and does not participate in undo/save/search byte semantics.
 - There is no separate `:asm` command.
 
@@ -126,7 +126,7 @@ cache_pages = 128                  # page-cache capacity
 | `:insp` / `:insp more` | Open inspector / reveal more paginated entries |
 | `:format ...` | Force format |
 
-Memory-related commands in `memory` builds:
+Memory-related commands in `default`, `full`, or other `memory` builds:
 
 | Command | Description |
 |---------|-------------|
@@ -182,6 +182,6 @@ at your option.
 
 `core` and `default` builds do not enable the optional Keystone-assembler dependency described below.
 
-`full` builds enable the optional Keystone-assembler dependency for inline assembly patching. When redistributing `full` source bundles or binaries from this repository, ship the included third-party notices and Keystone FOSS notice / license / exception files as well; see [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt).
+`full` builds enable the optional Keystone-assembler dependency for inline assembly patching and the optional MIT-licensed `sagitta-rs` analysis dependency. When redistributing `full` source bundles or binaries from this repository, ship the included third-party notices and Keystone FOSS notice / license / exception files as well; see [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt).
 
-Builds that explicitly enable `sagitta-analysis` also include the optional MIT-licensed `sagitta-rs` dependency; keep the Sagitta notice in [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt) with redistributed artifacts.
+Builds that enable `sagitta-analysis` directly also include `sagitta-rs`; keep the Sagitta notice in [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt) with redistributed artifacts.

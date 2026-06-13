@@ -52,4 +52,4 @@ cargo clippy --all-targets
 - `docs/issues.md` 只保留仍有行动价值的 backlog
 - 已完成或已过期的长列表移到 `docs/archive/`，不要继续占容量
 
-若改动 license / feature bundle / release 打包，必须同步 `Cargo.toml`、`LICENSE*`、`licenses/THIRD_PARTY_NOTICES.txt` 与 `licenses/keystone/FOSS-NOTICE.txt` 与 release workflow；`full` 产物必须继续附带 Keystone 的 FOSS notice / license / exception 文件，且不要把 `full` 写成 `MIT/Apache-only`。
+若改动 license / feature bundle / release 打包，必须同步 `Cargo.toml`、`LICENSE*`、`licenses/THIRD_PARTY_NOTICES.txt` 与 `licenses/keystone/FOSS-NOTICE.txt` 与 release workflow；`full` 产物必须继续附带 Keystone 的 FOSS notice / license / exception 文件，并保留 Sagitta notice，且不要把 `full` 写成 `MIT/Apache-only`。

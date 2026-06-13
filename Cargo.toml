@@ -28,13 +28,14 @@ default-bundle = [
     "disasm-capstone-full",
     "disasm-capstone-x86",
     "disasm-capstone-arm64",
+    "memory",
     "symbols",
 ]
 disasm = []
 memory = []
 symbols = ["disasm", "dep:object", "dep:symbolic-common", "dep:symbolic-demangle"]
 asm = ["disasm", "dep:keystone-engine"]
-full = ["default-bundle", "asm"]
+full = ["default-bundle", "asm", "sagitta-analysis"]
 sagitta-analysis = ["symbols", "disasm", "dep:sagitta-rs"]
 disasm-capstone = ["disasm", "dep:capstone"]
 disasm-capstone-full = ["disasm-capstone", "capstone/full"]
