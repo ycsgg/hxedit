@@ -12,5 +12,8 @@ pub use engine::{
     diff_sources, CurrentDiffRange, DiffHunk, DiffHunkKind, DiffOptions, DiffProfile, DiffResult,
     DiffStatus, DiffTruncateReason, OtherDiffRange,
 };
-pub use mismatch::{find_mismatch_backward, find_mismatch_forward};
+pub use mismatch::{
+    find_mismatch_backward, find_mismatch_backward_step, find_mismatch_forward,
+    find_mismatch_forward_step,
+};
 pub use source::{DiffByte, DiffSource, DocumentLogicalCursor, FileDiffSource, VecDiffSource};

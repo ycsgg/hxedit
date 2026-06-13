@@ -123,7 +123,7 @@ cache_pages = 128                  # page-cache capacity
 | `:fill <pattern> <len>` / `:zero <len>` | Overwrite transforms |
 | `:re ...` / `:re! ...` | Equal-length replace / length-changing replace |
 | `:hash md5|sha1|sha256|sha512|crc32` | Hash |
-| `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh|next|prev|off` | Show a synchronized page comparing current logical bytes with another file; visible pages realign inserted/deleted bytes within `N`, equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__` |
+| `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh|next|prev|off` | Show a synchronized page comparing current logical bytes with another file; visible pages realign inserted/deleted bytes within `N`, equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__`; `next` / `prev` scan in large progress-reporting steps, block other input while scanning, and Esc cancels |
 | `:insp` / `:insp more` | Open inspector / reveal more paginated entries |
 | `:format ...` | Force format |
 

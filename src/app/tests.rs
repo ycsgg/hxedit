@@ -4,6 +4,7 @@
 //! to reduce total count while maintaining coverage.
 
 use std::fs;
+use std::io::{Seek, SeekFrom, Write};
 
 use tempfile::tempdir;
 
@@ -705,9 +706,78 @@ fn scroll_viewport_operations() {
     app.scroll_viewport(3);
     assert_eq!(app.cursor, 96);
 
-    // Stops at last page
+    // Allows the tail row to become the top row, so large-file tail offsets can
+    // be inspected directly instead of being capped at the last full page.
     app.scroll_viewport(99);
-    assert_eq!(app.viewport_top, 192);
+    assert_eq!(app.viewport_top, 240);
+}
+
+#[test]
+fn viewport_can_scroll_to_large_tail_row() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("large.bin");
+    let sparse = fs::File::create(&file).unwrap();
+    sparse.set_len(0x4000_0001).unwrap();
+    let cli = Cli {
+        file: Some(file),
+        pid: None,
+        process: None,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let mut app = App::from_cli(cli).unwrap();
+    app.view_rows = 4;
+
+    app.scroll_viewport(i64::MAX);
+
+    assert_eq!(app.viewport_top, 0x4000_0000);
+}
+
+#[test]
+fn diff_projection_can_scroll_to_other_only_tail_row() {
+    let dir = tempdir().unwrap();
+    let current = dir.path().join("current.bin");
+    let other = dir.path().join("other.bin");
+    let current_file = fs::File::create(&current).unwrap();
+    current_file.set_len(0x4000_0000).unwrap();
+    let mut other_file = fs::File::create(&other).unwrap();
+    other_file.set_len(0x4000_0001).unwrap();
+    other_file.seek(SeekFrom::Start(0x4000_0000)).unwrap();
+    other_file.write_all(&[1]).unwrap();
+
+    let cli = Cli {
+        file: Some(current),
+        pid: None,
+        process: None,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let mut app = App::from_cli(cli).unwrap();
+    app.view_rows = 4;
+    app.execute_command(Command::Diff(DiffCommand::Open {
+        path: other,
+        max_shift: Some(0),
+    }))
+    .unwrap();
+
+    app.scroll_viewport(i64::MAX);
+
+    assert_eq!(app.viewport_top, 0x4000_0000);
+    assert_eq!(app.cursor, 0x3fff_ffff);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1009,6 +1079,110 @@ fn diff_next_finds_far_mismatch_with_chunk_scan() {
         .unwrap();
 
     assert_eq!(app.cursor, current.len() as u64 - 1);
+}
+
+#[test]
+fn diff_next_large_scan_steps_across_ticks() {
+    let dir = tempdir().unwrap();
+    let current = dir.path().join("current.bin");
+    let other = dir.path().join("other.bin");
+    let size = 129 * 1024 * 1024_u64;
+
+    let current_file = fs::File::create(&current).unwrap();
+    current_file.set_len(size).unwrap();
+    let mut other_file = fs::File::create(&other).unwrap();
+    other_file.set_len(size).unwrap();
+    other_file.seek(SeekFrom::Start(size - 1)).unwrap();
+    other_file.write_all(&[1]).unwrap();
+
+    let cli = Cli {
+        file: Some(current),
+        pid: None,
+        process: None,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let mut app = App::from_cli(cli).unwrap();
+    app.execute_command(Command::Diff(DiffCommand::Open {
+        path: other,
+        max_shift: Some(0),
+    }))
+    .unwrap();
+
+    app.cursor = 0;
+    app.execute_command(Command::Diff(DiffCommand::Next))
+        .unwrap();
+
+    assert!(app.diff_mismatch_scan_pending());
+    assert_eq!(app.cursor, 0);
+    assert!(app.status_message.contains("diff scanning next"));
+
+    let mut steps = 0;
+    while app.diff_mismatch_scan_pending() {
+        app.continue_diff_mismatch_scan().unwrap();
+        steps += 1;
+        assert!(steps <= 1);
+    }
+
+    assert_eq!(app.cursor, size - 1);
+    assert!(app.status_message.contains("diff mismatch"));
+}
+
+#[test]
+fn diff_scan_blocks_navigation_until_escape() {
+    let dir = tempdir().unwrap();
+    let current = dir.path().join("current.bin");
+    let other = dir.path().join("other.bin");
+    let size = 160 * 1024 * 1024_u64;
+
+    let current_file = fs::File::create(&current).unwrap();
+    current_file.set_len(size).unwrap();
+    let mut other_file = fs::File::create(&other).unwrap();
+    other_file.set_len(size).unwrap();
+    other_file.seek(SeekFrom::Start(size - 1)).unwrap();
+    other_file.write_all(&[1]).unwrap();
+
+    let cli = Cli {
+        file: Some(current),
+        pid: None,
+        process: None,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let mut app = App::from_cli(cli).unwrap();
+    app.execute_command(Command::Diff(DiffCommand::Open {
+        path: other,
+        max_shift: Some(0),
+    }))
+    .unwrap();
+
+    app.cursor = 0;
+    app.execute_command(Command::Diff(DiffCommand::Next))
+        .unwrap();
+    assert!(app.diff_mismatch_scan_pending());
+
+    app.handle_action(Action::MoveDown);
+    assert_eq!(app.cursor, 0);
+    assert!(app.diff_mismatch_scan_pending());
+
+    app.handle_action(Action::LeaveMode);
+    assert_eq!(app.cursor, 0);
+    assert!(!app.diff_mismatch_scan_pending());
+    assert!(app.status_message.contains("diff scan canceled"));
 }
 
 #[test]

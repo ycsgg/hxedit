@@ -28,7 +28,7 @@ mod text_cursor;
 mod undo;
 
 use anyhow::Result;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -750,8 +750,19 @@ impl App {
             terminal.draw(|frame| self.render(frame))?;
             #[cfg(feature = "sagitta-analysis")]
             self.drain_background_results();
+            if self.diff_mismatch_scan_pending() {
+                if let Err(err) = self.continue_diff_mismatch_scan() {
+                    self.cancel_diff_mismatch_scan(None);
+                    self.set_error_status(err.to_string());
+                }
+            }
             let poll_start = self.profiler.as_ref().map(|_| Instant::now());
-            let has_event = event::poll(Duration::from_millis(250))?;
+            let poll_timeout = if self.diff_mismatch_scan_pending() {
+                Duration::from_millis(0)
+            } else {
+                Duration::from_millis(250)
+            };
+            let has_event = event::poll(poll_timeout)?;
             if let (Some(start), Some(profiler)) = (poll_start, self.profiler.as_mut()) {
                 profiler.record_poll(start.elapsed(), has_event);
             }
@@ -760,6 +771,14 @@ impl App {
                     Event::Key(key) => {
                         if let Some(profiler) = self.profiler.as_mut() {
                             profiler.record_key_event();
+                        }
+                        if self.diff_mismatch_scan_pending() {
+                            if matches!(key.code, KeyCode::Esc) {
+                                self.cancel_diff_mismatch_scan(Some("diff scan canceled"));
+                            } else {
+                                self.report_diff_mismatch_scan_blocked_input();
+                            }
+                            continue;
                         }
                         if let Some(action) = self.map_key_with_prefix(key) {
                             self.handle_action(action);

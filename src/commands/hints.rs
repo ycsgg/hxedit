@@ -179,7 +179,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             CommandHint {
                 syntax,
                 details:
-                    "show a read-only synchronized page comparing current logical bytes with another file; visible pages realign inserted/deleted bytes within N before coloring"
+                    "show a read-only synchronized page comparing current logical bytes with another file; next/prev scan in large progress-reporting steps, block other input, and Esc cancels"
                         .to_owned(),
             }
         }

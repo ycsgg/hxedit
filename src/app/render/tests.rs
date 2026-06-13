@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{Seek, SeekFrom, Write};
 
 #[cfg(feature = "disasm-capstone")]
 use ratatui::layout::Rect;
@@ -132,6 +133,50 @@ fn visible_diff_page_marks_equal_replace_and_missing_sides() {
         page.rows[0].cells[3].kind,
         crate::view::diff_panel::DiffPanelCellKind::OnlyCurrent
     );
+}
+
+#[test]
+fn visible_diff_page_shows_other_only_tail_beyond_current_eof() {
+    let dir = tempdir().unwrap();
+    let current = dir.path().join("current.bin");
+    let other = dir.path().join("other.bin");
+    let current_file = fs::File::create(&current).unwrap();
+    current_file.set_len(0x4000_0000).unwrap();
+    let mut other_file = fs::File::create(&other).unwrap();
+    other_file.set_len(0x4000_0001).unwrap();
+    other_file.seek(SeekFrom::Start(0x4000_0000)).unwrap();
+    other_file.write_all(&[1]).unwrap();
+    let cli = Cli {
+        file: Some(current),
+        pid: None,
+        process: None,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+    };
+    let mut app = App::from_cli(cli).unwrap();
+    app.view_rows = 2;
+    app.execute_command(Command::Diff(crate::commands::types::DiffCommand::Open {
+        path: other,
+        max_shift: Some(0),
+    }))
+    .unwrap();
+    app.viewport_top = 0x4000_0000;
+
+    let visible_rows = app.collect_visible_rows(1);
+    let page = app.visible_diff_page(&visible_rows).unwrap();
+
+    assert_eq!(
+        page.rows[0].cells[0].kind,
+        crate::view::diff_panel::DiffPanelCellKind::OnlyOther
+    );
+    assert_eq!(page.rows[0].cells[0].other_byte, Some(1));
 }
 
 #[test]

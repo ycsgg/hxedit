@@ -65,7 +65,7 @@ impl App {
             }
             return;
         }
-        if self.document.is_empty() {
+        if self.viewport_content_len() == 0 {
             self.viewport_top = 0;
             return;
         }
@@ -86,7 +86,7 @@ impl App {
     }
 
     pub(crate) fn scroll_viewport(&mut self, rows: i64) {
-        if self.document.is_empty() {
+        if self.viewport_content_len() == 0 {
             return;
         }
         if matches!(self.main_view, MainView::Disassembly(_)) {
@@ -118,12 +118,20 @@ impl App {
             self.cursor = 0;
             return;
         }
+        if self.viewport_top >= self.document.len() {
+            self.cursor = self.document.len().saturating_sub(1);
+            return;
+        }
         let row_size = self.config.bytes_per_line as u64;
         let visible_rows = self.visible_rows();
         let visible_start = self.viewport_top;
         let visible_end = (self.viewport_top + visible_rows.saturating_mul(row_size))
             .min(self.document.len())
             .saturating_sub(1);
+        if visible_start > visible_end {
+            self.cursor = self.document.len().saturating_sub(1);
+            return;
+        }
         let anchor = self
             .cursor_anchor_offset()
             .clamp(visible_start, visible_end);
@@ -137,14 +145,23 @@ impl App {
     }
 
     pub(crate) fn max_viewport_top(&self) -> u64 {
-        if self.document.is_empty() {
+        let content_len = self.viewport_content_len();
+        if content_len == 0 {
             return 0;
         }
         let row_size = self.config.bytes_per_line as u64;
-        let visible_rows = self.visible_rows();
-        let tail_rows = self.document.len().saturating_sub(1) / row_size;
-        tail_rows
-            .saturating_sub(visible_rows.saturating_sub(1))
-            .saturating_mul(row_size)
+        let tail_rows = content_len.saturating_sub(1) / row_size;
+        tail_rows.saturating_mul(row_size)
+    }
+
+    fn viewport_content_len(&self) -> u64 {
+        let current_len = self.document.len();
+        if self.diff_projection_active() {
+            self.diff_state()
+                .map(|state| current_len.max(state.other_len))
+                .unwrap_or(current_len)
+        } else {
+            current_len
+        }
     }
 }

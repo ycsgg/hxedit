@@ -18,6 +18,7 @@ pub fn map(key: KeyEvent) -> Option<Action> {
     }
 
     match key.code {
+        KeyCode::Esc => Some(Action::LeaveMode),
         KeyCode::Char('v') => Some(Action::ToggleVisual),
         KeyCode::Char('i') => Some(Action::EnterInsert),
         KeyCode::Char('r') => Some(Action::EnterReplace),

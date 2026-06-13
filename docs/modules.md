@@ -63,7 +63,7 @@
 - `diff` overlay 必须先把可见 display slot 映射到 logical offset，再读 other raw offset；因为 tombstone 会让 logical range 不等于连续 display range
 - `diff` 局部重对齐投影里的 other-only `__` 必须作为可见 cell 计入 hit-test / 选区映射；左侧点击 `__` 锚到相邻 current display slot，右侧 diff panel 点击要同步左侧光标并高亮对应 other raw byte
 - 关闭或切走 diff panel（Tab 隐藏、`:diff off`、`:data` / `:insp` / `:sym` 打开其他 side panel）必须停止 diff 投影，左侧不能残留 diff 着色或 `__`
-- 编辑 / undo / redo / save reload 后 diff 可按当前可见页即时重新着色，不能自动重扫大文件；后续做 shift-aware stepper/progress 时继续保持这个边界
+- 编辑 / undo / redo / save reload 后 diff 可按当前可见页即时重新着色，不能自动重扫大文件；`diff next` / `diff prev` 的远距离 mismatch 查找必须保持大块 stepper/progress，扫描中阻止其它输入且 Esc 可取消，不能退回无反馈的单次同步全文件扫描；后续做 shift-aware alignment cache 时继续保持这个边界
 - 当前 `:dis` 已落地，并且必须继续保持为“主视图切换”而不是新的编辑语义；反汇编结果只能是当前 bytes 的投影，不能借机改写 replacement / tombstone / real delete 边界
 - `sagitta-analysis` 下的 `:ana` 必须只读取 current logical bytes：用 `Document::for_each_logical_chunk` 分块物化，先检查 `visible_len() <= 128 MiB`，不要用会把 tombstone 读成 `0x00` 的 render-ish 路径。Sagitta snapshot 属于 App/UI 层 owned data，不写入 `Document`，不参与 undo / save / search
 - Sagitta editing invalidation 挂在 App undo/edit 边界：replacement-only 标记 `OutdatedBytes`，insert / real delete / tombstone / resize replace 标记 `InvalidLayout`。不要为了追踪函数入口引入新的 document anchor 语义

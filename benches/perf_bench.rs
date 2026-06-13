@@ -11,7 +11,7 @@ use hxedit::commands::types::HashAlgorithm;
 use hxedit::config::Config;
 use hxedit::core::document::Document;
 use hxedit::core::file_view::FileView;
-use hxedit::diff::find_mismatch_forward;
+use hxedit::diff::{find_mismatch_forward, find_mismatch_forward_step};
 use hxedit::format;
 use tempfile::tempdir;
 
@@ -505,6 +505,43 @@ fn bench_diff_next_tail_mismatch_256mb() -> BenchResult {
     bench_diff_next_tail_mismatch("diff-next-256", 256 * 1024 * 1024)
 }
 
+fn bench_diff_next_tail_mismatch_256mb_stepper() -> BenchResult {
+    let size = 256 * 1024 * 1024;
+    let (_dir, current, other) = write_sparse_diff_pair("diff-next-256-stepper", size)?;
+    let config = bench_config();
+    let mut document = Document::open(&current, &config)?;
+    let mut other_view = FileView::open(&other, true, config.page_size, config.cache_pages)?;
+    let other_len = other_view.len();
+
+    let mut cursor = 1_u64;
+    let end = size as u64 - 1;
+    let mut steps = 0_usize;
+    let t = Instant::now();
+    let found = loop {
+        let step = find_mismatch_forward_step(
+            &mut document,
+            &mut other_view,
+            other_len,
+            cursor,
+            end,
+            128 * 1024 * 1024,
+        )?;
+        steps += 1;
+        if let Some(found) = step.found {
+            break Some(found);
+        }
+        let Some(next) = step.next else {
+            break None;
+        };
+        cursor = next;
+    };
+    let elapsed = t.elapsed();
+
+    assert_eq!(found, Some(end));
+    print("diff next tail mismatch 256MB stepper", elapsed, steps);
+    Ok(())
+}
+
 fn bench_diff_next_tail_mismatch(name: &str, size: usize) -> BenchResult {
     let (_dir, current, other) = write_sparse_diff_pair(name, size)?;
     let config = bench_config();
@@ -586,6 +623,10 @@ fn main() {
         (
             "diff_next_tail_mismatch_256mb",
             bench_diff_next_tail_mismatch_256mb,
+        ),
+        (
+            "diff_next_tail_mismatch_256mb_stepper",
+            bench_diff_next_tail_mismatch_256mb_stepper,
         ),
     ];
 

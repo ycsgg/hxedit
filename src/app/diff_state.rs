@@ -2,9 +2,97 @@ use std::path::PathBuf;
 
 use crate::app::{App, SidePanelKind};
 use crate::core::file_view::FileView;
-use crate::diff::{find_mismatch_backward, find_mismatch_forward, DiffOptions};
+use crate::diff::{find_mismatch_backward_step, find_mismatch_forward_step, DiffOptions};
 use crate::error::{HxError, HxResult};
 use crate::mode::Mode;
+
+const DIFF_MISMATCH_STEP_BYTES: u64 = 128 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiffMismatchDirection {
+    Forward,
+    Backward,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiffMismatchPhase {
+    Primary,
+    Wrapped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DiffMismatchScan {
+    direction: DiffMismatchDirection,
+    phase: DiffMismatchPhase,
+    origin: u64,
+    range_start: u64,
+    range_end: u64,
+    cursor: u64,
+    scanned: u64,
+}
+
+impl DiffMismatchScan {
+    fn new(direction: DiffMismatchDirection, origin: u64, doc_len: u64) -> Option<Self> {
+        if doc_len == 0 {
+            return None;
+        }
+        let last = doc_len - 1;
+        let (range_start, range_end, cursor, phase) = match direction {
+            DiffMismatchDirection::Forward => {
+                let start = origin.saturating_add(1);
+                if start <= last {
+                    (start, last, start, DiffMismatchPhase::Primary)
+                } else {
+                    (0, last, 0, DiffMismatchPhase::Wrapped)
+                }
+            }
+            DiffMismatchDirection::Backward => {
+                if origin > 0 {
+                    (0, origin - 1, origin - 1, DiffMismatchPhase::Primary)
+                } else {
+                    (0, 0, 0, DiffMismatchPhase::Primary)
+                }
+            }
+        };
+        Some(Self {
+            direction,
+            phase,
+            origin: origin.min(last),
+            range_start,
+            range_end,
+            cursor,
+            scanned: 0,
+        })
+    }
+
+    fn advance_to_wrap(&mut self, doc_len: u64) -> bool {
+        if self.phase == DiffMismatchPhase::Wrapped || doc_len == 0 {
+            return false;
+        }
+        let last = doc_len - 1;
+        self.phase = DiffMismatchPhase::Wrapped;
+        match self.direction {
+            DiffMismatchDirection::Forward => {
+                self.range_start = 0;
+                self.range_end = self.origin.min(last);
+                self.cursor = self.range_start;
+            }
+            DiffMismatchDirection::Backward => {
+                self.range_start = self.origin.min(last);
+                self.range_end = last;
+                self.cursor = self.range_end;
+            }
+        }
+        self.range_start <= self.range_end
+    }
+
+    fn direction_label(self) -> &'static str {
+        match self.direction {
+            DiffMismatchDirection::Forward => "next",
+            DiffMismatchDirection::Backward => "previous",
+        }
+    }
+}
 
 /// Runtime state for the synchronized diff page.
 ///
@@ -25,6 +113,7 @@ pub(crate) struct DiffState {
     /// render it active only while the cursor is still on its display anchor.
     pub selected_other_offset: Option<u64>,
     pub selected_other_anchor_display: Option<u64>,
+    pub pending_mismatch_scan: Option<DiffMismatchScan>,
 }
 
 impl App {
@@ -62,6 +151,7 @@ impl App {
             stale: false,
             selected_other_offset: None,
             selected_other_anchor_display: None,
+            pending_mismatch_scan: None,
         });
         self.show_side_panel = true;
         self.active_side_panel = SidePanelKind::Diff;
@@ -157,6 +247,30 @@ impl App {
         self.jump_to_diff_mismatch(false)
     }
 
+    pub(crate) fn diff_mismatch_scan_pending(&self) -> bool {
+        self.diff_state()
+            .and_then(|state| state.pending_mismatch_scan)
+            .is_some()
+    }
+
+    pub(crate) fn cancel_diff_mismatch_scan(&mut self, message: Option<&str>) {
+        if let Some(state) = self.diff_state.as_mut() {
+            state.pending_mismatch_scan = None;
+        }
+        if let Some(message) = message {
+            self.set_info_status(message);
+        }
+    }
+
+    pub(crate) fn report_diff_mismatch_scan_blocked_input(&mut self) {
+        if let Some(scan) = self
+            .diff_state()
+            .and_then(|state| state.pending_mismatch_scan)
+        {
+            self.set_diff_mismatch_scan_status(scan);
+        }
+    }
+
     pub(crate) fn read_diff_other_byte(&mut self, offset: u64) -> HxResult<Option<u8>> {
         let Some(state) = self.diff_state_mut() else {
             return Ok(None);
@@ -180,6 +294,7 @@ impl App {
             // diagnostics but do not block live coloring behind refresh.
             state.revision_at_open = self.document_revision;
             state.stale = false;
+            state.pending_mismatch_scan = None;
         }
     }
 
@@ -192,61 +307,119 @@ impl App {
             return Ok(());
         }
 
-        let start = if forward {
-            self.cursor.saturating_add(1)
+        let direction = if forward {
+            DiffMismatchDirection::Forward
         } else {
-            self.cursor.saturating_sub(1)
+            DiffMismatchDirection::Backward
         };
-        let found = if forward {
-            match self.find_diff_mismatch_forward(start)? {
-                Some(offset) => Some(offset),
-                None => self.find_diff_mismatch_forward(0)?,
-            }
-        } else {
-            match self.find_diff_mismatch_backward(start)? {
-                Some(offset) => Some(offset),
-                None => self
-                    .document
-                    .len()
-                    .checked_sub(1)
-                    .map_or(Ok(None), |end| self.find_diff_mismatch_backward(end))?,
+
+        let Some(scan) = DiffMismatchScan::new(direction, self.cursor, self.document.len()) else {
+            self.set_info_status("diff: no current bytes");
+            return Ok(());
+        };
+        if let Some(state) = self.diff_state.as_mut() {
+            state.pending_mismatch_scan = Some(scan);
+        }
+        self.clear_diff_cell_selection();
+        self.set_diff_mismatch_scan_status(scan);
+        self.continue_diff_mismatch_scan()
+    }
+
+    pub(crate) fn continue_diff_mismatch_scan(&mut self) -> HxResult<()> {
+        let Some(mut scan) = self
+            .diff_state
+            .as_mut()
+            .and_then(|state| state.pending_mismatch_scan.take())
+        else {
+            return Ok(());
+        };
+
+        if self.document.is_empty() {
+            self.set_info_status("diff: no current bytes");
+            return Ok(());
+        }
+
+        let step = {
+            let Some(state) = self.diff_state.as_mut() else {
+                return Ok(());
+            };
+            match scan.direction {
+                DiffMismatchDirection::Forward => find_mismatch_forward_step(
+                    &mut self.document,
+                    &mut state.other_view,
+                    state.other_len,
+                    scan.cursor,
+                    scan.range_end,
+                    DIFF_MISMATCH_STEP_BYTES,
+                )?,
+                DiffMismatchDirection::Backward => find_mismatch_backward_step(
+                    &mut self.document,
+                    &mut state.other_view,
+                    state.other_len,
+                    scan.range_start,
+                    scan.cursor,
+                    DIFF_MISMATCH_STEP_BYTES,
+                )?,
             }
         };
 
-        let Some(target) = found else {
-            self.set_info_status("diff: no differing current-side bytes");
+        scan.scanned = scan.scanned.saturating_add(step.scanned);
+        if let Some(target) = step.found {
+            self.finish_diff_mismatch_scan(target);
             return Ok(());
-        };
+        }
+        if let Some(next) = step.next {
+            scan.cursor = next;
+            if let Some(state) = self.diff_state.as_mut() {
+                state.pending_mismatch_scan = Some(scan);
+            }
+            self.set_diff_mismatch_scan_status(scan);
+            return Ok(());
+        }
+        if scan.advance_to_wrap(self.document.len()) {
+            if let Some(state) = self.diff_state.as_mut() {
+                state.pending_mismatch_scan = Some(scan);
+            }
+            self.set_diff_mismatch_scan_status(scan);
+            return Ok(());
+        }
+
+        self.set_info_status("diff: no differing current-side bytes");
+        Ok(())
+    }
+
+    fn finish_diff_mismatch_scan(&mut self, target: u64) {
+        if let Some(state) = self.diff_state.as_mut() {
+            state.pending_mismatch_scan = None;
+        }
         self.cursor = target;
         self.clear_diff_cell_selection();
         self.center_cursor_in_view();
         self.sync_inspector_to_cursor();
         self.refresh_data_panel();
         self.set_info_status(format!("diff mismatch @ display 0x{target:x}"));
-        Ok(())
     }
 
-    fn find_diff_mismatch_forward(&mut self, start: u64) -> HxResult<Option<u64>> {
-        let Some(state) = self.diff_state.as_mut() else {
-            return Ok(None);
-        };
-        find_mismatch_forward(
-            &mut self.document,
-            &mut state.other_view,
-            state.other_len,
-            start,
-        )
+    fn set_diff_mismatch_scan_status(&mut self, scan: DiffMismatchScan) {
+        self.set_info_status(format!(
+            "diff scanning {} mismatch... {} checked; Esc to cancel",
+            scan.direction_label(),
+            format_scan_bytes(scan.scanned)
+        ));
     }
+}
 
-    fn find_diff_mismatch_backward(&mut self, start: u64) -> HxResult<Option<u64>> {
-        let Some(state) = self.diff_state.as_mut() else {
-            return Ok(None);
-        };
-        find_mismatch_backward(
-            &mut self.document,
-            &mut state.other_view,
-            state.other_len,
-            start,
-        )
+fn format_scan_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * KIB;
+    const GIB: u64 = 1024 * MIB;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{} MiB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{} KiB", bytes / KIB)
+    } else {
+        format!("{bytes} bytes")
     }
 }
