@@ -156,6 +156,15 @@ fn inspector_enter_escape_and_format_warnings() {
     app_sqlite.handle_action(Action::SidePanelEnter);
     assert!(app_sqlite.status_message.contains("SQLite inspector edits"));
 
+    // PCAP/PCAPNG format warnings
+    let mut app_pcap = app_with_inspector_field_for("PCAP");
+    app_pcap.handle_action(Action::SidePanelEnter);
+    assert!(app_pcap.status_message.contains("PCAP inspector edits"));
+
+    let mut app_pcapng = app_with_inspector_field_for("PCAPNG");
+    app_pcapng.handle_action(Action::SidePanelEnter);
+    assert!(app_pcapng.status_message.contains("PCAPNG inspector edits"));
+
     // TAR format warning
     let mut app_tar = app_with_inspector_field_for("TAR");
     app_tar.handle_action(Action::SidePanelEnter);
@@ -198,6 +207,28 @@ fn inspector_warns_when_editing_sqlite_field() {
     assert_eq!(app.mode, Mode::InspectorEdit);
     assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
     assert!(app.status_message.contains("SQLite inspector edits"));
+}
+
+#[test]
+fn inspector_warns_when_editing_pcap_field() {
+    let mut app = app_with_inspector_field_for("PCAP");
+
+    app.handle_action(Action::SidePanelEnter);
+
+    assert_eq!(app.mode, Mode::InspectorEdit);
+    assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+    assert!(app.status_message.contains("PCAP inspector edits"));
+}
+
+#[test]
+fn inspector_warns_when_editing_pcapng_field() {
+    let mut app = app_with_inspector_field_for("PCAPNG");
+
+    app.handle_action(Action::SidePanelEnter);
+
+    assert_eq!(app.mode, Mode::InspectorEdit);
+    assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+    assert!(app.status_message.contains("PCAPNG inspector edits"));
 }
 
 #[test]
@@ -308,9 +339,9 @@ fn hidden_inspector_focus_falls_back_to_normal_mode() {
     app4.handle_action(Action::ToggleSidePanel);
     assert_eq!(app4.mode, Mode::Normal);
     assert!(app4.status_message.contains("no format detected"));
-    assert!(app4
-        .status_message
-        .contains("ELF / PNG / ZIP / SQLite / GZIP / GIF / BMP / WAV / TAR / JPEG"));
+    assert!(app4.status_message.contains(
+        "ELF / PNG / ZIP / SQLite / PCAP / PCAPNG / GZIP / GIF / BMP / WAV / TAR / JPEG"
+    ));
 
     // View-only inspector reports read-only mode
     let mut app5 = app_with_inspector_field_editable("TEST", false);
@@ -350,9 +381,9 @@ fn entering_inspector_without_detected_format_stays_in_normal_with_hint() {
     assert!(app.show_side_panel);
     assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
     assert!(app.status_message.contains("no format detected"));
-    assert!(app
-        .status_message
-        .contains("ELF / PNG / ZIP / SQLite / GZIP / GIF / BMP / WAV / TAR / JPEG"));
+    assert!(app.status_message.contains(
+        "ELF / PNG / ZIP / SQLite / PCAP / PCAPNG / GZIP / GIF / BMP / WAV / TAR / JPEG"
+    ));
 }
 
 #[test]

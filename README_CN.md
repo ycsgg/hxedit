@@ -15,7 +15,7 @@
   - tombstone delete
 - 编辑、粘贴、替换、inspector 写入都支持完整 undo / redo
 - 统一文本 / hex / typed-value 搜索，支持前后向、自动 wrap-around、同屏命中高亮；大文件用 SIMD `memmem` 扫描（只有含 tombstone / replacement 编辑的分块才退回逐字节）
-- 内置格式检查器：ELF、PE/COFF、Mach-O、PNG、ZIP（central directory、EOCD、ZIP64、data descriptor）、SQLite、GZIP、GIF、BMP、WAV、TAR、JPEG
+- 内置格式检查器：ELF、PE/COFF、Mach-O、PNG、ZIP（central directory、EOCD、ZIP64、data descriptor）、SQLite、PCAP/PCAPNG、GZIP、GIF、BMP、WAV、TAR、JPEG
 - 哈希：MD5、SHA1、SHA256、SHA512、CRC32
 - 剪贴板复制 / 粘贴、导出、fill / zero / xor / replace
 - 只读同步滚动 diff 页面，可用 `:diff` 对比另一个文件

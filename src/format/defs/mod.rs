@@ -4,6 +4,8 @@ pub mod gif;
 pub mod gzip;
 pub mod jpeg;
 pub mod macho;
+pub mod pcap;
+pub mod pcapng;
 pub mod pe;
 pub mod png;
 pub mod sqlite;

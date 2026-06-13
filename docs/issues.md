@@ -61,7 +61,7 @@
 
 - [ ] **[P1] 继续补齐现有格式深度**
   - 当前格式覆盖面已够宽，近期重点不再是“再加一个格式名”
-  - 应优先补 ELF、PE、Mach-O 等现有格式的深层结构、分页、跳转与更稳定的编辑边界；ZIP 已具备 central directory / EOCD / ZIP64 / data descriptor 感知，SQLite 已具备 database header / b-tree page 轻量解析，后续重点是结构间跳转与一致性提示
+  - 应优先补 ELF、PE、Mach-O 等现有格式的深层结构、分页、跳转与更稳定的编辑边界；ZIP 已具备 central directory / EOCD / ZIP64 / data descriptor 感知，SQLite 已具备 database header / b-tree page 轻量解析，PCAP/PCAPNG 已具备 capture/block/packet data range 轻量解析，后续重点是结构间跳转与一致性提示
 
 ### ELF 解析扩展计划
 
