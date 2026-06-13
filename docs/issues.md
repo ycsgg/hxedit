@@ -11,11 +11,6 @@
   - 现状：64 KB 分块已就位，但 GB 级文件仍会让 UI 长时间静默
   - 建议：开始先显示 `hashing...`，之后每 N 个 chunk 刷一次百分比或已处理字节数
 
-- [ ] **[P1] ZIP parser 仍只覆盖安全的 partial scan**
-  - 现状：当前主要按 local file header 正向扫描；命中 data descriptor 会保护性停止
-  - 缺口：还没有完整处理 central directory / EOCD / ZIP64 / data descriptor
-  - 目标：在不误解析 offset 的前提下，把 ZIP inspector 从“安全浏览”推进到“结构感知”
-
 - [ ] **[P1] ELF inspector 仍只有 Header + Program Header Table**
   - 现状：Section Header Table、符号表、重定位表、动态段等都还没展开
   - 额外问题：ELF 当前也还没有像 PNG / ZIP 一样接入 `:insp more` 分页路径
@@ -66,7 +61,7 @@
 
 - [ ] **[P1] 继续补齐现有格式深度**
   - 当前格式覆盖面已够宽，近期重点不再是“再加一个格式名”
-  - 应优先补 ZIP、ELF、PE、Mach-O 等现有格式的深层结构、分页、跳转与更稳定的编辑边界
+  - 应优先补 ELF、PE、Mach-O 等现有格式的深层结构、分页、跳转与更稳定的编辑边界；ZIP 已具备 central directory / EOCD / ZIP64 / data descriptor 感知，后续重点是结构间跳转与一致性提示
 
 ### ELF 解析扩展计划
 

@@ -24,7 +24,7 @@
 - 选区：Visual 选区，或 inspector 当前字段范围作为 active selection
 - 命令：`:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`；`default` / `full` 内置 `memory` feature，支持 `:mem freeze` / `:mem thaw` 暂停与恢复目标进程，`:mem commit` / `:mem commit-all` 写回 replacement（后者按 VA 升序遍历所有 dirty region），`:w` 等价 `:mem commit` 且 `:w <path>` 被拒绝（改用 `:export`）；`MemorySession` 按 region 持久化未提交 replacement / undo / redo，切换 region 不丢失编辑，`:q` 在任意 region dirty 时拒绝并汇总；`sagitta-analysis` feature 下额外支持 `:ana` / `:ana status` / `:ana off`，对当前 logical bytes 后台运行 crates.io `sagitta-rs` 并用 ready snapshot 覆盖 symbol panel 数据源
 - Inspector / side panel：
-  - Inspector：ELF、PE/COFF、Mach-O、PNG、ZIP、GZIP、GIF、BMP、WAV、TAR、JPEG
+  - Inspector：ELF、PE/COFF、Mach-O、PNG、ZIP（central directory / EOCD / ZIP64 / data descriptor 感知）、GZIP、GIF、BMP、WAV、TAR、JPEG
   - Symbol panel：可执行文件 symbol / import 列表与跳转；`sagitta-analysis` ready 后使用 Sagitta recovered functions 覆盖 native entries
   - Data panel：cursor-relative primitive decode
 - Disassembly：
@@ -109,14 +109,14 @@
 ### 2.4 结构安全仍需保守
 
 - ELF 某些头字段可编辑，风险相对可控
-- PNG / ZIP 仍不能自动修 CRC、descriptor、目录索引等一致性
+- PNG / ZIP 仍不能自动修 CRC、descriptor、目录索引等一致性；ZIP inspector 已能读取 central directory / EOCD / ZIP64 / data descriptor，但编辑仍只是 byte 写入
 - 新增 editable 字段时，宁可少开，也不要把“能改字节”误写成“结构安全”
 
 ### 2.5 格式支持深度仍有限
 
 虽然当前已支持 ELF / PE / Mach-O / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG，但仍有深度边界：
 
-- ZIP 还没有完整 central directory / ZIP64 / data descriptor 感知
+- ZIP 已从 local-header partial scan 推进到 central directory / EOCD / ZIP64 / data descriptor 感知，但还没有结构间跳转或自动一致性修复
 - 某些格式仍以“安全浏览 + 保守编辑”为主，不做结构修复
 - 大表格 / 深层结构仍需要继续补分页、跳转与更细粒度视图
 
