@@ -86,10 +86,10 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
             FieldDef {
                 name: "packed".into(),
                 offset: 4,
-                field_type: FieldType::Flags {
-                    inner: Box::new(FieldType::U8),
-                    flags: vec![(0x80, "global_color_table".into()), (0x08, "sorted".into())],
-                },
+                field_type: FieldType::custom_flags(
+                    FieldType::U8,
+                    vec![(0x80, "global_color_table".into()), (0x08, "sorted".into())],
+                ),
                 description: "Logical screen packed flags".into(),
                 editable: true,
             },
@@ -167,10 +167,7 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
                     fields: vec![FieldDef {
                         name: "trailer".into(),
                         offset: 0,
-                        field_type: FieldType::Enum {
-                            inner: Box::new(FieldType::U8),
-                            variants: block_start_variants(),
-                        },
+                        field_type: FieldType::custom_enum(FieldType::U8, block_start_variants()),
                         description: "GIF trailer byte".into(),
                         editable: false,
                     }],
@@ -263,10 +260,7 @@ fn parse_image_block(doc: &mut Document, offset: u64, image_index: usize) -> Par
         FieldDef {
             name: "separator".into(),
             offset: 0,
-            field_type: FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: block_start_variants(),
-            },
+            field_type: FieldType::custom_enum(FieldType::U8, block_start_variants()),
             description: "Image descriptor separator".into(),
             editable: false,
         },
@@ -301,14 +295,14 @@ fn parse_image_block(doc: &mut Document, offset: u64, image_index: usize) -> Par
         FieldDef {
             name: "packed".into(),
             offset: 9,
-            field_type: FieldType::Flags {
-                inner: Box::new(FieldType::U8),
-                flags: vec![
+            field_type: FieldType::custom_flags(
+                FieldType::U8,
+                vec![
                     (0x80, "local_color_table".into()),
                     (0x40, "interlaced".into()),
                     (0x20, "sorted".into()),
                 ],
-            },
+            ),
             description: "Image descriptor packed flags".into(),
             editable: true,
         },
@@ -428,20 +422,14 @@ fn parse_graphic_control_extension(
         FieldDef {
             name: "introducer".into(),
             offset: 0,
-            field_type: FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: block_start_variants(),
-            },
+            field_type: FieldType::custom_enum(FieldType::U8, block_start_variants()),
             description: "Extension introducer".into(),
             editable: false,
         },
         FieldDef {
             name: "label".into(),
             offset: 1,
-            field_type: FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: extension_label_variants(),
-            },
+            field_type: FieldType::custom_enum(FieldType::U8, extension_label_variants()),
             description: "Extension label".into(),
             editable: true,
         },
@@ -460,20 +448,27 @@ fn parse_graphic_control_extension(
         fields.push(FieldDef {
             name: "packed".into(),
             offset: 3,
-            field_type: FieldType::Flags {
-                inner: Box::new(FieldType::U8),
-                flags: vec![(0x01, "transparent_color".into())],
-            },
+            field_type: FieldType::custom_flags(
+                FieldType::U8,
+                vec![(0x01, "transparent_color".into())],
+            ),
             description: "Graphic Control Extension packed flags".into(),
             editable: true,
         });
     }
     if available >= 6 {
+        let delay_time = read_bytes_raw(doc, offset + 4, 2)
+            .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+            .unwrap_or(0);
         fields.push(FieldDef {
             name: "delay_time".into(),
             offset: 4,
-            field_type: FieldType::U16Le,
-            description: "Frame delay in hundredths of a second".into(),
+            field_type: FieldType::custom_display(
+                2,
+                gif_delay_display(delay_time),
+                encode_gif_delay,
+            ),
+            description: "Frame delay decoded from hundredths of a second".into(),
             editable: true,
         });
     }
@@ -537,20 +532,14 @@ fn parse_application_extension(
         FieldDef {
             name: "introducer".into(),
             offset: 0,
-            field_type: FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: block_start_variants(),
-            },
+            field_type: FieldType::custom_enum(FieldType::U8, block_start_variants()),
             description: "Extension introducer".into(),
             editable: false,
         },
         FieldDef {
             name: "label".into(),
             offset: 1,
-            field_type: FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: extension_label_variants(),
-            },
+            field_type: FieldType::custom_enum(FieldType::U8, extension_label_variants()),
             description: "Application Extension label".into(),
             editable: true,
         },
@@ -657,20 +646,14 @@ fn parse_plaintext_extension(
         FieldDef {
             name: "introducer".into(),
             offset: 0,
-            field_type: FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: block_start_variants(),
-            },
+            field_type: FieldType::custom_enum(FieldType::U8, block_start_variants()),
             description: "Extension introducer".into(),
             editable: false,
         },
         FieldDef {
             name: "label".into(),
             offset: 1,
-            field_type: FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: extension_label_variants(),
-            },
+            field_type: FieldType::custom_enum(FieldType::U8, extension_label_variants()),
             description: "Plain Text Extension label".into(),
             editable: true,
         },
@@ -798,20 +781,14 @@ fn parse_comment_extension(doc: &mut Document, offset: u64, extension_index: usi
                 FieldDef {
                     name: "introducer".into(),
                     offset: 0,
-                    field_type: FieldType::Enum {
-                        inner: Box::new(FieldType::U8),
-                        variants: block_start_variants(),
-                    },
+                    field_type: FieldType::custom_enum(FieldType::U8, block_start_variants()),
                     description: "Extension introducer".into(),
                     editable: false,
                 },
                 FieldDef {
                     name: "label".into(),
                     offset: 1,
-                    field_type: FieldType::Enum {
-                        inner: Box::new(FieldType::U8),
-                        variants: extension_label_variants(),
-                    },
+                    field_type: FieldType::custom_enum(FieldType::U8, extension_label_variants()),
                     description: "Comment Extension label".into(),
                     editable: true,
                 },
@@ -856,20 +833,14 @@ fn parse_generic_extension(
                 FieldDef {
                     name: "introducer".into(),
                     offset: 0,
-                    field_type: FieldType::Enum {
-                        inner: Box::new(FieldType::U8),
-                        variants: block_start_variants(),
-                    },
+                    field_type: FieldType::custom_enum(FieldType::U8, block_start_variants()),
                     description: "Extension introducer".into(),
                     editable: false,
                 },
                 FieldDef {
                     name: "label".into(),
                     offset: 1,
-                    field_type: FieldType::Enum {
-                        inner: Box::new(FieldType::U8),
-                        variants: extension_label_variants(),
-                    },
+                    field_type: FieldType::custom_enum(FieldType::U8, extension_label_variants()),
                     description: "Extension label".into(),
                     editable: true,
                 },
@@ -971,6 +942,86 @@ fn extension_label_name(label: u8) -> String {
         .unwrap_or_else(|| format!("Extension 0x{label:02x}"))
 }
 
+fn gif_delay_display(hundredths: u16) -> String {
+    if hundredths.is_multiple_of(100) {
+        format!("{}s ({} cs)", hundredths / 100, hundredths)
+    } else {
+        format!("{}ms ({} cs)", u32::from(hundredths) * 10, hundredths)
+    }
+}
+
+fn encode_gif_delay(input: &str) -> Result<Vec<u8>, String> {
+    let value = parse_gif_delay(input)?;
+    Ok(value.to_le_bytes().to_vec())
+}
+
+fn parse_gif_delay(input: &str) -> Result<u16, String> {
+    let head = input
+        .trim()
+        .split_once(" (")
+        .map(|(head, _)| head.trim_end())
+        .unwrap_or_else(|| input.trim());
+    let compact: String = head.chars().filter(|ch| !ch.is_whitespace()).collect();
+    if compact.is_empty() {
+        return Err("GIF delay is empty".into());
+    }
+    let number_end = compact
+        .find(|ch: char| !ch.is_ascii_digit() && ch != '.')
+        .unwrap_or(compact.len());
+    if number_end == 0 {
+        return Err("GIF delay value is missing".into());
+    }
+    let (number, unit) = compact.split_at(number_end);
+    let unit = unit.to_ascii_lowercase();
+    let hundredths = match unit.as_str() {
+        "" | "cs" => parse_integer(number, "centiseconds")?,
+        "s" => parse_decimal_scaled(number, 100, "seconds")?,
+        "ms" => {
+            let millis = parse_integer(number, "milliseconds")?;
+            if millis % 10 != 0 {
+                return Err("GIF delay milliseconds must be a multiple of 10".into());
+            }
+            millis / 10
+        }
+        _ => return Err("GIF delay unit must be s, ms, or cs".into()),
+    };
+    u16::try_from(hundredths).map_err(|_| "GIF delay must fit in u16 centiseconds".into())
+}
+
+fn parse_integer(input: &str, name: &str) -> Result<u32, String> {
+    if input.is_empty() || !input.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!("invalid {name}"));
+    }
+    input
+        .parse::<u32>()
+        .map_err(|err| format!("invalid {name}: {err}"))
+}
+
+fn parse_decimal_scaled(input: &str, scale: u32, name: &str) -> Result<u32, String> {
+    let (whole, fraction) = input.split_once('.').unwrap_or((input, ""));
+    let whole = parse_integer(whole, name)?;
+    if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!("invalid {name} fraction"));
+    }
+    if fraction.len() > 2 {
+        return Err(format!("{name} accept at most two fractional digits"));
+    }
+    let mut fraction_value = if fraction.is_empty() {
+        0
+    } else {
+        fraction
+            .parse::<u32>()
+            .map_err(|err| format!("invalid {name} fraction: {err}"))?
+    };
+    for _ in fraction.len()..2 {
+        fraction_value *= 10;
+    }
+    whole
+        .checked_mul(scale)
+        .and_then(|value| value.checked_add(fraction_value))
+        .ok_or_else(|| format!("{name} value is out of range"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -981,6 +1032,8 @@ mod tests {
     use crate::config::Config;
     use crate::core::document::Document;
     use crate::format;
+    use crate::format::edit::encode_value;
+    use crate::format::types::{CustomCodec, FieldType};
 
     fn write_gif(path: &std::path::Path, bytes: &[u8]) -> Document {
         fs::write(path, bytes).unwrap();
@@ -996,7 +1049,9 @@ mod tests {
         bytes.push(0);
         bytes.push(0);
         bytes.extend_from_slice(&[0x00, 0x00, 0x00, 0xff, 0xff, 0xff]);
-        bytes.extend_from_slice(&[0x21, 0xf9, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        bytes.extend_from_slice(&[0x21, 0xf9, 0x04, 0x00]);
+        bytes.extend_from_slice(&10_u16.to_le_bytes());
+        bytes.extend_from_slice(&[0x00, 0x00]);
         bytes.extend_from_slice(&[0x2c, 0x00, 0x00, 0x00, 0x00]);
         bytes.extend_from_slice(&1_u16.to_le_bytes());
         bytes.extend_from_slice(&1_u16.to_le_bytes());
@@ -1051,6 +1106,31 @@ mod tests {
             .structs
             .iter()
             .any(|structure| structure.name == "Trailer"));
+        let gce = def
+            .structs
+            .iter()
+            .find(|structure| structure.name.contains("Graphics Control"))
+            .expect("graphics control extension");
+        let delay = gce
+            .fields
+            .iter()
+            .find(|field| field.name == "delay_time")
+            .expect("delay_time field");
+        let FieldType::Custom(custom) = &delay.field_type else {
+            panic!("delay_time should use custom display");
+        };
+        let CustomCodec::Display { display, .. } = &custom.codec else {
+            panic!("delay_time should use display codec");
+        };
+        assert_eq!(display, "100ms (10 cs)");
+        assert_eq!(
+            encode_value(&delay.field_type, display).unwrap(),
+            10_u16.to_le_bytes()
+        );
+        assert_eq!(
+            encode_value(&delay.field_type, "1.5s").unwrap(),
+            150_u16.to_le_bytes()
+        );
 
         let structs = format::parse::parse_format(&def, &mut doc).expect("parse succeeds");
         let image = structs

@@ -11,6 +11,7 @@ use crate::format::types::FieldType;
 /// - Enum name: ET_EXEC (for Enum types, matches variant name)
 /// - Raw hex bytes: 7f 45 4c 46 (for Bytes type)
 /// - String literal: "text" (for Utf8 type)
+/// - Format-specific custom text for Custom types
 pub fn encode_value(field_type: &FieldType, input: &str) -> Result<Vec<u8>, String> {
     let input = input.trim();
     match field_type {
@@ -111,18 +112,23 @@ pub fn encode_value(field_type: &FieldType, input: &str) -> Result<Vec<u8>, Stri
             Ok(bytes)
         }
         FieldType::DataRange(_) => Err("data range fields cannot be edited".into()),
-        FieldType::Enum { inner, variants } => {
-            // Try matching variant name first
+        FieldType::Custom(custom) => encode_custom_value(custom, input),
+    }
+}
+
+fn encode_custom_value(
+    custom: &crate::format::types::CustomField,
+    input: &str,
+) -> Result<Vec<u8>, String> {
+    match &custom.codec {
+        crate::format::types::CustomCodec::Display { encode, .. } => encode(input),
+        crate::format::types::CustomCodec::Enum { inner, variants } => {
             if let Some((val, _)) = variants.iter().find(|(_, name)| name == input) {
                 return encode_value(inner, &format!("0x{:x}", val));
             }
-            // Fall back to numeric input
             encode_value(inner, input)
         }
-        FieldType::Flags { inner, .. } => {
-            // For flags, accept numeric input only
-            encode_value(inner, input)
-        }
+        crate::format::types::CustomCodec::Flags { inner, .. } => encode_value(inner, input),
     }
 }
 
@@ -221,12 +227,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn enum_display_value_can_roundtrip_from_prefilled_text() {
+    fn unsigned_values_are_range_checked() {
+        assert!(encode_value(&FieldType::U8, "0x1ff").is_err());
+    }
+
+    #[test]
+    fn custom_value_uses_format_encoder() {
+        fn encode_test(input: &str) -> Result<Vec<u8>, String> {
+            if input == "ok" {
+                Ok(vec![1, 2, 3, 4])
+            } else {
+                Err("bad custom value".into())
+            }
+        }
+
+        let field_type = FieldType::custom_display(4, "ok", encode_test);
+        assert_eq!(encode_value(&field_type, "ok").unwrap(), vec![1, 2, 3, 4]);
+        assert!(encode_value(&field_type, "nope").is_err());
+    }
+
+    #[test]
+    fn custom_enum_display_value_can_roundtrip_from_prefilled_text() {
         let encoded = encode_value(
-            &FieldType::Enum {
-                inner: Box::new(FieldType::U16Le),
-                variants: vec![(0x3e, "EM_X86_64".into())],
-            },
+            &FieldType::custom_enum(FieldType::U16Le, vec![(0x3e, "EM_X86_64".into())]),
             "0x003e (EM_X86_64)",
         )
         .unwrap();
@@ -234,20 +257,12 @@ mod tests {
     }
 
     #[test]
-    fn flags_display_value_accepts_numeric_prefix() {
+    fn custom_flags_display_value_accepts_numeric_prefix() {
         let encoded = encode_value(
-            &FieldType::Flags {
-                inner: Box::new(FieldType::U16Le),
-                flags: vec![(0x0001, "Encrypted".into())],
-            },
+            &FieldType::custom_flags(FieldType::U16Le, vec![(0x0001, "Encrypted".into())]),
             "0x0001 [Encrypted]",
         )
         .unwrap();
         assert_eq!(encoded, 1u16.to_le_bytes());
-    }
-
-    #[test]
-    fn unsigned_values_are_range_checked() {
-        assert!(encode_value(&FieldType::U8, "0x1ff").is_err());
     }
 }

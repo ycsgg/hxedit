@@ -1,5 +1,6 @@
 use crate::core::document::Document;
 use crate::format::detect::read_bytes_raw;
+use crate::format::time;
 use crate::format::types::*;
 
 const PCAP_HEADER_LEN: u64 = 24;
@@ -107,10 +108,7 @@ fn global_header_struct(endian: Endian, precision: TimestampPrecision) -> Struct
             field(
                 "network",
                 20,
-                FieldType::Enum {
-                    inner: Box::new(endian.u32_type()),
-                    variants: linktype_variants(),
-                },
+                FieldType::custom_enum(endian.u32_type(), linktype_variants()),
                 "Link-layer header type for every packet record",
                 true,
             ),
@@ -138,8 +136,17 @@ fn packet_struct(
     let declared_end = packet_data_offset.checked_add(incl_len)?;
     let available_len = doc.len().saturating_sub(packet_data_offset).min(incl_len);
     let complete = declared_end <= doc.len();
+    let ts_sec = endian.read_u32(&header, 0);
+    let fraction = endian.read_u32(&header, 4);
 
     let mut fields = vec![
+        field(
+            "timestamp_utc",
+            0,
+            timestamp_type(endian, precision, ts_sec, fraction),
+            "Packet timestamp as UTC; editing rewrites ts_sec and fractional timestamp together",
+            true,
+        ),
         field(
             "ts_sec",
             0,
@@ -238,6 +245,69 @@ impl Endian {
     }
 }
 
+fn timestamp_type(
+    endian: Endian,
+    precision: TimestampPrecision,
+    ts_sec: u32,
+    fraction: u32,
+) -> FieldType {
+    FieldType::custom_display(
+        8,
+        time::format_unix_utc_fraction(
+            ts_sec,
+            fraction,
+            precision.fraction_precision(),
+            precision.fraction_field_name(),
+        ),
+        match (endian, precision) {
+            (Endian::Little, TimestampPrecision::Microseconds) => encode_le_micro_timestamp,
+            (Endian::Big, TimestampPrecision::Microseconds) => encode_be_micro_timestamp,
+            (Endian::Little, TimestampPrecision::Nanoseconds) => encode_le_nano_timestamp,
+            (Endian::Big, TimestampPrecision::Nanoseconds) => encode_be_nano_timestamp,
+        },
+    )
+}
+
+fn encode_le_micro_timestamp(input: &str) -> Result<Vec<u8>, String> {
+    encode_timestamp(input, Endian::Little, TimestampPrecision::Microseconds)
+}
+
+fn encode_be_micro_timestamp(input: &str) -> Result<Vec<u8>, String> {
+    encode_timestamp(input, Endian::Big, TimestampPrecision::Microseconds)
+}
+
+fn encode_le_nano_timestamp(input: &str) -> Result<Vec<u8>, String> {
+    encode_timestamp(input, Endian::Little, TimestampPrecision::Nanoseconds)
+}
+
+fn encode_be_nano_timestamp(input: &str) -> Result<Vec<u8>, String> {
+    encode_timestamp(input, Endian::Big, TimestampPrecision::Nanoseconds)
+}
+
+fn encode_timestamp(
+    input: &str,
+    endian: Endian,
+    precision: TimestampPrecision,
+) -> Result<Vec<u8>, String> {
+    let (ts_sec, fraction) = parse_timestamp(input, precision)?;
+    let mut bytes = Vec::with_capacity(8);
+    match endian {
+        Endian::Little => {
+            bytes.extend_from_slice(&ts_sec.to_le_bytes());
+            bytes.extend_from_slice(&fraction.to_le_bytes());
+        }
+        Endian::Big => {
+            bytes.extend_from_slice(&ts_sec.to_be_bytes());
+            bytes.extend_from_slice(&fraction.to_be_bytes());
+        }
+    }
+    Ok(bytes)
+}
+
+fn parse_timestamp(input: &str, precision: TimestampPrecision) -> Result<(u32, u32), String> {
+    time::parse_unix_utc_fraction(input, precision.fraction_precision())
+}
+
 #[derive(Clone, Copy)]
 enum TimestampPrecision {
     Microseconds,
@@ -263,6 +333,13 @@ impl TimestampPrecision {
         match self {
             Self::Microseconds => "Packet timestamp microseconds",
             Self::Nanoseconds => "Packet timestamp nanoseconds",
+        }
+    }
+
+    const fn fraction_precision(self) -> time::FractionPrecision {
+        match self {
+            Self::Microseconds => time::MICROSECOND,
+            Self::Nanoseconds => time::NANOSECOND,
         }
     }
 }
@@ -324,6 +401,7 @@ mod tests {
     use super::{detect, detect_with_cap};
     use crate::config::Config;
     use crate::core::document::Document;
+    use crate::format::edit::encode_value;
     use crate::format::types::FieldType;
 
     fn open_pcap(bytes: Vec<u8>) -> Document {
@@ -371,6 +449,30 @@ mod tests {
             .iter()
             .find(|structure| structure.name == "Packet 0")
             .expect("packet 0");
+        let timestamp = packet
+            .fields
+            .iter()
+            .find(|field| field.name == "timestamp_utc")
+            .expect("timestamp field");
+        let FieldType::Custom(custom) = &timestamp.field_type else {
+            panic!("timestamp should use custom formatting");
+        };
+        let crate::format::types::CustomCodec::Display { display, .. } = &custom.codec else {
+            panic!("timestamp should use custom display codec");
+        };
+        assert_eq!(custom.bytes, 8);
+        assert_eq!(display, "1970-01-01T00:16:40.000123Z");
+        let mut expected_timestamp = Vec::new();
+        expected_timestamp.extend_from_slice(&1000_u32.to_le_bytes());
+        expected_timestamp.extend_from_slice(&123_u32.to_le_bytes());
+        assert_eq!(
+            encode_value(&timestamp.field_type, display).unwrap(),
+            expected_timestamp
+        );
+        assert_eq!(
+            encode_value(&timestamp.field_type, "1000.000123").unwrap(),
+            expected_timestamp
+        );
         assert!(packet.fields.iter().any(|field| field.name == "packet_data"
             && matches!(field.field_type, FieldType::DataRange(4))));
     }
@@ -399,10 +501,46 @@ mod tests {
             def.structs[0].name,
             "PCAP Global Header (nanosecond timestamps)"
         );
+        let packet = def
+            .structs
+            .iter()
+            .find(|structure| structure.name == "Packet 0")
+            .expect("packet 0");
+        let timestamp = packet
+            .fields
+            .iter()
+            .find(|field| field.name == "timestamp_utc")
+            .expect("timestamp field");
+        let FieldType::Custom(custom) = &timestamp.field_type else {
+            panic!("timestamp should use custom formatting");
+        };
+        let crate::format::types::CustomCodec::Display { display, .. } = &custom.codec else {
+            panic!("timestamp should use custom display codec");
+        };
+        assert_eq!(display, "1970-01-01T00:33:20.000000999Z");
+        let mut expected_timestamp = Vec::new();
+        expected_timestamp.extend_from_slice(&2000_u32.to_be_bytes());
+        expected_timestamp.extend_from_slice(&999_u32.to_be_bytes());
+        assert_eq!(
+            encode_value(&timestamp.field_type, display).unwrap(),
+            expected_timestamp
+        );
         assert!(def
             .structs
             .iter()
             .any(|structure| structure.name.contains("more PCAP packets beyond 1")));
+    }
+
+    #[test]
+    fn pcap_timestamp_rejects_fraction_beyond_precision() {
+        assert!(
+            super::encode_le_micro_timestamp("1970-01-01T00:00:00.1234567Z").is_err(),
+            "microsecond PCAP timestamps should reject more than 6 fraction digits"
+        );
+        assert!(
+            super::encode_le_nano_timestamp("1970-01-01T00:00:00.1234567890Z").is_err(),
+            "nanosecond PCAP timestamps should reject more than 9 fraction digits"
+        );
     }
 
     #[test]

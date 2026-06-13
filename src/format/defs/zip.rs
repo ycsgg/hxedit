@@ -1,5 +1,6 @@
 use crate::core::document::Document;
 use crate::format::detect::read_bytes_raw;
+use crate::format::time;
 use crate::format::types::*;
 
 const ZIP_LOCAL_MAGIC: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
@@ -215,6 +216,8 @@ struct CentralEntry {
     index: usize,
     offset: u64,
     next_offset: u64,
+    mod_time: u16,
+    mod_date: u16,
     compressed_size_32: u32,
     uncompressed_size_32: u32,
     filename_len: u16,
@@ -239,6 +242,8 @@ struct LocalHeader {
     signature: [u8; 4],
     offset: u64,
     flags: u16,
+    mod_time: u16,
+    mod_date: u16,
     compressed_size_32: u32,
     filename_len: u16,
     extra_len: u16,
@@ -310,6 +315,8 @@ fn parse_central_entry(doc: &mut Document, offset: u64, index: usize) -> Option<
         return None;
     }
 
+    let mod_time = le_u16(&fixed, 12);
+    let mod_date = le_u16(&fixed, 14);
     let compressed_size_32 = le_u32(&fixed, 20);
     let uncompressed_size_32 = le_u32(&fixed, 24);
     let filename_len = le_u16(&fixed, 28);
@@ -355,6 +362,8 @@ fn parse_central_entry(doc: &mut Document, offset: u64, index: usize) -> Option<
         index,
         offset,
         next_offset,
+        mod_time,
+        mod_date,
         compressed_size_32,
         uncompressed_size_32,
         filename_len,
@@ -372,6 +381,8 @@ fn parse_local_header(doc: &mut Document, offset: u64) -> Option<LocalHeader> {
     let fixed = read_bytes_raw(doc, offset, LOCAL_FIXED_LEN as usize)?;
     let signature = [fixed[0], fixed[1], fixed[2], fixed[3]];
     let flags = le_u16(&fixed, 6);
+    let mod_time = le_u16(&fixed, 10);
+    let mod_date = le_u16(&fixed, 12);
     let compressed_size_32 = le_u32(&fixed, 18);
     let uncompressed_size_32 = le_u32(&fixed, 22);
     let filename_len = le_u16(&fixed, 26);
@@ -397,6 +408,8 @@ fn parse_local_header(doc: &mut Document, offset: u64) -> Option<LocalHeader> {
         signature,
         offset,
         flags,
+        mod_time,
+        mod_date,
         compressed_size_32,
         filename_len,
         extra_len,
@@ -484,6 +497,17 @@ fn build_central_directory_struct(entry: &CentralEntry) -> StructDef {
             10,
             compression_type(),
             "Compression method",
+            true,
+        ),
+        field(
+            "modified_at",
+            12,
+            FieldType::custom_display(
+                4,
+                time::format_dos_datetime(entry.mod_time, entry.mod_date),
+                time::encode_dos_datetime_le,
+            ),
+            "Last modification timestamp decoded from ZIP DOS time/date",
             true,
         ),
         field(
@@ -896,6 +920,17 @@ fn local_header_fields(header: &LocalHeader) -> Vec<FieldDef> {
         ),
         field("flags", 6, zip_flags_type(), "General purpose bit flag", true),
         field("compression", 8, compression_type(), "Compression method", true),
+        field(
+            "modified_at",
+            10,
+            FieldType::custom_display(
+                4,
+                time::format_dos_datetime(header.mod_time, header.mod_date),
+                time::encode_dos_datetime_le,
+            ),
+            "Last modification timestamp decoded from ZIP DOS time/date",
+            true,
+        ),
         field("mod_time", 10, FieldType::U16Le, "Last modification time", true),
         field("mod_date", 12, FieldType::U16Le, "Last modification date", true),
         field("crc32", 14, FieldType::U32Le, "CRC-32 checksum", false),
@@ -1081,21 +1116,21 @@ fn descriptor_size_type(width: usize) -> FieldType {
 }
 
 fn zip_flags_type() -> FieldType {
-    FieldType::Flags {
-        inner: Box::new(FieldType::U16Le),
-        flags: vec![
+    FieldType::custom_flags(
+        FieldType::U16Le,
+        vec![
             (0x0001, "Encrypted".into()),
             (0x0008, "Data descriptor".into()),
             (0x0800, "UTF-8".into()),
         ],
-    }
+    )
 }
 
 fn compression_type() -> FieldType {
-    FieldType::Enum {
-        inner: Box::new(FieldType::U16Le),
-        variants: vec![(0, "Stored".into()), (8, "Deflated".into())],
-    }
+    FieldType::custom_enum(
+        FieldType::U16Le,
+        vec![(0, "Stored".into()), (8, "Deflated".into())],
+    )
 }
 
 fn field(
@@ -1174,7 +1209,12 @@ mod tests {
     use super::{detect, detect_with_cap};
     use crate::config::Config;
     use crate::core::document::Document;
+    use crate::format::edit::encode_value;
+    use crate::format::types::CustomCodec;
     use crate::format::types::FieldType;
+
+    const SAMPLE_DOS_TIME: u16 = 0x4dd4;
+    const SAMPLE_DOS_DATE: u16 = 0x58e3;
 
     fn open_zip(bytes: Vec<u8>) -> Document {
         let dir = tempdir().unwrap();
@@ -1189,8 +1229,8 @@ mod tests {
         bytes.extend_from_slice(&20_u16.to_le_bytes());
         bytes.extend_from_slice(&flags.to_le_bytes());
         bytes.extend_from_slice(&0_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&SAMPLE_DOS_TIME.to_le_bytes());
+        bytes.extend_from_slice(&SAMPLE_DOS_DATE.to_le_bytes());
         bytes.extend_from_slice(&0x1234_5678_u32.to_le_bytes());
         if flags & super::ZIP_DATA_DESCRIPTOR_FLAG == 0 {
             bytes.extend_from_slice(&data_len.to_le_bytes());
@@ -1217,8 +1257,8 @@ mod tests {
         bytes.extend_from_slice(&20_u16.to_le_bytes());
         bytes.extend_from_slice(&flags.to_le_bytes());
         bytes.extend_from_slice(&0_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&SAMPLE_DOS_TIME.to_le_bytes());
+        bytes.extend_from_slice(&SAMPLE_DOS_DATE.to_le_bytes());
         bytes.extend_from_slice(&0x1234_5678_u32.to_le_bytes());
         bytes.extend_from_slice(&data_len.to_le_bytes());
         bytes.extend_from_slice(&data_len.to_le_bytes());
@@ -1294,6 +1334,39 @@ mod tests {
             .structs
             .iter()
             .any(|structure| structure.name == "Data Descriptor: a.txt [no signature]"));
+    }
+
+    #[test]
+    fn zip_modification_time_is_editable_dos_datetime() {
+        let mut doc = open_zip(simple_zip_with_descriptor(true));
+        let def = detect(&mut doc).expect("zip should be detected");
+        for structure_name in [
+            "Local File 0: a.txt [data descriptor]",
+            "Central Directory Entry 0: a.txt",
+        ] {
+            let structure = def
+                .structs
+                .iter()
+                .find(|structure| structure.name == structure_name)
+                .expect("zip structure");
+            let modified_at = structure
+                .fields
+                .iter()
+                .find(|field| field.name == "modified_at")
+                .expect("modified_at field");
+            let FieldType::Custom(custom) = &modified_at.field_type else {
+                panic!("modified_at should use custom display");
+            };
+            let CustomCodec::Display { display, .. } = &custom.codec else {
+                panic!("modified_at should use display codec");
+            };
+            assert_eq!(display, "2024-07-03T09:46:40 (DOS local)");
+            let expected = [SAMPLE_DOS_TIME.to_le_bytes(), SAMPLE_DOS_DATE.to_le_bytes()].concat();
+            assert_eq!(
+                encode_value(&modified_at.field_type, display).unwrap(),
+                expected
+            );
+        }
     }
 
     #[test]

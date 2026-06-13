@@ -1,5 +1,6 @@
 use crate::core::document::Document;
 use crate::format::detect::{read_bytes_raw, read_u8, DEFAULT_ENTRY_CAP};
+use crate::format::time;
 use crate::format::types::*;
 
 // DOS Header constants
@@ -328,15 +329,15 @@ impl<'a> PeParser<'a> {
             FieldDef {
                 name: "Machine".to_string(),
                 offset: 0,
-                field_type: FieldType::Enum {
-                    inner: Box::new(FieldType::U16Le),
-                    variants: vec![
+                field_type: FieldType::custom_enum(
+                    FieldType::U16Le,
+                    vec![
                         (MACHINE_I386 as u64, "i386".to_string()),
                         (MACHINE_AMD64 as u64, "AMD64".to_string()),
                         (MACHINE_ARM as u64, "ARM".to_string()),
                         (MACHINE_ARM64 as u64, "ARM64".to_string()),
                     ],
-                },
+                ),
                 description: format!("Target machine type: {}", machine_name(machine)),
                 editable: true,
             },
@@ -350,8 +351,12 @@ impl<'a> PeParser<'a> {
             FieldDef {
                 name: "TimeDateStamp".to_string(),
                 offset: 4,
-                field_type: FieldType::U32Le,
-                description: format!("Time date stamp: 0x{:08x}", time_date_stamp),
+                field_type: FieldType::custom_display(
+                    4,
+                    time::format_unix_utc(time_date_stamp),
+                    encode_pe_time_date_stamp,
+                ),
+                description: format!("COFF timestamp: 0x{:08x}", time_date_stamp),
                 editable: true,
             },
             FieldDef {
@@ -378,10 +383,7 @@ impl<'a> PeParser<'a> {
             FieldDef {
                 name: "Characteristics".to_string(),
                 offset: 18,
-                field_type: FieldType::Flags {
-                    inner: Box::new(FieldType::U16Le),
-                    flags: coff_characteristics_flags(),
-                },
+                field_type: FieldType::custom_flags(FieldType::U16Le, coff_characteristics_flags()),
                 description: format!("Image characteristics: 0x{:04x}", characteristics),
                 editable: true,
             },
@@ -397,13 +399,13 @@ impl<'a> PeParser<'a> {
             FieldDef {
                 name: "Magic".to_string(),
                 offset: 0,
-                field_type: FieldType::Enum {
-                    inner: Box::new(FieldType::U16Le),
-                    variants: vec![
+                field_type: FieldType::custom_enum(
+                    FieldType::U16Le,
+                    vec![
                         (OPT_MAGIC_PE32 as u64, "PE32".to_string()),
                         (OPT_MAGIC_PE32_PLUS as u64, "PE32+".to_string()),
                     ],
-                },
+                ),
                 description: if self.is_pe32_plus {
                     "PE32+ (64-bit)"
                 } else {
@@ -678,10 +680,10 @@ impl<'a> PeParser<'a> {
             FieldDef {
                 name: "Characteristics".to_string(),
                 offset: 36,
-                field_type: FieldType::Flags {
-                    inner: Box::new(FieldType::U32Le),
-                    flags: section_characteristics_flags(),
-                },
+                field_type: FieldType::custom_flags(
+                    FieldType::U32Le,
+                    section_characteristics_flags(),
+                ),
                 description: format!("Section characteristics: 0x{:08x}", characteristics),
                 editable: true,
             },
@@ -730,9 +732,20 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
     PeParser::new(doc, pe_offset, entry_cap).parse()
 }
 
+fn encode_pe_time_date_stamp(input: &str) -> Result<Vec<u8>, String> {
+    Ok(time::parse_unix_utc(input)?.to_le_bytes().to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use crate::config::Config;
+    use crate::format::edit::encode_value;
+    use crate::format::types::{CustomCodec, FieldType};
 
     #[test]
     fn test_machine_name() {
@@ -740,5 +753,43 @@ mod tests {
         assert_eq!(machine_name(MACHINE_AMD64), "AMD64");
         assert_eq!(machine_name(MACHINE_ARM64), "ARM64");
         assert_eq!(machine_name(0x0000), "Unknown");
+    }
+
+    #[test]
+    fn coff_timestamp_is_editable_utc() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("sample.exe");
+        let mut bytes = vec![0_u8; DOS_HEADER_SIZE as usize];
+        bytes[0..2].copy_from_slice(&DOS_MAGIC);
+        bytes[60..64].copy_from_slice(&(DOS_HEADER_SIZE as u32).to_le_bytes());
+        bytes.extend_from_slice(&PE_SIGNATURE);
+        bytes.extend_from_slice(&MACHINE_AMD64.to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&1000_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        fs::write(&path, bytes).unwrap();
+
+        let mut doc = Document::open(&path, &Config::default()).unwrap();
+        let def = detect(&mut doc).expect("pe should be detected");
+        let coff = &def.structs[0].children[0];
+        let timestamp = coff
+            .fields
+            .iter()
+            .find(|field| field.name == "TimeDateStamp")
+            .expect("TimeDateStamp field");
+        let FieldType::Custom(custom) = &timestamp.field_type else {
+            panic!("TimeDateStamp should use custom display");
+        };
+        let CustomCodec::Display { display, .. } = &custom.codec else {
+            panic!("TimeDateStamp should use display codec");
+        };
+        assert_eq!(display, "1970-01-01T00:16:40Z");
+        assert_eq!(
+            encode_value(&timestamp.field_type, display).unwrap(),
+            1000_u32.to_le_bytes()
+        );
     }
 }

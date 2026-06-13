@@ -259,10 +259,7 @@ fn interface_description_block(
         field(
             "linktype",
             8,
-            FieldType::Enum {
-                inner: Box::new(endian.u16_type()),
-                variants: linktype_variants(),
-            },
+            FieldType::custom_enum(endian.u16_type(), linktype_variants()),
             "Link-layer type for packets on this interface",
             false,
         ),
@@ -501,10 +498,10 @@ fn block_name(
 }
 
 fn block_type_type(endian: Endian, block_type: u32) -> FieldType {
-    FieldType::Enum {
-        inner: Box::new(endian.u32_type()),
-        variants: vec![(block_type as u64, block_type_label(block_type).into())],
-    }
+    FieldType::custom_enum(
+        endian.u32_type(),
+        vec![(block_type as u64, block_type_label(block_type).into())],
+    )
 }
 
 fn block_type_label(block_type: u32) -> &'static str {

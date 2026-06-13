@@ -109,16 +109,16 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
                 FieldDef {
                     name: "color_type".into(),
                     offset: 17,
-                    field_type: FieldType::Enum {
-                        inner: Box::new(FieldType::U8),
-                        variants: vec![
+                    field_type: FieldType::custom_enum(
+                        FieldType::U8,
+                        vec![
                             (0, "Grayscale".into()),
                             (2, "RGB".into()),
                             (3, "Indexed".into()),
                             (4, "Grayscale+Alpha".into()),
                             (6, "RGBA".into()),
                         ],
-                    },
+                    ),
                     description: "Color type".into(),
                     editable: true,
                 },
@@ -139,10 +139,10 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
                 FieldDef {
                     name: "interlace".into(),
                     offset: 20,
-                    field_type: FieldType::Enum {
-                        inner: Box::new(FieldType::U8),
-                        variants: vec![(0, "None".into()), (1, "Adam7".into())],
-                    },
+                    field_type: FieldType::custom_enum(
+                        FieldType::U8,
+                        vec![(0, "None".into()), (1, "Adam7".into())],
+                    ),
                     description: "Interlace method".into(),
                     editable: true,
                 },

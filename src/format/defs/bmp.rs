@@ -346,10 +346,7 @@ fn build_dib_header_struct(dib_size: u64, present_len: u64) -> StructDef {
             present_len,
             "compression",
             16,
-            FieldType::Enum {
-                inner: Box::new(FieldType::U32Le),
-                variants: compression_variants(),
-            },
+            FieldType::custom_enum(FieldType::U32Le, compression_variants()),
             "Compression method",
             true,
         );

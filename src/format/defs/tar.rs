@@ -1,5 +1,6 @@
 use crate::core::document::Document;
 use crate::format::detect::read_bytes_raw;
+use crate::format::time;
 use crate::format::types::*;
 
 const TAR_BLOCK: u64 = 512;
@@ -57,7 +58,10 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
             break;
         }
 
-        let size = parse_octal_field(&header[124..136]).unwrap_or(0);
+        let mode_field = parse_octal_field(&header[100..108]);
+        let size_field = parse_octal_field(&header[124..136]);
+        let mtime_field = parse_octal_field(&header[136..148]);
+        let size = size_field.unwrap_or(0);
         let checksum_ok = checksum_matches(&header);
         let typeflag = header[156];
         let name = entry_name(&header);
@@ -76,8 +80,12 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
             FieldDef {
                 name: "mode".into(),
                 offset: 100,
-                field_type: FieldType::Utf8(TAR_MODE_LEN),
-                description: "File mode (octal text)".into(),
+                field_type: FieldType::custom_display(
+                    TAR_MODE_LEN,
+                    tar_mode_display(mode_field),
+                    encode_tar_mode,
+                ),
+                description: "File mode decoded from TAR octal text".into(),
                 editable: true,
             },
             FieldDef {
@@ -97,15 +105,23 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
             FieldDef {
                 name: "size".into(),
                 offset: 124,
-                field_type: FieldType::Utf8(TAR_SIZE_LEN),
-                description: "Entry size (octal text)".into(),
+                field_type: FieldType::custom_display(
+                    TAR_SIZE_LEN,
+                    tar_size_display(size_field),
+                    encode_tar_size,
+                ),
+                description: "Entry size decoded from TAR octal text".into(),
                 editable: true,
             },
             FieldDef {
                 name: "mtime".into(),
                 offset: 136,
-                field_type: FieldType::Utf8(TAR_MTIME_LEN),
-                description: "Modification time (octal text)".into(),
+                field_type: FieldType::custom_display(
+                    TAR_MTIME_LEN,
+                    tar_mtime_display(mtime_field),
+                    encode_tar_mtime,
+                ),
+                description: "Modification time decoded from TAR octal Unix seconds".into(),
                 editable: true,
             },
             FieldDef {
@@ -118,10 +134,7 @@ pub fn detect_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef
             FieldDef {
                 name: "typeflag".into(),
                 offset: 156,
-                field_type: FieldType::Enum {
-                    inner: Box::new(FieldType::U8),
-                    variants: typeflag_variants(),
-                },
+                field_type: FieldType::custom_enum(FieldType::U8, typeflag_variants()),
                 description: "Entry type".into(),
                 editable: true,
             },
@@ -298,6 +311,210 @@ fn parse_octal_field(raw: &[u8]) -> Option<u64> {
     }
 }
 
+fn tar_mode_display(value: Option<u64>) -> String {
+    match value {
+        Some(value) => format!("0o{value:07o} ({})", symbolic_mode(value)),
+        None => "invalid octal mode".into(),
+    }
+}
+
+fn tar_size_display(value: Option<u64>) -> String {
+    match value {
+        Some(value) => format!("{value} bytes (0o{value:o})"),
+        None => "invalid octal size".into(),
+    }
+}
+
+fn tar_mtime_display(value: Option<u64>) -> String {
+    match value {
+        Some(value) if value <= u32::MAX as u64 => {
+            format!("{} (0o{value:o})", time::format_unix_utc(value as u32))
+        }
+        Some(value) => format!("{value} seconds since Unix epoch (0o{value:o})"),
+        None => "invalid octal mtime".into(),
+    }
+}
+
+fn encode_tar_mode(input: &str) -> Result<Vec<u8>, String> {
+    let input = input.trim();
+    let value = parse_symbolic_mode(input).unwrap_or_else(|| parse_tar_integer(input, 8))?;
+    encode_tar_octal_field(value, TAR_MODE_LEN)
+}
+
+fn encode_tar_size(input: &str) -> Result<Vec<u8>, String> {
+    let value = parse_tar_integer(input, 10)?;
+    encode_tar_octal_field(value, TAR_SIZE_LEN)
+}
+
+fn encode_tar_mtime(input: &str) -> Result<Vec<u8>, String> {
+    let input = input.trim();
+    let head = input
+        .split_once(" (")
+        .map(|(head, _)| head.trim_end())
+        .unwrap_or(input);
+    let value = if head.contains('-') || head.contains('T') || head.contains(':') {
+        time::parse_unix_utc(head)? as u64
+    } else {
+        parse_tar_integer(head, 10)?
+    };
+    encode_tar_octal_field(value, TAR_MTIME_LEN)
+}
+
+fn encode_tar_octal_field(value: u64, width: usize) -> Result<Vec<u8>, String> {
+    let digits = width.saturating_sub(1);
+    let text = format!("{value:0digits$o}");
+    if text.len() > digits {
+        return Err(format!(
+            "octal value does not fit in {width}-byte TAR field"
+        ));
+    }
+    let mut bytes = text.into_bytes();
+    bytes.push(0);
+    Ok(bytes)
+}
+
+fn parse_tar_integer(input: &str, default_radix: u32) -> Result<u64, String> {
+    let token = numeric_token(input);
+    if token.is_empty() {
+        return Err("value is empty".into());
+    }
+    if let Some(octal) = token
+        .strip_prefix("0o")
+        .or_else(|| token.strip_prefix("0O"))
+    {
+        u64::from_str_radix(octal, 8).map_err(|err| format!("invalid octal value: {err}"))
+    } else if let Some(hex) = token
+        .strip_prefix("0x")
+        .or_else(|| token.strip_prefix("0X"))
+    {
+        u64::from_str_radix(hex, 16).map_err(|err| format!("invalid hex value: {err}"))
+    } else {
+        u64::from_str_radix(token, default_radix)
+            .map_err(|err| format!("invalid numeric value: {err}"))
+    }
+}
+
+fn numeric_token(input: &str) -> &str {
+    let trimmed = input.trim();
+    trimmed
+        .split([' ', '\t', '(', '[', '{'])
+        .next()
+        .unwrap_or(trimmed)
+}
+
+fn symbolic_mode(value: u64) -> String {
+    let bits = value & 0o7777;
+    let mut text = String::with_capacity(9);
+    text.push(if bits & 0o400 != 0 { 'r' } else { '-' });
+    text.push(if bits & 0o200 != 0 { 'w' } else { '-' });
+    text.push(special_exec(bits, 0o100, 0o4000, 's', 'S'));
+    text.push(if bits & 0o040 != 0 { 'r' } else { '-' });
+    text.push(if bits & 0o020 != 0 { 'w' } else { '-' });
+    text.push(special_exec(bits, 0o010, 0o2000, 's', 'S'));
+    text.push(if bits & 0o004 != 0 { 'r' } else { '-' });
+    text.push(if bits & 0o002 != 0 { 'w' } else { '-' });
+    text.push(special_exec(bits, 0o001, 0o1000, 't', 'T'));
+    text
+}
+
+fn special_exec(bits: u64, exec: u64, special: u64, set_exec: char, set_no_exec: char) -> char {
+    match (bits & exec != 0, bits & special != 0) {
+        (true, true) => set_exec,
+        (false, true) => set_no_exec,
+        (true, false) => 'x',
+        (false, false) => '-',
+    }
+}
+
+fn parse_symbolic_mode(input: &str) -> Option<Result<u64, String>> {
+    let text = input.trim();
+    let text = match text.len() {
+        9 => text,
+        10 => &text[1..],
+        _ => return None,
+    };
+    let bytes = text.as_bytes();
+    if bytes.len() != 9 {
+        return None;
+    }
+
+    Some((|| {
+        let mut value = 0_u64;
+        parse_perm(bytes[0], b'r', 0o400, &mut value, "user read")?;
+        parse_perm(bytes[1], b'w', 0o200, &mut value, "user write")?;
+        parse_exec(
+            bytes[2],
+            0o100,
+            0o4000,
+            b's',
+            b'S',
+            &mut value,
+            "user execute",
+        )?;
+        parse_perm(bytes[3], b'r', 0o040, &mut value, "group read")?;
+        parse_perm(bytes[4], b'w', 0o020, &mut value, "group write")?;
+        parse_exec(
+            bytes[5],
+            0o010,
+            0o2000,
+            b's',
+            b'S',
+            &mut value,
+            "group execute",
+        )?;
+        parse_perm(bytes[6], b'r', 0o004, &mut value, "other read")?;
+        parse_perm(bytes[7], b'w', 0o002, &mut value, "other write")?;
+        parse_exec(
+            bytes[8],
+            0o001,
+            0o1000,
+            b't',
+            b'T',
+            &mut value,
+            "other execute",
+        )?;
+        Ok(value)
+    })())
+}
+
+fn parse_perm(byte: u8, expected: u8, bit: u64, value: &mut u64, name: &str) -> Result<(), String> {
+    match byte {
+        b'-' => Ok(()),
+        found if found == expected => {
+            *value |= bit;
+            Ok(())
+        }
+        _ => Err(format!("invalid symbolic mode bit for {name}")),
+    }
+}
+
+fn parse_exec(
+    byte: u8,
+    exec_bit: u64,
+    special_bit: u64,
+    special_exec: u8,
+    special_no_exec: u8,
+    value: &mut u64,
+    name: &str,
+) -> Result<(), String> {
+    match byte {
+        b'-' => Ok(()),
+        b'x' => {
+            *value |= exec_bit;
+            Ok(())
+        }
+        found if found == special_exec => {
+            *value |= exec_bit | special_bit;
+            Ok(())
+        }
+        found if found == special_no_exec => {
+            *value |= special_bit;
+            Ok(())
+        }
+        _ => Err(format!("invalid symbolic mode bit for {name}")),
+    }
+}
+
 fn entry_name(header: &[u8]) -> String {
     let name = trim_tar_text(&header[..TAR_NAME_LEN]);
     let prefix = trim_tar_text(&header[345..500]);
@@ -388,6 +605,8 @@ mod tests {
     use crate::config::Config;
     use crate::core::document::Document;
     use crate::format;
+    use crate::format::edit::encode_value;
+    use crate::format::types::{CustomCodec, FieldType};
 
     struct TarEntry<'a> {
         name: &'a str,
@@ -508,6 +727,77 @@ mod tests {
             .expect("file_data field");
         assert_eq!(field.abs_offset, TAR_BLOCK);
         assert_eq!(field.size, 5);
+    }
+
+    #[test]
+    fn tar_octal_fields_are_readable_and_editable() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("readable.tar");
+        let entries = [TarEntry {
+            name: "payload.bin",
+            typeflag: b'0',
+            data: b"hello",
+            prefix: "",
+        }];
+        let mut doc = write_tar(&path, &build_tar(&entries));
+
+        let def = detect(&mut doc).expect("tar detected");
+        let entry = &def.structs[0];
+        let mode = entry
+            .fields
+            .iter()
+            .find(|field| field.name == "mode")
+            .expect("mode field");
+        let size = entry
+            .fields
+            .iter()
+            .find(|field| field.name == "size")
+            .expect("size field");
+        let mtime = entry
+            .fields
+            .iter()
+            .find(|field| field.name == "mtime")
+            .expect("mtime field");
+
+        let FieldType::Custom(custom) = &mode.field_type else {
+            panic!("mode should use custom display");
+        };
+        let CustomCodec::Display { display, .. } = &custom.codec else {
+            panic!("mode should use display codec");
+        };
+        assert_eq!(display, "0o0000644 (rw-r--r--)");
+        assert_eq!(
+            encode_value(&mode.field_type, display).unwrap(),
+            super::encode_tar_octal_field(0o644, super::TAR_MODE_LEN).unwrap()
+        );
+        assert_eq!(
+            encode_value(&mode.field_type, "rwxr-xr-x").unwrap(),
+            super::encode_tar_octal_field(0o755, super::TAR_MODE_LEN).unwrap()
+        );
+
+        let FieldType::Custom(custom) = &size.field_type else {
+            panic!("size should use custom display");
+        };
+        let CustomCodec::Display { display, .. } = &custom.codec else {
+            panic!("size should use display codec");
+        };
+        assert_eq!(display, "5 bytes (0o5)");
+        assert_eq!(
+            encode_value(&size.field_type, display).unwrap(),
+            super::encode_tar_octal_field(5, super::TAR_SIZE_LEN).unwrap()
+        );
+
+        let FieldType::Custom(custom) = &mtime.field_type else {
+            panic!("mtime should use custom display");
+        };
+        let CustomCodec::Display { display, .. } = &custom.codec else {
+            panic!("mtime should use display codec");
+        };
+        assert_eq!(display, "1970-01-01T00:00:00Z (0o0)");
+        assert_eq!(
+            encode_value(&mtime.field_type, display).unwrap(),
+            super::encode_tar_octal_field(0, super::TAR_MTIME_LEN).unwrap()
+        );
     }
 
     #[test]

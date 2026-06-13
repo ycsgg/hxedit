@@ -314,9 +314,9 @@ impl<'a> MachoParser<'a> {
             FieldDef {
                 name: "cputype".to_string(),
                 offset: 4,
-                field_type: FieldType::Enum {
-                    inner: Box::new(self.u32_t()),
-                    variants: vec![
+                field_type: FieldType::custom_enum(
+                    self.u32_t(),
+                    vec![
                         (CPU_TYPE_X86 as u64, "x86".to_string()),
                         (CPU_TYPE_X86_64 as u64, "x86_64".to_string()),
                         (CPU_TYPE_ARM as u64, "ARM".to_string()),
@@ -324,7 +324,7 @@ impl<'a> MachoParser<'a> {
                         (CPU_TYPE_POWERPC as u64, "PowerPC".to_string()),
                         (CPU_TYPE_POWERPC64 as u64, "PowerPC64".to_string()),
                     ],
-                },
+                ),
                 description: format!("CPU type: {}", cpu_type_name(cputype)),
                 editable: false,
             },
@@ -338,9 +338,9 @@ impl<'a> MachoParser<'a> {
             FieldDef {
                 name: "filetype".to_string(),
                 offset: 12,
-                field_type: FieldType::Enum {
-                    inner: Box::new(self.u32_t()),
-                    variants: vec![
+                field_type: FieldType::custom_enum(
+                    self.u32_t(),
+                    vec![
                         (MH_OBJECT as u64, "Object".to_string()),
                         (MH_EXECUTE as u64, "Executable".to_string()),
                         (MH_FVMLIB as u64, "FVMLib".to_string()),
@@ -351,7 +351,7 @@ impl<'a> MachoParser<'a> {
                         (MH_BUNDLE as u64, "Bundle".to_string()),
                         (MH_DSYM as u64, "dSYM".to_string()),
                     ],
-                },
+                ),
                 description: format!("File type: {}", file_type_name(filetype)),
                 editable: false,
             },
@@ -455,9 +455,9 @@ impl<'a> MachoParser<'a> {
             FieldDef {
                 name: "cmd".to_string(),
                 offset: 0,
-                field_type: FieldType::Enum {
-                    inner: Box::new(self.u32_t()),
-                    variants: vec![
+                field_type: FieldType::custom_enum(
+                    self.u32_t(),
+                    vec![
                         (LC_SEGMENT as u64, "LC_SEGMENT".to_string()),
                         (LC_SEGMENT_64 as u64, "LC_SEGMENT_64".to_string()),
                         (LC_SYMTAB as u64, "LC_SYMTAB".to_string()),
@@ -470,7 +470,7 @@ impl<'a> MachoParser<'a> {
                         (LC_UUID as u64, "LC_UUID".to_string()),
                         (LC_CODE_SIGNATURE as u64, "LC_CODE_SIGNATURE".to_string()),
                     ],
-                },
+                ),
                 description: format!("Command: {}", cmd_name),
                 editable: false,
             },
@@ -787,9 +787,9 @@ impl<'a> FatParser<'a> {
                 FieldDef {
                     name: "cputype".to_string(),
                     offset: 0,
-                    field_type: FieldType::Enum {
-                        inner: Box::new(FieldType::U32Be),
-                        variants: vec![
+                    field_type: FieldType::custom_enum(
+                        FieldType::U32Be,
+                        vec![
                             (CPU_TYPE_X86 as u64, "x86".to_string()),
                             (CPU_TYPE_X86_64 as u64, "x86_64".to_string()),
                             (CPU_TYPE_ARM as u64, "ARM".to_string()),
@@ -797,7 +797,7 @@ impl<'a> FatParser<'a> {
                             (CPU_TYPE_POWERPC as u64, "PowerPC".to_string()),
                             (CPU_TYPE_POWERPC64 as u64, "PowerPC64".to_string()),
                         ],
-                    },
+                    ),
                     description: format!("CPU type: {}", cpu_type_name(cputype)),
                     editable: false,
                 },

@@ -213,10 +213,7 @@ impl ElfParser<'_> {
                     FieldDef {
                         name: "d_tag".into(),
                         offset: 0,
-                        field_type: FieldType::Enum {
-                            inner: Box::new(word_t.clone()),
-                            variants: dynamic_tag_variants(),
-                        },
+                        field_type: FieldType::custom_enum(word_t.clone(), dynamic_tag_variants()),
                         description: "Dynamic entry tag".into(),
                         editable: false,
                     },
@@ -466,10 +463,7 @@ impl ElfParser<'_> {
                     FieldDef {
                         name: "pr_type".into(),
                         offset: 0,
-                        field_type: FieldType::Enum {
-                            inner: Box::new(self.u32_t()),
-                            variants: gnu_property_variants(),
-                        },
+                        field_type: FieldType::custom_enum(self.u32_t(), gnu_property_variants()),
                         description: "GNU property type".into(),
                         editable: false,
                     },

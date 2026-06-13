@@ -25,6 +25,7 @@
 - 命令：`:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`；`default` / `full` 内置 `memory` feature，支持 `:mem freeze` / `:mem thaw` 暂停与恢复目标进程，`:mem commit` / `:mem commit-all` 写回 replacement（后者按 VA 升序遍历所有 dirty region），`:w` 等价 `:mem commit` 且 `:w <path>` 被拒绝（改用 `:export`）；`MemorySession` 按 region 持久化未提交 replacement / undo / redo，切换 region 不丢失编辑，`:q` 在任意 region dirty 时拒绝并汇总；`sagitta-analysis` feature 下额外支持 `:ana` / `:ana status` / `:ana off`，对当前 logical bytes 后台运行 crates.io `sagitta-rs` 并用 ready snapshot 覆盖 symbol panel 数据源
 - Inspector / side panel：
   - Inspector：ELF、PE/COFF、Mach-O、PNG、ZIP（central directory / EOCD / ZIP64 / data descriptor 感知）、SQLite（database header / b-tree page header / cell pointer array，不深入 record payload）、PCAP / PCAPNG（capture/header/block/packet data range，不深入链路层 payload）、GZIP、GIF、BMP、WAV、TAR、JPEG
+  - 格式自定义可读编辑字段：classic PCAP UTC packet timestamp（同步写回 `ts_sec` + `ts_usec` / `ts_nsec`）、GZIP / PE Unix timestamp、ZIP DOS `modified_at`、TAR octal `mode` / `size` / `mtime`、GIF frame delay
   - Symbol panel：可执行文件 symbol / import 列表与跳转；`sagitta-analysis` ready 后使用 Sagitta recovered functions 覆盖 native entries
   - Data panel：cursor-relative primitive decode
 - Disassembly：
@@ -41,7 +42,7 @@
 - overwrite paste / `:fill` / `:zero` 越过 EOF 会截断，不会自动 append
 - `:xor` 只读取 active selection 的 logical bytes，XOR 后以 hex 文本复制到剪贴板；`:xor!` 是 replacement 语义的原地覆盖，不改变 piece 布局；key 不带 `0x` 时按十进制解析，带 `0x` 时按 hex 解析
 - insert paste 会真实插入并右移后续 display offset
-- PNG / ZIP inspector 可编辑字段只代表“能写 byte”，**不代表结构安全**
+- PNG / ZIP / TAR / GZIP / GIF 等 inspector 可编辑字段只代表“能写 byte”，**不代表结构安全**；合成可读字段仍是固定长度 replacement 写回，不自动修 CRC、checksum、descriptor、目录索引或 payload layout
 - `save` / `logical_bytes()` / `read_logical_range()` / `:hash` / `:export`(binary, `for_each_logical_chunk`) / dirty search / diff current-source / `:xor!`(`transform_visible_range_in_place`) 统一经 `src/core/document/walk.rs` 走 piece-walking + 分块 overlay：tombstone、replacement、Original/Add 的组合语义只在 walker 中判定；读原始文件时优先按 `Document::max_contiguous_read_len()`（约等于 `page_size * cache_pages`）裁剪，避免小 cache 配置下过度换页
 - `:diff` 是只读同步滚动投影视图：current side 使用当前文档 logical bytes（跳过 tombstone、应用 replacement、包含 insert），other side 使用对比文件 raw bytes；不写入 `Document`，不进 undo/save；打开时只读打开 other 文件，不做全文件预扫描，render 时只读取当前可见页并在 `max_shift` 范围内局部重对齐后着色。着色约定：相同字节只在右侧灰色；同位置不同字节左右均 warning 亮黄色；current-only / other-only 的缺失侧补 `__` 并用 error 红色。other-only `__` 是投影 cell，需要参与鼠标 hit-test / 选区映射；切走或隐藏 diff panel 后必须停止投影，左侧不保留 `__` 或 diff 着色。
 
@@ -109,16 +110,16 @@
 ### 2.4 结构安全仍需保守
 
 - ELF 某些头字段可编辑，风险相对可控
-- PNG / ZIP 仍不能自动修 CRC、descriptor、目录索引等一致性；ZIP inspector 已能读取 central directory / EOCD / ZIP64 / data descriptor，但编辑仍只是 byte 写入
+- PNG / ZIP / TAR / GZIP / GIF 仍不能自动修 CRC、checksum、descriptor、目录索引等一致性；ZIP inspector 已能读取 central directory / EOCD / ZIP64 / data descriptor，ZIP / TAR 等可读字段编辑仍只是 byte 写入
 - 新增 editable 字段时，宁可少开，也不要把“能改字节”误写成“结构安全”
 
 ### 2.5 格式支持深度仍有限
 
 虽然当前已支持 ELF / PE / Mach-O / PNG / ZIP / SQLite / PCAP / PCAPNG / GZIP / GIF / BMP / WAV / TAR / JPEG，但仍有深度边界：
 
-- ZIP 已从 local-header partial scan 推进到 central directory / EOCD / ZIP64 / data descriptor 感知，但还没有结构间跳转或自动一致性修复
+- ZIP 已从 local-header partial scan 推进到 central directory / EOCD / ZIP64 / data descriptor 感知，并为 DOS 修改时间提供可读双向字段，但还没有结构间跳转或自动一致性修复
 - SQLite 当前只做轻量容器级解析：database header、b-tree page header、cell pointer array 与 cell content data range；不解码 record payload / schema / SQL 层语义
-- PCAP / PCAPNG 当前只做 capture 容器级解析：global header、packet records、section/interface/packet blocks 与 packet data range；不解码 Ethernet/IP/TCP/UDP 等链路层或网络层 payload
+- PCAP / PCAPNG 当前只做 capture 容器级解析：global header、packet records、section/interface/packet blocks 与 packet data range；classic PCAP packet record 额外提供可编辑的 UTC timestamp 合成字段（同步写回 `ts_sec` + `ts_usec` / `ts_nsec`）；不解码 Ethernet/IP/TCP/UDP 等链路层或网络层 payload
 - 某些格式仍以“安全浏览 + 保守编辑”为主，不做结构修复
 - 大表格 / 深层结构仍需要继续补分页、跳转与更细粒度视图
 

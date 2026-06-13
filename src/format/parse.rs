@@ -472,7 +472,14 @@ pub fn format_value(field_type: &FieldType, raw: &[u8]) -> String {
                 format!("{} bytes", len)
             }
         }
-        FieldType::Enum { inner, variants } => {
+        FieldType::Custom(custom) => format_custom_value(custom, raw),
+    }
+}
+
+fn format_custom_value(custom: &CustomField, raw: &[u8]) -> String {
+    match &custom.codec {
+        CustomCodec::Display { display, .. } => display.clone(),
+        CustomCodec::Enum { inner, variants } => {
             let base = format_value(inner, raw);
             let numeric = decode_unsigned(inner, raw);
             let label = variants
@@ -482,7 +489,7 @@ pub fn format_value(field_type: &FieldType, raw: &[u8]) -> String {
                 .unwrap_or("?");
             format!("{} ({})", base, label)
         }
-        FieldType::Flags { inner, flags } => {
+        CustomCodec::Flags { inner, flags } => {
             let base = format_value(inner, raw);
             let numeric = decode_unsigned(inner, raw);
             let active: Vec<&str> = flags
@@ -865,5 +872,24 @@ mod tests {
         let fv = parse_field(&mut doc, &field, 0).unwrap();
         assert_eq!(fv.size, 8);
         assert!(!fv.display.contains("(overflow)"));
+    }
+
+    #[test]
+    fn parse_field_custom_uses_format_supplied_display() {
+        fn reject(_: &str) -> Result<Vec<u8>, String> {
+            Err("not used".into())
+        }
+
+        let mut doc = doc_with_bytes(&[0u8; 8]);
+        let field = FieldDef {
+            name: "timestamp_utc".into(),
+            offset: 0,
+            field_type: FieldType::custom_display(8, "1970-01-01T00:00:00.000000Z", reject),
+            description: String::new(),
+            editable: true,
+        };
+        let fv = parse_field(&mut doc, &field, 0).unwrap();
+        assert_eq!(fv.size, 8);
+        assert_eq!(fv.display, "1970-01-01T00:00:00.000000Z");
     }
 }

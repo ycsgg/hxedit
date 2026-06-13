@@ -264,10 +264,7 @@ fn extend_fmt_chunk_fields(fields: &mut Vec<FieldDef>, payload_len: u64) {
         payload_len,
         "audio_format",
         8,
-        FieldType::Enum {
-            inner: Box::new(FieldType::U16Le),
-            variants: audio_format_variants(),
-        },
+        FieldType::custom_enum(FieldType::U16Le, audio_format_variants()),
         "WAVE format tag",
         true,
     );

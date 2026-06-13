@@ -25,20 +25,51 @@ pub enum FieldType {
     /// Variable-length data range displayed as "start–end (N bytes)".
     /// The length is computed at detect time and stored here.
     DataRange(u64),
-    /// Enum mapping: inner type's numeric value -> display name.
-    /// E.g. ELF e_type: 2 -> "ET_EXEC".
-    Enum {
-        inner: Box<FieldType>,
-        variants: Vec<(u64, String)>,
-    },
-    /// Bit-flag combination for flags fields.
-    Flags {
-        inner: Box<FieldType>,
-        flags: Vec<(u64, String)>,
-    },
+    /// Custom field display and edit encoding.
+    ///
+    /// Formats can use this for values whose user-facing representation spans
+    /// or transforms multiple on-disk fields, such as a PCAP timestamp made
+    /// from `ts_sec` plus `ts_usec`. Built-in enum/flag decorations can also
+    /// be expressed through this path so display and edit conversion share one
+    /// inspector pipeline.
+    Custom(CustomField),
 }
 
 impl FieldType {
+    pub fn custom_display(
+        bytes: usize,
+        display: impl Into<String>,
+        encode: fn(&str) -> Result<Vec<u8>, String>,
+    ) -> Self {
+        Self::Custom(CustomField {
+            bytes,
+            codec: CustomCodec::Display {
+                display: display.into(),
+                encode,
+            },
+        })
+    }
+
+    pub fn custom_enum(inner: FieldType, variants: Vec<(u64, String)>) -> Self {
+        Self::Custom(CustomField {
+            bytes: inner.byte_size().unwrap_or(0),
+            codec: CustomCodec::Enum {
+                inner: Box::new(inner),
+                variants,
+            },
+        })
+    }
+
+    pub fn custom_flags(inner: FieldType, flags: Vec<(u64, String)>) -> Self {
+        Self::Custom(CustomField {
+            bytes: inner.byte_size().unwrap_or(0),
+            codec: CustomCodec::Flags {
+                inner: Box::new(inner),
+                flags,
+            },
+        })
+    }
+
     /// Returns the number of bytes this field type consumes.
     pub fn byte_size(&self) -> Option<usize> {
         match self {
@@ -48,9 +79,31 @@ impl FieldType {
             Self::U64Le | Self::U64Be | Self::I64Le | Self::I64Be => Some(8),
             Self::Bytes(n) | Self::Utf8(n) => Some(*n),
             Self::DataRange(_) => None,
-            Self::Enum { inner, .. } | Self::Flags { inner, .. } => inner.byte_size(),
+            Self::Custom(custom) => Some(custom.bytes),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct CustomField {
+    pub bytes: usize,
+    pub codec: CustomCodec,
+}
+
+#[derive(Debug, Clone)]
+pub enum CustomCodec {
+    Display {
+        display: String,
+        encode: fn(&str) -> Result<Vec<u8>, String>,
+    },
+    Enum {
+        inner: Box<FieldType>,
+        variants: Vec<(u64, String)>,
+    },
+    Flags {
+        inner: Box<FieldType>,
+        flags: Vec<(u64, String)>,
+    },
 }
 
 /// Definition of a single field within a struct.

@@ -47,10 +47,7 @@ fn enum_u8_field(
     field(
         name,
         offset,
-        FieldType::Enum {
-            inner: Box::new(FieldType::U8),
-            variants,
-        },
+        FieldType::custom_enum(FieldType::U8, variants),
         description,
         editable,
     )

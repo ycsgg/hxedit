@@ -112,4 +112,6 @@
 - "字段可编辑"不等于"结构安全"
 - 对 PNG / ZIP 等结构一致性强的格式，提示修改可能会破坏结构
 - `DataRange` 字段类型用于显示大数据块的起始/结束偏移量，不可编辑
+- 枚举、flags 与格式自定义显示 / 编辑转换统一走 `FieldType::Custom` + `CustomCodec`；具体格式需要的双向转换逻辑应留在对应 `defs/*` 内
+- 合成可读字段必须保持固定长度 replacement 写回；例如 ZIP `modified_at` 覆盖 `mod_time + mod_date`，TAR `mode` / `size` / `mtime` 写回同宽 octal ASCII，不要借机改变 entry layout 或自动修 checksum
 - ELF 格式已包含 Program Header Table 解析，改动时注意 32/64 位和端序分支

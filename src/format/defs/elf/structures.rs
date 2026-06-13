@@ -97,20 +97,17 @@ impl ElfParser<'_> {
                 FieldDef {
                     name: "p_type".into(),
                     offset: 0,
-                    field_type: FieldType::Enum {
-                        inner: Box::new(u32_t.clone()),
-                        variants: program_type_variants(),
-                    },
+                    field_type: FieldType::custom_enum(u32_t.clone(), program_type_variants()),
                     description: "Segment type".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "p_flags".into(),
                     offset: layout.flags_offset,
-                    field_type: FieldType::Flags {
-                        inner: Box::new(u32_t.clone()),
-                        flags: vec![(4, "R".into()), (2, "W".into()), (1, "X".into())],
-                    },
+                    field_type: FieldType::custom_flags(
+                        u32_t.clone(),
+                        vec![(4, "R".into()), (2, "W".into()), (1, "X".into())],
+                    ),
                     description: "Segment flags".into(),
                     editable: true,
                 },
@@ -200,20 +197,14 @@ impl ElfParser<'_> {
                 FieldDef {
                     name: "sh_type".into(),
                     offset: 4,
-                    field_type: FieldType::Enum {
-                        inner: Box::new(u32_t.clone()),
-                        variants: section_type_variants(),
-                    },
+                    field_type: FieldType::custom_enum(u32_t.clone(), section_type_variants()),
                     description: "Section type".into(),
                     editable: true,
                 },
                 FieldDef {
                     name: "sh_flags".into(),
                     offset: layout.flags_offset,
-                    field_type: FieldType::Flags {
-                        inner: Box::new(word_t.clone()),
-                        flags: section_flag_variants(),
-                    },
+                    field_type: FieldType::custom_flags(word_t.clone(), section_flag_variants()),
                     description: "Section attribute flags".into(),
                     editable: true,
                 },

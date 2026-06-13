@@ -16,6 +16,7 @@ A terminal hex editor for large files, written in Rust.
 - Full undo / redo across edits, paste, replace, and inspector writes
 - Unified text/hex/typed-value search with forward/backward traversal, wrap-around, and visible-hit highlighting; large files are scanned with SIMD `memmem` (only chunks containing tombstone/replacement edits fall back to byte-at-a-time)
 - Built-in format inspectors for ELF, PE/COFF, Mach-O, PNG, ZIP (central directory, EOCD, ZIP64, and data descriptors), SQLite, PCAP/PCAPNG, GZIP, GIF, BMP, WAV, TAR, and JPEG
+- Inspector fields can use format-specific readable editors, including classic PCAP UTC packet timestamps, GZIP/PE Unix timestamps, ZIP DOS modification times, TAR octal mode/size/mtime, and GIF frame delays
 - Hashing for MD5, SHA1, SHA256, SHA512, and CRC32
 - Clipboard copy/paste, export, fill/zero/xor/replace transforms
 - Read-only synchronized diff page against another file (`:diff`)

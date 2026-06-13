@@ -22,20 +22,20 @@ impl ElfParser<'_> {
             FieldDef {
                 name: "ei_class".into(),
                 offset: 4,
-                field_type: FieldType::Enum {
-                    inner: Box::new(FieldType::U8),
-                    variants: vec![(1, "32-bit".into()), (2, "64-bit".into())],
-                },
+                field_type: FieldType::custom_enum(
+                    FieldType::U8,
+                    vec![(1, "32-bit".into()), (2, "64-bit".into())],
+                ),
                 description: "File class".into(),
                 editable: true,
             },
             FieldDef {
                 name: "ei_data".into(),
                 offset: 5,
-                field_type: FieldType::Enum {
-                    inner: Box::new(FieldType::U8),
-                    variants: vec![(1, "Little-endian".into()), (2, "Big-endian".into())],
-                },
+                field_type: FieldType::custom_enum(
+                    FieldType::U8,
+                    vec![(1, "Little-endian".into()), (2, "Big-endian".into())],
+                ),
                 description: "Data encoding".into(),
                 editable: true,
             },
@@ -49,41 +49,41 @@ impl ElfParser<'_> {
             FieldDef {
                 name: "ei_osabi".into(),
                 offset: 7,
-                field_type: FieldType::Enum {
-                    inner: Box::new(FieldType::U8),
-                    variants: vec![(0, "ELFOSABI_NONE".into()), (3, "ELFOSABI_LINUX".into())],
-                },
+                field_type: FieldType::custom_enum(
+                    FieldType::U8,
+                    vec![(0, "ELFOSABI_NONE".into()), (3, "ELFOSABI_LINUX".into())],
+                ),
                 description: "OS/ABI identification".into(),
                 editable: true,
             },
             FieldDef {
                 name: "e_type".into(),
                 offset: 16,
-                field_type: FieldType::Enum {
-                    inner: Box::new(u16_t.clone()),
-                    variants: vec![
+                field_type: FieldType::custom_enum(
+                    u16_t.clone(),
+                    vec![
                         (0, "ET_NONE".into()),
                         (1, "ET_REL".into()),
                         (2, "ET_EXEC".into()),
                         (3, "ET_DYN".into()),
                         (4, "ET_CORE".into()),
                     ],
-                },
+                ),
                 description: "Object file type".into(),
                 editable: true,
             },
             FieldDef {
                 name: "e_machine".into(),
                 offset: 18,
-                field_type: FieldType::Enum {
-                    inner: Box::new(u16_t.clone()),
-                    variants: vec![
+                field_type: FieldType::custom_enum(
+                    u16_t.clone(),
+                    vec![
                         (0x03, "EM_386".into()),
                         (0x3e, "EM_X86_64".into()),
                         (0xb7, "EM_AARCH64".into()),
                         (0xf3, "EM_RISCV".into()),
                     ],
-                },
+                ),
                 description: "Architecture".into(),
                 editable: true,
             },

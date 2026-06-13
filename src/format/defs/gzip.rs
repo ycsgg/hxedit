@@ -1,5 +1,6 @@
 use crate::core::document::Document;
 use crate::format::detect::read_bytes_raw;
+use crate::format::time;
 use crate::format::types::*;
 
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
@@ -26,6 +27,7 @@ pub fn detect_with_cap(doc: &mut Document, _entry_cap: usize) -> Option<FormatDe
     }
 
     let flags = fixed[3];
+    let mtime = u32::from_le_bytes([fixed[4], fixed[5], fixed[6], fixed[7]]);
     let mut fields = vec![
         FieldDef {
             name: "signature".into(),
@@ -37,34 +39,34 @@ pub fn detect_with_cap(doc: &mut Document, _entry_cap: usize) -> Option<FormatDe
         FieldDef {
             name: "compression_method".into(),
             offset: 2,
-            field_type: FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: vec![(GZIP_CM_DEFLATE as u64, "Deflate".into())],
-            },
+            field_type: FieldType::custom_enum(
+                FieldType::U8,
+                vec![(GZIP_CM_DEFLATE as u64, "Deflate".into())],
+            ),
             description: "Compression method".into(),
             editable: true,
         },
         FieldDef {
             name: "flags".into(),
             offset: 3,
-            field_type: FieldType::Flags {
-                inner: Box::new(FieldType::U8),
-                flags: vec![
+            field_type: FieldType::custom_flags(
+                FieldType::U8,
+                vec![
                     (FTEXT as u64, "FTEXT".into()),
                     (FHCRC as u64, "FHCRC".into()),
                     (FEXTRA as u64, "FEXTRA".into()),
                     (FNAME as u64, "FNAME".into()),
                     (FCOMMENT as u64, "FCOMMENT".into()),
                 ],
-            },
+            ),
             description: "Gzip header flags".into(),
             editable: true,
         },
         FieldDef {
             name: "mtime".into(),
             offset: 4,
-            field_type: FieldType::U32Le,
-            description: "Modification time".into(),
+            field_type: FieldType::custom_display(4, gzip_mtime_display(mtime), encode_gzip_mtime),
+            description: "Modification time as UTC; 0 means no timestamp".into(),
             editable: true,
         },
         FieldDef {
@@ -77,10 +79,7 @@ pub fn detect_with_cap(doc: &mut Document, _entry_cap: usize) -> Option<FormatDe
         FieldDef {
             name: "os".into(),
             offset: 9,
-            field_type: FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: os_variants(),
-            },
+            field_type: FieldType::custom_enum(FieldType::U8, os_variants()),
             description: "Originating operating system".into(),
             editable: true,
         },
@@ -243,6 +242,27 @@ fn read_u16_le(doc: &mut Document, offset: u64) -> Option<u16> {
     Some(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
 
+fn gzip_mtime_display(mtime: u32) -> String {
+    if mtime == 0 {
+        "no timestamp".into()
+    } else {
+        time::format_unix_utc(mtime)
+    }
+}
+
+fn encode_gzip_mtime(input: &str) -> Result<Vec<u8>, String> {
+    let input = input.trim();
+    let value = if input.eq_ignore_ascii_case("no timestamp")
+        || input.eq_ignore_ascii_case("none")
+        || input == "0"
+    {
+        0
+    } else {
+        time::parse_unix_utc(input)?
+    };
+    Ok(value.to_le_bytes().to_vec())
+}
+
 fn c_string_field(
     doc: &mut Document,
     offset: u64,
@@ -307,6 +327,8 @@ mod tests {
     use crate::config::Config;
     use crate::core::document::Document;
     use crate::format;
+    use crate::format::edit::encode_value;
+    use crate::format::types::{CustomCodec, FieldType};
 
     fn write_gzip(path: &std::path::Path, bytes: &[u8]) -> Document {
         fs::write(path, bytes).unwrap();
@@ -361,6 +383,26 @@ mod tests {
             .structs
             .iter()
             .any(|structure| structure.name == "Gzip Trailer"));
+        let mtime = def.structs[0]
+            .fields
+            .iter()
+            .find(|field| field.name == "mtime")
+            .expect("mtime field");
+        let FieldType::Custom(custom) = &mtime.field_type else {
+            panic!("mtime should use custom display");
+        };
+        let CustomCodec::Display { display, .. } = &custom.codec else {
+            panic!("mtime should use display codec");
+        };
+        assert_eq!(display, &format::time::format_unix_utc(0x1234_5678));
+        assert_eq!(
+            encode_value(&mtime.field_type, display).unwrap(),
+            0x1234_5678_u32.to_le_bytes()
+        );
+        assert_eq!(
+            encode_value(&mtime.field_type, "no timestamp").unwrap(),
+            0_u32.to_le_bytes()
+        );
 
         let structs = format::parse::parse_format(&def, &mut doc).expect("parse succeeds");
         let compressed = structs

@@ -71,20 +71,20 @@ fn database_header_struct() -> StructDef {
             field(
                 "write_version",
                 18,
-                FieldType::Enum {
-                    inner: Box::new(FieldType::U8),
-                    variants: vec![(1, "rollback journal".into()), (2, "WAL".into())],
-                },
+                FieldType::custom_enum(
+                    FieldType::U8,
+                    vec![(1, "rollback journal".into()), (2, "WAL".into())],
+                ),
                 "File format write version",
                 true,
             ),
             field(
                 "read_version",
                 19,
-                FieldType::Enum {
-                    inner: Box::new(FieldType::U8),
-                    variants: vec![(1, "rollback journal".into()), (2, "WAL".into())],
-                },
+                FieldType::custom_enum(
+                    FieldType::U8,
+                    vec![(1, "rollback journal".into()), (2, "WAL".into())],
+                ),
                 "File format read version",
                 true,
             ),
@@ -148,15 +148,15 @@ fn database_header_struct() -> StructDef {
             field(
                 "schema_format",
                 44,
-                FieldType::Enum {
-                    inner: Box::new(FieldType::U32Be),
-                    variants: vec![
+                FieldType::custom_enum(
+                    FieldType::U32Be,
+                    vec![
                         (1, "legacy".into()),
                         (2, "without rowid".into()),
                         (3, "descending indexes".into()),
                         (4, "modern".into()),
                     ],
-                },
+                ),
                 "Schema format number",
                 true,
             ),
@@ -177,14 +177,14 @@ fn database_header_struct() -> StructDef {
             field(
                 "text_encoding",
                 56,
-                FieldType::Enum {
-                    inner: Box::new(FieldType::U32Be),
-                    variants: vec![
+                FieldType::custom_enum(
+                    FieldType::U32Be,
+                    vec![
                         (1, "UTF-8".into()),
                         (2, "UTF-16le".into()),
                         (3, "UTF-16be".into()),
                     ],
-                },
+                ),
                 "Database text encoding",
                 true,
             ),
@@ -332,10 +332,7 @@ fn build_btree_page_struct(
         field(
             "page_type",
             header_offset,
-            FieldType::Enum {
-                inner: Box::new(FieldType::U8),
-                variants: btree_page_type_variants(),
-            },
+            FieldType::custom_enum(FieldType::U8, btree_page_type_variants()),
             "SQLite b-tree page type",
             true,
         ),
