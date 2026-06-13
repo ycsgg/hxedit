@@ -102,6 +102,14 @@
 
 ## Performance / Maintenance
 
+- [ ] **[P1] 大范围 replacement 需要从按字节存储升级为区间 overlay**
+  - 现状：`:fill` / `:zero` / `:xor!` 等路径已按 chunk 流式写入，但 `Document.replacements` 与 undo 仍按 `CellId -> u8` / per-byte change 展开；随机大文件上执行 GB 级 replacement 会把内存耗尽
+  - 建议：引入 `ReplacementStore`，支持按稳定 `CellId` 范围挂载 `SetPattern` / `SetBytes` / `TransformXor` 等 overlay layer；undo/redo 通过挂载/移除 layer 保持 replacement 语义，不退化成 real delete / insert
+
+- [ ] **[P1] `:re` / `:re!` 需要批量 match job，避免一次性收集全量匹配**
+  - 现状：replace 会先收集全部 match offset；低熵大文件上小 needle 可能产生海量 match，提前 OOM，且无进度/取消
+  - 建议：以 job/stepper 扫描，单步最多收集固定数量 match（例如 65535）或扫描固定字节预算；同长 `:re` 可逐批应用，变长 `:re!` 需要基于替换前快照搜索并用 delta 映射到 live document，避免新插入内容影响后续匹配语义
+
 - [ ] **[P2] 格式检测 / Inspector 单字段扫描缺少预算**
   - 现状：entry cap 只限制结构数量；GZIP FNAME/FCOMMENT、JPEG scan data、GIF sub-block 等单字段仍可能在畸形大文件中同步扫到 EOF，导致 UI 长时间无响应
   - 建议：为格式解析增加统一 scan budget；超预算时保留已解析结构并标记 truncated / budget-exceeded，不继续依赖不可信 cursor 解析后续字段

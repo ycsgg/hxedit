@@ -5,10 +5,12 @@
 //! document and never participates in undo/save semantics.
 
 mod engine;
+mod mismatch;
 mod source;
 
 pub use engine::{
     diff_sources, CurrentDiffRange, DiffHunk, DiffHunkKind, DiffOptions, DiffProfile, DiffResult,
     DiffStatus, DiffTruncateReason, OtherDiffRange,
 };
+pub use mismatch::{find_mismatch_backward, find_mismatch_forward};
 pub use source::{DiffByte, DiffSource, DocumentLogicalCursor, FileDiffSource, VecDiffSource};

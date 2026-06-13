@@ -989,6 +989,29 @@ fn diff_navigation_and_off_behaviour() {
 }
 
 #[test]
+fn diff_next_finds_far_mismatch_with_chunk_scan() {
+    let dir = tempdir().unwrap();
+    let other = dir.path().join("other.bin");
+    let current = vec![0_u8; 2 * 1024 * 1024];
+    let mut other_bytes = current.clone();
+    *other_bytes.last_mut().unwrap() = 1;
+    fs::write(&other, other_bytes).unwrap();
+
+    let mut app = app_with_bytes(&current);
+    app.execute_command(Command::Diff(DiffCommand::Open {
+        path: other,
+        max_shift: Some(0),
+    }))
+    .unwrap();
+
+    app.cursor = 0;
+    app.execute_command(Command::Diff(DiffCommand::Next))
+        .unwrap();
+
+    assert_eq!(app.cursor, current.len() as u64 - 1);
+}
+
+#[test]
 fn diff_closes_when_switching_or_hiding_side_panel() {
     let dir = tempdir().unwrap();
     let other = dir.path().join("other.bin");

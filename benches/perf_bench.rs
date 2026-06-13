@@ -3,13 +3,15 @@
 //! Run with: `cargo bench --bench perf_bench`
 
 use std::fs;
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::time::{Duration, Instant};
 
 use digest::Digest;
 use hxedit::commands::types::HashAlgorithm;
 use hxedit::config::Config;
 use hxedit::core::document::Document;
+use hxedit::core::file_view::FileView;
+use hxedit::diff::find_mismatch_forward;
 use hxedit::format;
 use tempfile::tempdir;
 
@@ -37,6 +39,26 @@ fn write_patterned_file(
     let path = dir.path().join(name);
     fs::write(&path, patterned_data(size))?;
     Ok((dir, path))
+}
+
+fn write_sparse_diff_pair(
+    name: &str,
+    size: usize,
+) -> BenchResult<(tempfile::TempDir, std::path::PathBuf, std::path::PathBuf)> {
+    let dir = tempdir()?;
+    let current = dir.path().join(format!("{name}-current.bin"));
+    let other = dir.path().join(format!("{name}-other.bin"));
+
+    let current_file = fs::File::create(&current)?;
+    current_file.set_len(size as u64)?;
+
+    let mut other_file = fs::File::create(&other)?;
+    other_file.set_len(size as u64)?;
+    other_file.seek(SeekFrom::Start(size as u64 - 1))?;
+    other_file.write_all(&[1])?;
+    other_file.flush()?;
+
+    Ok((dir, current, other))
 }
 
 fn print(label: &str, elapsed: Duration, unit_count: usize) {
@@ -475,6 +497,34 @@ fn bench_search_256mb_dirty_one_tombstone() -> BenchResult {
     Ok(())
 }
 
+fn bench_diff_next_tail_mismatch_64mb() -> BenchResult {
+    bench_diff_next_tail_mismatch("diff-next-64", 64 * 1024 * 1024)
+}
+
+fn bench_diff_next_tail_mismatch_256mb() -> BenchResult {
+    bench_diff_next_tail_mismatch("diff-next-256", 256 * 1024 * 1024)
+}
+
+fn bench_diff_next_tail_mismatch(name: &str, size: usize) -> BenchResult {
+    let (_dir, current, other) = write_sparse_diff_pair(name, size)?;
+    let config = bench_config();
+    let mut document = Document::open(&current, &config)?;
+    let mut other_view = FileView::open(&other, true, config.page_size, config.cache_pages)?;
+    let other_len = other_view.len();
+
+    let t = Instant::now();
+    let found = find_mismatch_forward(&mut document, &mut other_view, other_len, 1)?;
+    let elapsed = t.elapsed();
+
+    assert_eq!(found, Some(size as u64 - 1));
+    print(
+        &format!("diff next tail mismatch {}MB", size / 1024 / 1024),
+        elapsed,
+        1,
+    );
+    Ok(())
+}
+
 fn run(label: &str, bench: fn() -> BenchResult) -> bool {
     eprintln!("[bench] running {label}");
     match bench() {
@@ -494,6 +544,7 @@ fn main() {
         return;
     }
 
+    let filter = std::env::var("HXEDIT_BENCH_FILTER").ok();
     let benches: &[BenchEntry] = &[
         ("resolve_piece_heavy", bench_resolve_piece_heavy),
         ("save_16mb_with_insert", bench_save_16mb_with_insert),
@@ -528,10 +579,23 @@ fn main() {
             "search_256mb_dirty_one_tombstone",
             bench_search_256mb_dirty_one_tombstone,
         ),
+        (
+            "diff_next_tail_mismatch_64mb",
+            bench_diff_next_tail_mismatch_64mb,
+        ),
+        (
+            "diff_next_tail_mismatch_256mb",
+            bench_diff_next_tail_mismatch_256mb,
+        ),
     ];
 
     let failed = benches
         .iter()
+        .filter(|(label, _)| {
+            filter
+                .as_deref()
+                .is_none_or(|needle| label.contains(needle))
+        })
         .filter(|(label, bench)| !run(label, *bench))
         .count();
     if failed > 0 {

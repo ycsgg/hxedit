@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::app::{App, SidePanelKind};
 use crate::core::file_view::FileView;
-use crate::diff::DiffOptions;
+use crate::diff::{find_mismatch_backward, find_mismatch_forward, DiffOptions};
 use crate::error::{HxError, HxResult};
 use crate::mode::Mode;
 
@@ -227,46 +227,26 @@ impl App {
     }
 
     fn find_diff_mismatch_forward(&mut self, start: u64) -> HxResult<Option<u64>> {
-        let mut offset = start.min(self.document.len());
-        while offset < self.document.len() {
-            if self.display_offset_is_diff_mismatch(offset)? {
-                return Ok(Some(offset));
-            }
-            offset += 1;
-        }
-        Ok(None)
+        let Some(state) = self.diff_state.as_mut() else {
+            return Ok(None);
+        };
+        find_mismatch_forward(
+            &mut self.document,
+            &mut state.other_view,
+            state.other_len,
+            start,
+        )
     }
 
     fn find_diff_mismatch_backward(&mut self, start: u64) -> HxResult<Option<u64>> {
-        if self.document.is_empty() {
+        let Some(state) = self.diff_state.as_mut() else {
             return Ok(None);
-        }
-        let mut offset = start.min(self.document.len() - 1);
-        loop {
-            if self.display_offset_is_diff_mismatch(offset)? {
-                return Ok(Some(offset));
-            }
-            if offset == 0 {
-                break;
-            }
-            offset -= 1;
-        }
-        Ok(None)
-    }
-
-    fn display_offset_is_diff_mismatch(&mut self, display_offset: u64) -> HxResult<bool> {
-        let current = match self.document.byte_at(display_offset)? {
-            crate::core::document::ByteSlot::Present(byte) => byte,
-            crate::core::document::ByteSlot::Deleted | crate::core::document::ByteSlot::Empty => {
-                return Ok(false);
-            }
         };
-        let Some(logical) = self
-            .document
-            .logical_offset_for_display_offset(display_offset)
-        else {
-            return Ok(false);
-        };
-        Ok(self.read_diff_other_byte(logical)? != Some(current))
+        find_mismatch_backward(
+            &mut self.document,
+            &mut state.other_view,
+            state.other_len,
+            start,
+        )
     }
 }
