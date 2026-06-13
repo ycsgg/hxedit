@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::document::walk::WalkControl;
 
 #[derive(Debug, Clone, Copy)]
 struct DiffAlignedCell {
@@ -568,7 +569,7 @@ impl App {
         }
 
         let mut local_options = options;
-        local_options.max_shift = render_shift.saturating_mul(2).max(1);
+        local_options.max_shift = render_shift.max(1);
         local_options.hunk_cap = options.hunk_cap.max(visible_rows.rows.len().max(1) * 4);
         let result = diff_sources(
             WindowDiffSource::new(current.clone()),
@@ -586,23 +587,57 @@ impl App {
         if self.document.is_empty() || display_start > display_end {
             return Ok(Vec::new());
         }
-        let end = display_end.min(self.document.len().saturating_sub(1));
-        let mut out = Vec::with_capacity((end - display_start + 1).min(8192) as usize);
-        for display_offset in display_start..=end {
-            let ByteSlot::Present(byte) = self.document.byte_at(display_offset)? else {
-                continue;
-            };
-            if let Some(logical_offset) = self
-                .document
-                .logical_offset_for_display_offset(display_offset)
-            {
-                out.push(DiffByte {
-                    stream_offset: logical_offset,
-                    display_offset: Some(display_offset),
-                    byte,
-                });
-            }
+        let doc_len = self.document.len();
+        if display_start >= doc_len {
+            return Ok(Vec::new());
         }
+        let end = display_end.min(doc_len.saturating_sub(1));
+        let mut out = Vec::with_capacity((end - display_start + 1).min(8192) as usize);
+
+        let mut next_logical_offset = if self.document.has_tombstones() {
+            None
+        } else {
+            Some(display_start)
+        };
+        let chunk_limit = self.document.max_contiguous_read_len();
+        self.document
+            .walk_visible_cells(display_start, end, chunk_limit, |document, chunk| {
+                if chunk.fast_path {
+                    let Some(logical_start) = next_logical_offset.or_else(|| {
+                        document.logical_offset_for_display_offset(chunk.display_start)
+                    }) else {
+                        return Ok(WalkControl::Continue);
+                    };
+                    for (idx, &byte) in chunk.raw_bytes.iter().enumerate() {
+                        out.push(DiffByte {
+                            stream_offset: logical_start + idx as u64,
+                            display_offset: Some(chunk.display_start + idx as u64),
+                            byte,
+                        });
+                    }
+                    next_logical_offset = Some(logical_start + chunk.raw_bytes.len() as u64);
+                    return Ok(WalkControl::Continue);
+                }
+
+                for cell in chunk.cells {
+                    if cell.deleted {
+                        continue;
+                    }
+                    let Some(logical_offset) = next_logical_offset.or_else(|| {
+                        document.logical_offset_for_display_offset(cell.display_offset)
+                    }) else {
+                        continue;
+                    };
+                    next_logical_offset = Some(logical_offset + 1);
+                    out.push(DiffByte {
+                        stream_offset: logical_offset,
+                        display_offset: Some(cell.display_offset),
+                        byte: cell.byte,
+                    });
+                }
+                Ok(WalkControl::Continue)
+            })?;
+
         Ok(out)
     }
 

@@ -57,6 +57,7 @@ enum MainPaneLines {
 struct MainLines {
     gutter: Vec<Line<'static>>,
     pane: MainPaneLines,
+    diff_page: Option<VisibleDiffPage>,
 }
 
 fn separator_widget(height: u16, palette: &crate::view::palette::Palette) -> Paragraph<'static> {

@@ -255,6 +255,42 @@ fn visible_diff_page_shows_other_side_insert_as_placeholder_on_left() {
 }
 
 #[test]
+fn visible_diff_page_maps_current_tombstones_to_logical_offsets() {
+    let dir = tempdir().unwrap();
+    let other = dir.path().join("other.bin");
+    fs::write(&other, b"acd").unwrap();
+    let mut app = app_with_bytes(b"abcd");
+    app.document.mark_tombstone(1).unwrap();
+    app.execute_command(Command::Diff(crate::commands::types::DiffCommand::Open {
+        path: other,
+        max_shift: None,
+    }))
+    .unwrap();
+
+    let visible_rows = app.collect_visible_rows(1);
+    let page = app.visible_diff_page(&visible_rows).unwrap();
+    let row = &page.rows[0];
+    assert_eq!(
+        row.cells[0].kind,
+        crate::view::diff_panel::DiffPanelCellKind::Equal
+    );
+    assert_eq!(row.cells[0].current_display_offset, Some(0));
+    assert_eq!(row.cells[0].other_offset, Some(0));
+    assert_eq!(
+        row.cells[1].kind,
+        crate::view::diff_panel::DiffPanelCellKind::Equal
+    );
+    assert_eq!(row.cells[1].current_display_offset, Some(2));
+    assert_eq!(row.cells[1].other_offset, Some(1));
+    assert_eq!(
+        row.cells[2].kind,
+        crate::view::diff_panel::DiffPanelCellKind::Equal
+    );
+    assert_eq!(row.cells[2].current_display_offset, Some(3));
+    assert_eq!(row.cells[2].other_offset, Some(2));
+}
+
+#[test]
 fn diff_overlay_is_removed_when_diff_side_panel_is_not_active() {
     let dir = tempdir().unwrap();
     let other = dir.path().join("other.bin");

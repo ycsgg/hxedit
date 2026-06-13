@@ -106,8 +106,9 @@ impl App {
         }
 
         let widget_draw_start = profiling.then(Instant::now);
+        let cached_diff_page = main_lines.diff_page.clone();
         self.render_main_grids(frame, columns, main_lines);
-        self.render_side_panel(frame, columns);
+        self.render_side_panel(frame, columns, cached_diff_page.as_ref());
 
         if let Some(start) = widget_draw_start {
             stats.widget_draw = start.elapsed();
@@ -223,6 +224,7 @@ impl App {
                     ascii_header: Line::raw(""),
                     ascii: vec![Line::raw("")],
                 },
+                diff_page: None,
             };
         }
 
@@ -233,6 +235,7 @@ impl App {
             self.report_render_error(format!("diff render failed: {err}"));
             VisibleDiffPage::default()
         });
+        let cached_diff_page = self.diff_projection_active().then(|| diff_page.clone());
         let projected = !diff_page.main_rows.is_empty();
         let gutter_offsets = if projected {
             &diff_page.main_row_offsets
@@ -252,7 +255,7 @@ impl App {
         };
         let gutter_lines = gutter::build(gutter_offsets, gutter_width_value, &self.palette);
         let overlays = hex_grid::HexGridOverlays {
-            diff_spans: diff_page.overlay_spans,
+            diff_spans: diff_page.overlay_spans.clone(),
             selection,
             inspector_highlight,
             search_matches,
@@ -306,6 +309,7 @@ impl App {
                 ascii_header: Line::raw("ASCII"),
                 ascii,
             },
+            diff_page: cached_diff_page,
         }
     }
 
@@ -376,6 +380,7 @@ impl App {
                     )],
                     jump_rail: None,
                 },
+                diff_page: None,
             };
         }
 
@@ -423,6 +428,7 @@ impl App {
                 text,
                 jump_rail,
             },
+            diff_page: None,
         }
     }
 
@@ -434,6 +440,7 @@ impl App {
                 text: vec![Line::styled(message.to_owned(), self.palette.error)],
                 jump_rail: None,
             },
+            diff_page: None,
         }
     }
 

@@ -5,6 +5,7 @@ impl App {
         &mut self,
         frame: &mut ratatui::Frame<'_>,
         columns: layout::MainColumns,
+        cached_diff_page: Option<&VisibleDiffPage>,
     ) {
         let (Some(side_panel_sep), Some(side_panel_area)) =
             (columns.side_panel_sep, columns.side_panel)
@@ -65,7 +66,7 @@ impl App {
                 }
             }
             SidePanelKind::Diff => {
-                self.render_diff_panel(frame, side_panel_area);
+                self.render_diff_panel(frame, side_panel_area, cached_diff_page);
             }
             SidePanelKind::Memory => {
                 self.render_memory_panel(frame, side_panel_area);
@@ -268,16 +269,27 @@ impl App {
         vec![Line::raw("memory feature is not enabled")]
     }
 
-    fn render_diff_panel(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+    fn render_diff_panel(
+        &mut self,
+        frame: &mut ratatui::Frame<'_>,
+        area: Rect,
+        cached_page: Option<&VisibleDiffPage>,
+    ) {
         if !self.diff_projection_active() {
             return;
         }
         let body_area = scrolled_body_area(area);
-        let visible_rows = self.collect_visible_rows(body_area.height as usize);
-        let page = self.visible_diff_page(&visible_rows).unwrap_or_else(|err| {
-            self.report_render_error(format!("diff panel render failed: {err}"));
-            VisibleDiffPage::default()
-        });
+        let computed_page;
+        let page = if let Some(page) = cached_page {
+            page
+        } else {
+            let visible_rows = self.collect_visible_rows(body_area.height as usize);
+            computed_page = self.visible_diff_page(&visible_rows).unwrap_or_else(|err| {
+                self.report_render_error(format!("diff panel render failed: {err}"));
+                VisibleDiffPage::default()
+            });
+            &computed_page
+        };
         let header = diff_panel::header_line(
             offset_width(self.document.len()),
             self.config.bytes_per_line,
