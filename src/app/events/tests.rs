@@ -151,6 +151,11 @@ fn inspector_enter_escape_and_format_warnings() {
     app_gz.handle_action(Action::SidePanelEnter);
     assert!(app_gz.status_message.contains("GZIP inspector edits"));
 
+    // SQLite format warning
+    let mut app_sqlite = app_with_inspector_field_for("SQLite");
+    app_sqlite.handle_action(Action::SidePanelEnter);
+    assert!(app_sqlite.status_message.contains("SQLite inspector edits"));
+
     // TAR format warning
     let mut app_tar = app_with_inspector_field_for("TAR");
     app_tar.handle_action(Action::SidePanelEnter);
@@ -182,6 +187,17 @@ fn inspector_warns_when_editing_gzip_field() {
     assert_eq!(app.mode, Mode::InspectorEdit);
     assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
     assert!(app.status_message.contains("GZIP inspector edits"));
+}
+
+#[test]
+fn inspector_warns_when_editing_sqlite_field() {
+    let mut app = app_with_inspector_field_for("SQLite");
+
+    app.handle_action(Action::SidePanelEnter);
+
+    assert_eq!(app.mode, Mode::InspectorEdit);
+    assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
+    assert!(app.status_message.contains("SQLite inspector edits"));
 }
 
 #[test]
@@ -294,7 +310,7 @@ fn hidden_inspector_focus_falls_back_to_normal_mode() {
     assert!(app4.status_message.contains("no format detected"));
     assert!(app4
         .status_message
-        .contains("ELF / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG"));
+        .contains("ELF / PNG / ZIP / SQLite / GZIP / GIF / BMP / WAV / TAR / JPEG"));
 
     // View-only inspector reports read-only mode
     let mut app5 = app_with_inspector_field_editable("TEST", false);
@@ -336,7 +352,7 @@ fn entering_inspector_without_detected_format_stays_in_normal_with_hint() {
     assert!(app.status_message.contains("no format detected"));
     assert!(app
         .status_message
-        .contains("ELF / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG"));
+        .contains("ELF / PNG / ZIP / SQLite / GZIP / GIF / BMP / WAV / TAR / JPEG"));
 }
 
 #[test]

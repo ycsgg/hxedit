@@ -6,6 +6,7 @@ pub mod jpeg;
 pub mod macho;
 pub mod pe;
 pub mod png;
+pub mod sqlite;
 pub mod tar;
 pub mod wav;
 pub mod zip;

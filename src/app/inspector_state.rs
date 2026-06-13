@@ -117,7 +117,7 @@ impl App {
     }
 
     fn supported_inspector_formats() -> &'static str {
-        "ELF / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG"
+        "ELF / PNG / ZIP / SQLite / GZIP / GIF / BMP / WAV / TAR / JPEG"
     }
 
     pub(crate) fn inspector(&self) -> Option<&InspectorState> {
@@ -237,6 +237,9 @@ impl App {
         match self.inspector()?.format_name.as_str() {
             "PNG" => Some("PNG inspector edits do not repair CRC or chunk consistency"),
             "ZIP" => Some("ZIP inspector edits do not repair header or descriptor consistency"),
+            "SQLite" => {
+                Some("SQLite inspector edits do not repair b-tree, pointer, or payload consistency")
+            }
             "GZIP" => Some("GZIP inspector edits do not recompute header/trailer consistency"),
             "GIF" => {
                 Some("GIF inspector edits do not repair palette, frame, or sub-block consistency")

@@ -3,8 +3,8 @@ use crate::format::defs;
 use crate::format::types::FormatDef;
 
 /// Default per-format entry cap used when the UI layer has not requested a
-/// higher value. 64 keeps ELF repeated tables / PNG chunk count / ZIP local
-/// file header lists at a manageable inspector height on first open;
+/// higher value. 64 keeps ELF repeated tables / PNG chunk count / ZIP entries /
+/// SQLite pages at a manageable inspector height on first open;
 /// `:insp more` raises it in batches.
 pub const DEFAULT_ENTRY_CAP: usize = 64;
 
@@ -17,7 +17,7 @@ pub fn detect_format(doc: &mut Document) -> Option<FormatDef> {
 }
 
 /// Like `detect_format`, but threads a per-format entry cap through to parsers
-/// that support pagination (ELF / PNG / ZIP / GIF / WAV).
+/// that support pagination (ELF / PNG / ZIP / SQLite / GIF / WAV).
 pub fn detect_format_with_cap(doc: &mut Document, entry_cap: usize) -> Option<FormatDef> {
     if let Some(def) = defs::elf::detect_with_cap(doc, entry_cap) {
         return Some(def);
@@ -29,6 +29,9 @@ pub fn detect_format_with_cap(doc: &mut Document, entry_cap: usize) -> Option<Fo
         return Some(def);
     }
     if let Some(def) = defs::zip::detect_with_cap(doc, entry_cap) {
+        return Some(def);
+    }
+    if let Some(def) = defs::sqlite::detect_with_cap(doc, entry_cap) {
         return Some(def);
     }
     if let Some(def) = defs::gzip::detect_with_cap(doc, entry_cap) {
@@ -70,6 +73,7 @@ pub fn detect_by_name_with_cap(
         "pe" | "pe32" | "pe32+" => defs::pe::detect_with_cap(doc, entry_cap),
         "png" => defs::png::detect_with_cap(doc, entry_cap),
         "zip" => defs::zip::detect_with_cap(doc, entry_cap),
+        "sqlite" | "sqlite3" | "db" => defs::sqlite::detect_with_cap(doc, entry_cap),
         "gzip" | "gz" => defs::gzip::detect_with_cap(doc, entry_cap),
         "gif" => defs::gif::detect_with_cap(doc, entry_cap),
         "bmp" => defs::bmp::detect_with_cap(doc, entry_cap),

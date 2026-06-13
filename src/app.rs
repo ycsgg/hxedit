@@ -138,7 +138,7 @@ pub struct App {
     active_side_panel: SidePanelKind,
     /// Manual format override for the inspector, e.g. `elf`.
     inspector_format_override: Option<String>,
-    /// Per-format entry cap for pagination-aware parsers (ELF / PNG / ZIP / GIF / WAV).
+    /// Per-format entry cap for pagination-aware parsers (ELF / PNG / ZIP / SQLite / GIF / WAV).
     /// Starts at `DEFAULT_ENTRY_CAP` and grows by `ENTRY_CAP_BATCH` on each
     /// `:insp more` until all entries are loaded.
     inspector_entry_cap: usize,
