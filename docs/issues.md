@@ -11,10 +11,6 @@
   - 现状：64 KB 分块已就位，但 GB 级文件仍会让 UI 长时间静默
   - 建议：开始先显示 `hashing...`，之后每 N 个 chunk 刷一次百分比或已处理字节数
 
-- [ ] **[P1] ELF inspector 仍只有 Header + Program Header Table**
-  - 现状：Section Header Table、符号表、重定位表、动态段等都还没展开
-  - 额外问题：ELF 当前也还没有像 PNG / ZIP 一样接入 `:insp more` 分页路径
-
 - [ ] **[P2] magic / header 被编辑后，inspector 的“格式丢失”反馈仍不够明确**
   - 现状：格式从可识别变为不可识别时，用户容易只看到 inspector 消失
   - 建议：从 Some → None 时给出显式状态提示，如 `format lost: header modified`
@@ -61,32 +57,15 @@
 
 - [ ] **[P1] 继续补齐现有格式深度**
   - 当前格式覆盖面已够宽，近期重点不再是“再加一个格式名”
-  - 应优先补 ELF、PE、Mach-O 等现有格式的深层结构、分页、跳转与更稳定的编辑边界；ZIP 已具备 central directory / EOCD / ZIP64 / data descriptor 感知，SQLite 已具备 database header / b-tree page 轻量解析，PCAP/PCAPNG 已具备 capture/block/packet data range 轻量解析；classic PCAP timestamp、GZIP/PE timestamp、ZIP DOS modified time、TAR octal mode/size/mtime、GIF frame delay 已支持可读合成字段双向编辑，后续重点是结构间跳转与一致性提示
+  - 应优先补 PE、Mach-O 等现有格式的深层结构、跳转与更稳定的编辑边界；ELF 已具备 section / symbol / relocation / dynamic / note / hash / version 等结构和分页，后续重点转为结构间跳转、联动与保守编辑；ZIP 已具备 central directory / EOCD / ZIP64 / data descriptor 感知，SQLite 已具备 database header / b-tree page 轻量解析，PCAP/PCAPNG 已具备 capture/block/packet data range 轻量解析；classic PCAP timestamp、GZIP/PE timestamp、ZIP DOS modified time、TAR octal mode/size/mtime、GIF frame delay 已支持可读合成字段双向编辑，后续重点是结构间跳转与一致性提示
 
-### ELF 解析扩展计划
+### ELF 后续计划
 
-- [ ] **[P1] Phase 1：Section Header Table + section name string table**
-  - 显示 `e_shoff / e_shnum / e_shstrndx` 对应的 section 列表
-  - 为每个 section 提供 `section_data` 范围字段
-  - 大表格要接入分页能力，不要一次性塞满 inspector
-
-- [ ] **[P1] Phase 2：动态相关结构**
-  - 覆盖 `PT_DYNAMIC` / `.dynamic`、`PT_INTERP`、常见 note / GNU property 相关段
-  - 重点是把“段存在”升级为“段内部字段可浏览”
-
-- [ ] **[P2] Phase 3：符号表与字符串表**
-  - 支持 `.symtab` / `.dynsym` / `.strtab` / `.dynstr`
-  - 补常见枚举显示，如 symbol bind / type / visibility
-
-- [ ] **[P2] Phase 4：重定位与版本信息**
-  - 支持 `REL` / `RELA`、GNU / SysV hash、version needs / defs 等常见结构
-  - 目标是让动态链接相关问题能在 inspector 里直接追踪
-
-- [ ] **[P2] Phase 5：结构间跳转与联动**
+- [ ] **[P2] 结构间跳转与联动**
   - 从 `e_phoff` / `e_shoff` / `p_offset` / `sh_offset` 直接跳到对应表项或数据范围
   - 让 ELF inspector 不只是“列表展示”，还能快速导航
 
-- [ ] **[P3] Phase 6：保守开放编辑**
+- [ ] **[P3] 保守开放深层表项编辑**
   - 默认先把深层表项做成 view-only
   - 只为低风险字段开放编辑，继续避免把“可编辑”误导成“结构安全”
 
@@ -122,6 +101,10 @@
 ---
 
 ## Performance / Maintenance
+
+- [ ] **[P2] 格式检测 / Inspector 单字段扫描缺少预算**
+  - 现状：entry cap 只限制结构数量；GZIP FNAME/FCOMMENT、JPEG scan data、GIF sub-block 等单字段仍可能在畸形大文件中同步扫到 EOF，导致 UI 长时间无响应
+  - 建议：为格式解析增加统一 scan budget；超预算时保留已解析结构并标记 truncated / budget-exceeded，不继续依赖不可信 cursor 解析后续字段
 
 - [ ] **[P2] `:diff` 后台 alignment cache / progress 仍未落地**
   - 现状：UI 已改为同步滚动可见页，打开不再全文件扫描；可见页会在 `max_shift` 范围内做局部重对齐并处理投影 cell 的点击/清理

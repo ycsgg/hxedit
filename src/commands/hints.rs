@@ -1,3 +1,18 @@
+#[cfg(feature = "sagitta-analysis")]
+use super::ANALYSIS_ALIASES;
+use super::{
+    is_alias, known_command_aliases, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES,
+    FILL_ALIASES, FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES,
+    LEGACY_HEX_SEARCH_ALIASES, PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES,
+    QUIT_FORCE_ALIASES, REDO_ALIASES, REPLACE_ALIASES, SEARCH_ALIASES, UNDO_ALIASES, WRITE_ALIASES,
+    WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
+};
+#[cfg(feature = "disasm")]
+use super::{DISASSEMBLE_ALIASES, DISASSEMBLE_FORCE_ALIASES, INSTRUCTION_SEARCH_ALIASES};
+#[cfg(feature = "memory")]
+use super::{MEMORY_ALIASES, MEMORY_SEARCH_ALIASES};
+#[cfg(feature = "symbols")]
+use super::{SYMBOL_PANEL_ALIASES, SYMBOL_SEARCH_ALIASES};
 use crate::commands::split_command;
 
 #[derive(Debug, Clone)]
@@ -17,27 +32,27 @@ pub fn hint_for(input: &str) -> CommandHint {
 
     let (name, rest) = split_command(trimmed);
     match name {
-        "q" | "quit" | "q!" | "quit!" => CommandHint {
+        name if is_alias(name, QUIT_ALIASES) || is_alias(name, QUIT_FORCE_ALIASES) => CommandHint {
             syntax: "q | quit | q! | quit!".to_owned(),
             details: "quit editor; ! forces quit even with unsaved changes".to_owned(),
         },
-        "w" | "write" => CommandHint {
+        name if is_alias(name, WRITE_ALIASES) => CommandHint {
             syntax: "w [path] | write [path]".to_owned(),
             details: "save current file; optional path writes to a new target".to_owned(),
         },
-        "wq" => CommandHint {
+        name if is_alias(name, WRITE_QUIT_ALIASES) => CommandHint {
             syntax: "wq".to_owned(),
             details: "save current file and quit".to_owned(),
         },
-        "fill" => CommandHint {
+        name if is_alias(name, FILL_ALIASES) => CommandHint {
             syntax: "fill <hex-pattern> <len>".to_owned(),
             details: "overwrite bytes from cursor with a repeated hex pattern; len is the number of bytes to write".to_owned(),
         },
-        "zero" => CommandHint {
+        name if is_alias(name, ZERO_ALIASES) => CommandHint {
             syntax: "zero <len>".to_owned(),
             details: "overwrite bytes from cursor with 0x00 for len bytes".to_owned(),
         },
-        "re" | "replace" | "re!" | "replace!" => CommandHint {
+        name if is_alias(name, REPLACE_ALIASES) => CommandHint {
             syntax: format!("{name} [hex|ascii] <needle> -> <replacement>"),
             details: if name.ends_with('!') {
                 "replace all non-overlapping matches in the active selection (visual or selected inspector field) or entire file; ! allows length changes via real delete/insert"
@@ -47,7 +62,7 @@ pub fn hint_for(input: &str) -> CommandHint {
                     .to_owned()
             },
         },
-        "insp" | "inspector" => {
+        name if is_alias(name, INSPECTOR_ALIASES) => {
             let is_more = rest.map(str::trim) == Some("more");
             CommandHint {
                 syntax: if is_more {
@@ -63,26 +78,21 @@ pub fn hint_for(input: &str) -> CommandHint {
                 },
             }
         }
-        "format" => CommandHint {
-            syntax: "format [elf|pe|macho|png|zip|gzip|gif|bmp|wav|tar|jpeg]".to_owned(),
-            details: "auto-detect format when omitted, or force a built-in inspector".to_owned(),
-        },
+        name if is_alias(name, FORMAT_ALIASES) => format_hint(),
         #[cfg(feature = "memory")]
-        "mem" => CommandHint {
+        name if is_alias(name, MEMORY_ALIASES) => CommandHint {
             syntax: "mem [list|refresh|info|freeze|thaw|commit|commit-all]".to_owned(),
             details: "open/focus memory panel, list processes, refresh maps, inspect state, freeze/thaw the target, or commit active memory-document replacements".to_owned(),
         },
-        "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
-        | "paste?!" => paste_hint(name, rest, false),
-        "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?" | "pi!?"
-        | "pi?!" | "paste-insert!?" | "paste-insert?!" => paste_hint(name, rest, true),
-        "g" | "goto" => CommandHint {
+        name if is_alias(name, PASTE_ALIASES) => paste_hint(name, rest, false),
+        name if is_alias(name, PASTE_INSERT_ALIASES) => paste_hint(name, rest, true),
+        name if is_alias(name, GOTO_ALIASES) => CommandHint {
             syntax: format!("{name} <offset|end|+delta|-delta>"),
             details:
                 "jump to an absolute offset, end, or a relative delta; supports decimal or 0x-prefixed hex, and reports the moved byte delta on success"
                     .to_owned(),
         },
-        "s" | "s!" => CommandHint {
+        name if is_alias(name, SEARCH_ALIASES) => CommandHint {
             syntax: format!("{name} [mode]<delim><pattern><delim>"),
             details: if name.ends_with('!') {
                 "search upward; modes include /text/, x/hex/, b/byte/, u32/u64 and signed variants; use n/p to jump next/previous match".to_owned()
@@ -90,7 +100,7 @@ pub fn hint_for(input: &str) -> CommandHint {
                 "search downward; modes include /text/, x/hex/, b/byte/, u32/u64 and signed variants; use n/p to jump next/previous match".to_owned()
             },
         },
-        "S" | "S!" => CommandHint {
+        name if is_alias(name, LEGACY_HEX_SEARCH_ALIASES) => CommandHint {
             syntax: format!("{name} <hex-bytes> (deprecated; use s{} x/<hex-bytes>/)", if name.ends_with('!') { "!" } else { "" }),
             details: if name.ends_with('!') {
                 "deprecated hex-search alias; search upward with the unified form like: s! x/7f 45 4c 46/".to_owned()
@@ -99,7 +109,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             },
         },
         #[cfg(feature = "memory")]
-        "ms" | "ms!" => CommandHint {
+        name if is_alias(name, MEMORY_SEARCH_ALIASES) => CommandHint {
             syntax: format!("{name} [mode]<delim><pattern><delim> [in:<selector>] [not:<selector>]"),
             details: if name.ends_with('!') {
                 "search process memory upward across readable regions; modes include /text/, x/hex/, b/byte/, u32/u64, filters include permissions, kind, path glob, and va range; repeat with gn/gN".to_owned()
@@ -108,12 +118,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             },
         },
         #[cfg(feature = "disasm")]
-        "si"
-        | "si!"
-        | "search-instruction"
-        | "search-instruction!"
-        | "search-insn"
-        | "search-insn!" => CommandHint {
+        name if is_alias(name, INSTRUCTION_SEARCH_ALIASES) => CommandHint {
             syntax: format!("{name} <instruction-text>"),
             details: if name.ends_with('!') {
                 "search decoded instruction text upward in disassembly view; matches mnemonic and operands, then jumps to the matching instruction row".to_owned()
@@ -122,7 +127,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             },
         },
         #[cfg(feature = "symbols")]
-        "symbol" | "symbol!" | "search-symbol" | "search-symbol!" => CommandHint {
+        name if is_alias(name, SYMBOL_SEARCH_ALIASES) => CommandHint {
             syntax: format!("{name} <symbol-name>"),
             details: if name.ends_with('!') {
                 "search symbolized disassembly rows upward in disassembly view; matches symbol labels, symbolized operands, and direct-target symbol hints, then jumps to the matching row".to_owned()
@@ -130,24 +135,24 @@ pub fn hint_for(input: &str) -> CommandHint {
                 "search symbolized disassembly rows downward in disassembly view; matches symbol labels, symbolized operands, and direct-target symbol hints, then jumps to the matching row".to_owned()
             },
         },
-        "u" | "undo" => CommandHint {
+        name if is_alias(name, UNDO_ALIASES) => CommandHint {
             syntax: format!("{name} [steps]"),
             details: "undo one change by default; pass a positive number to undo more".to_owned(),
         },
-        "redo" => CommandHint {
+        name if is_alias(name, REDO_ALIASES) => CommandHint {
             syntax: "redo [steps]".to_owned(),
             details: "redo one undone change by default; pass a positive number to redo more"
                 .to_owned(),
         },
-        "c" | "copy" => copy_hint(name, rest),
-        "export" => CommandHint {
+        name if is_alias(name, COPY_ALIASES) => copy_hint(name, rest),
+        name if is_alias(name, EXPORT_ALIASES) => CommandHint {
             syntax: "export <path> | export bin <path> | export c [name] | export py [name]"
                 .to_owned(),
             details:
                 "export the active selection (visual or selected inspector field) as raw bytes to a file, or copy a C/Python literal to the clipboard"
                     .to_owned(),
         },
-        "xor" | "xor!" => CommandHint {
+        name if is_alias(name, XOR_ALIASES) => CommandHint {
             syntax: format!("{name} <0x??|0..255>"),
             details: if name.ends_with('!') {
                 "xor each logical byte in the active selection with a one-byte key, then overwrite the same display cells in place; bare keys are decimal, 0x-prefixed keys are hex"
@@ -157,11 +162,11 @@ pub fn hint_for(input: &str) -> CommandHint {
                     .to_owned()
             },
         },
-        "hash" => CommandHint {
+        name if is_alias(name, HASH_ALIASES) => CommandHint {
             syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
             details: "compute hash of the current selection (visual or selected inspector field), or the entire file if no selection is active".to_owned(),
         },
-        "diff" => {
+        name if is_alias(name, DIFF_ALIASES) => {
             let syntax = match rest.map(str::trim) {
                 Some("off") => "diff off".to_owned(),
                 Some("refresh") => "diff refresh".to_owned(),
@@ -179,7 +184,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             }
         }
         #[cfg(feature = "sagitta-analysis")]
-        "ana" | "analysis" => {
+        name if is_alias(name, ANALYSIS_ALIASES) => {
             let syntax = match rest.map(str::trim) {
                 Some("status") => "ana status".to_owned(),
                 Some("off") => "ana off".to_owned(),
@@ -191,7 +196,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             }
         }
         #[cfg(feature = "disasm")]
-        "dis" | "disassemble" => {
+        name if is_alias(name, DISASSEMBLE_ALIASES) => {
             let syntax = match rest.map(str::trim) {
                 Some("off") => "dis off".to_owned(),
                 Some(arg) if !arg.is_empty() => format!("{name} {arg}"),
@@ -203,12 +208,12 @@ pub fn hint_for(input: &str) -> CommandHint {
             }
         }
         #[cfg(feature = "disasm")]
-        "dis!" | "disassemble!" => CommandHint {
+        name if is_alias(name, DISASSEMBLE_FORCE_ALIASES) => CommandHint {
             syntax: format!("{name} <x86|x86_64|arm|aarch64|riscv64> <offset>"),
             details: "force a raw disassembly view from the given display offset even when the file is not recognized as ELF/PE/Mach-O; assumes little-endian decoding for the chosen arch".to_owned(),
         },
         #[cfg(feature = "symbols")]
-        "sym" | "symbols" => {
+        name if is_alias(name, SYMBOL_PANEL_ALIASES) => {
             let syntax = match rest.map(str::trim) {
                 Some("off") => "sym off".to_owned(),
                 Some(arg) if !arg.is_empty() => format!("{name} {arg}"),
@@ -219,7 +224,7 @@ pub fn hint_for(input: &str) -> CommandHint {
                 details: "show executable symbols/import targets in the side panel; `sym off` closes the symbol page and restores inspector when available".to_owned(),
             }
         }
-        "data" => {
+        name if is_alias(name, DATA_ALIASES) => {
             let syntax = match rest.map(str::trim) {
                 Some("off") => "data off".to_owned(),
                 _ => "data | data off".to_owned(),
@@ -247,6 +252,23 @@ pub fn hint_for(input: &str) -> CommandHint {
                 }
             }
         }
+    }
+}
+
+fn format_hint() -> CommandHint {
+    let aliases = crate::format::detect::forced_format_alias_list();
+    CommandHint {
+        syntax: format!(
+            "format [{}]",
+            crate::format::detect::forced_format_primary_names()
+        ),
+        details: if aliases.is_empty() {
+            "auto-detect format when omitted, or force a built-in inspector".to_owned()
+        } else {
+            format!(
+                "auto-detect format when omitted, or force a built-in inspector; aliases: {aliases}"
+            )
+        },
     }
 }
 
@@ -338,89 +360,7 @@ fn paste_hint(name: &str, rest: Option<&str>, insert: bool) -> CommandHint {
 }
 
 fn known_commands() -> Vec<&'static str> {
-    #[allow(unused_mut)]
-    let mut commands = vec![
-        "q",
-        "quit",
-        "q!",
-        "w",
-        "write",
-        "wq",
-        "fill",
-        "zero",
-        "re",
-        "replace",
-        "re!",
-        "replace!",
-        "g",
-        "goto",
-        "s",
-        "s!",
-        "S",
-        "S!",
-        "u",
-        "undo",
-        "redo",
-        "insp",
-        "inspector",
-        "format",
-        "c",
-        "copy",
-        "export",
-        "xor",
-        "xor!",
-        "hash",
-        "diff",
-        "data",
-        "p",
-        "paste",
-        "p!",
-        "paste!",
-        "p?",
-        "paste?",
-        "p!?",
-        "p?!",
-        "paste!?",
-        "paste?!",
-        "pi",
-        "paste-insert",
-        "pi!",
-        "paste-insert!",
-        "pi?",
-        "paste-insert?",
-        "pi!?",
-        "pi?!",
-        "paste-insert!?",
-        "paste-insert?!",
-    ];
-    #[cfg(feature = "disasm")]
-    {
-        commands.extend([
-            "si",
-            "si!",
-            "search-instruction",
-            "search-instruction!",
-            "search-insn",
-            "search-insn!",
-            "dis",
-            "dis!",
-            "disassemble",
-            "disassemble!",
-        ]);
-    }
-    #[cfg(feature = "symbols")]
-    {
-        commands.extend(["sym", "symbols", "symbol", "symbol!"]);
-    }
-    #[cfg(feature = "sagitta-analysis")]
-    {
-        commands.extend(["ana", "analysis"]);
-    }
-    #[cfg(feature = "memory")]
-    {
-        commands.extend(["mem", "ms", "ms!"]);
-    }
-    commands
+    known_command_aliases()
 }
 
 #[cfg(test)]
@@ -474,6 +414,33 @@ mod tests {
     fn inspector_hint_mentions_panel() {
         let hint = hint_for("insp");
         assert!(hint.details.contains("inspector"));
+    }
+
+    #[test]
+    fn format_hint_uses_format_registry() {
+        let hint = hint_for("format");
+        assert!(hint.syntax.contains("sqlite"));
+        assert!(hint.syntax.contains("pcapng"));
+        assert!(hint.syntax.contains("macho"));
+        assert!(hint.details.contains("sqlite3"));
+        assert!(hint.details.contains("mach-o"));
+    }
+
+    #[test]
+    fn completion_aliases_use_shared_registry() {
+        let commands = known_commands();
+        assert!(commands.contains(&"quit!"));
+        assert!(commands.contains(&"paste-insert?!"));
+        #[cfg(feature = "symbols")]
+        {
+            assert!(commands.contains(&"search-symbol"));
+            assert!(commands.contains(&"search-symbol!"));
+        }
+        #[cfg(feature = "disasm")]
+        {
+            assert!(commands.contains(&"search-instruction"));
+            assert!(commands.contains(&"disassemble!"));
+        }
     }
 
     #[cfg(feature = "symbols")]

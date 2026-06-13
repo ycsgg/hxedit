@@ -116,10 +116,6 @@ impl App {
         }
     }
 
-    fn supported_inspector_formats() -> &'static str {
-        "ELF / PNG / ZIP / SQLite / PCAP / PCAPNG / GZIP / GIF / BMP / WAV / TAR / JPEG"
-    }
-
     pub(crate) fn inspector(&self) -> Option<&InspectorState> {
         self.inspector_state.as_ref()
     }
@@ -142,7 +138,7 @@ impl App {
     fn no_format_detected_message(&self) -> String {
         format!(
             "inspector unavailable: no format detected (supported: {}; use :format to force)",
-            Self::supported_inspector_formats()
+            format::detect::supported_format_display_list()
         )
     }
 

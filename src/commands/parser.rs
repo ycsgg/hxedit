@@ -1,5 +1,20 @@
 use std::path::PathBuf;
 
+#[cfg(feature = "sagitta-analysis")]
+use super::ANALYSIS_ALIASES;
+use super::{
+    is_alias, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES, FILL_ALIASES,
+    FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES, LEGACY_HEX_SEARCH_ALIASES,
+    PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES, QUIT_FORCE_ALIASES, REDO_ALIASES,
+    REPLACE_ALIASES, SEARCH_ALIASES, UNDO_ALIASES, WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES,
+    ZERO_ALIASES,
+};
+#[cfg(feature = "disasm")]
+use super::{DISASSEMBLE_ALIASES, DISASSEMBLE_FORCE_ALIASES, INSTRUCTION_SEARCH_ALIASES};
+#[cfg(feature = "memory")]
+use super::{MEMORY_ALIASES, MEMORY_SEARCH_ALIASES};
+#[cfg(feature = "symbols")]
+use super::{SYMBOL_PANEL_ALIASES, SYMBOL_SEARCH_ALIASES};
 use crate::commands::{
     split_command,
     types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm},
@@ -23,46 +38,44 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
 
     let (name, rest) = split_command(trimmed);
     match name {
-        "q" | "quit" => Ok(Command::Quit { force: false }),
-        "q!" | "quit!" => Ok(Command::Quit { force: true }),
-        "w" | "write" => Ok(Command::Write {
+        name if is_alias(name, QUIT_ALIASES) => Ok(Command::Quit { force: false }),
+        name if is_alias(name, QUIT_FORCE_ALIASES) => Ok(Command::Quit { force: true }),
+        name if is_alias(name, WRITE_ALIASES) => Ok(Command::Write {
             path: opt_path(rest),
         }),
-        "wq" => Ok(Command::WriteQuit {
+        name if is_alias(name, WRITE_QUIT_ALIASES) => Ok(Command::WriteQuit {
             path: opt_path(rest),
         }),
-        "fill" => parse_fill(rest),
-        "zero" => parse_zero(rest),
-        "re" | "replace" | "re!" | "replace!" => parse_replace(name, rest),
-        "p" | "paste" | "p!" | "paste!" | "p?" | "paste?" | "p!?" | "p?!" | "paste!?"
-        | "paste?!" => parse_paste(name, rest, false),
-        "pi" | "paste-insert" | "pi!" | "paste-insert!" | "pi?" | "paste-insert?" | "pi!?"
-        | "pi?!" | "paste-insert!?" | "paste-insert?!" => parse_paste(name, rest, true),
-        "c" | "copy" => parse_copy(rest),
-        "export" => parse_export(rest),
-        "xor" | "xor!" => parse_xor(name, rest),
-        "u" | "undo" => Ok(Command::Undo {
+        name if is_alias(name, FILL_ALIASES) => parse_fill(rest),
+        name if is_alias(name, ZERO_ALIASES) => parse_zero(rest),
+        name if is_alias(name, REPLACE_ALIASES) => parse_replace(name, rest),
+        name if is_alias(name, PASTE_ALIASES) => parse_paste(name, rest, false),
+        name if is_alias(name, PASTE_INSERT_ALIASES) => parse_paste(name, rest, true),
+        name if is_alias(name, COPY_ALIASES) => parse_copy(rest),
+        name if is_alias(name, EXPORT_ALIASES) => parse_export(rest),
+        name if is_alias(name, XOR_ALIASES) => parse_xor(name, rest),
+        name if is_alias(name, UNDO_ALIASES) => Ok(Command::Undo {
             steps: parse_undo_steps(rest)?,
         }),
-        "redo" => Ok(Command::Redo {
+        name if is_alias(name, REDO_ALIASES) => Ok(Command::Redo {
             steps: parse_redo_steps(rest)?,
         }),
-        "insp" | "inspector" => match rest.map(str::trim) {
+        name if is_alias(name, INSPECTOR_ALIASES) => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Inspector),
             Some("more") => Ok(Command::InspectorMore),
             Some(other) => Err(HxError::UnknownCommand(format!("insp {other}"))),
         },
-        "format" => Ok(Command::Format {
+        name if is_alias(name, FORMAT_ALIASES) => Ok(Command::Format {
             name: rest.filter(|value| !value.is_empty()).map(str::to_owned),
         }),
-        "g" | "goto" => {
+        name if is_alias(name, GOTO_ALIASES) => {
             let arg = rest.ok_or(HxError::MissingArgument("offset"))?;
             Ok(Command::Goto {
                 target: parse_goto_target(arg)?,
             })
         }
-        "s" | "s!" => parse_search(rest, name.ends_with('!')),
-        "S" | "S!" => {
+        name if is_alias(name, SEARCH_ALIASES) => parse_search(rest, name.ends_with('!')),
+        name if is_alias(name, LEGACY_HEX_SEARCH_ALIASES) => {
             let arg = rest.ok_or(HxError::MissingArgument("hex search pattern"))?;
             Ok(Command::SearchHex {
                 pattern: parse_hex_bytes(arg)?,
@@ -71,12 +84,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             })
         }
         #[cfg(feature = "disasm")]
-        "si"
-        | "si!"
-        | "search-instruction"
-        | "search-instruction!"
-        | "search-insn"
-        | "search-insn!" => {
+        name if is_alias(name, INSTRUCTION_SEARCH_ALIASES) => {
             let arg = rest.ok_or(HxError::MissingArgument("instruction search pattern"))?;
             if arg.is_empty() {
                 return Err(HxError::EmptySearch);
@@ -87,7 +95,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             })
         }
         #[cfg(feature = "symbols")]
-        "symbol" | "symbol!" | "search-symbol" | "search-symbol!" => {
+        name if is_alias(name, SYMBOL_SEARCH_ALIASES) => {
             let arg = rest.ok_or(HxError::MissingArgument("symbol search pattern"))?;
             if arg.is_empty() {
                 return Err(HxError::EmptySearch);
@@ -98,26 +106,26 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             })
         }
         #[cfg(feature = "memory")]
-        "ms" | "ms!" => {
+        name if is_alias(name, MEMORY_SEARCH_ALIASES) => {
             let arg = rest.ok_or(HxError::MissingArgument("memory search pattern"))?;
             Ok(Command::MemorySearch {
                 query: crate::memory::MemorySearchQuery::parse(arg)?,
                 backward: name.ends_with('!'),
             })
         }
-        "hash" => {
+        name if is_alias(name, HASH_ALIASES) => {
             let arg = rest.ok_or(HxError::MissingArgument("hash algorithm"))?;
             let algo = HashAlgorithm::parse(arg)
                 .ok_or_else(|| HxError::InvalidHashAlgorithm(arg.to_owned()))?;
             Ok(Command::Hash { algorithm: algo })
         }
-        "diff" => parse_diff(rest),
+        name if is_alias(name, DIFF_ALIASES) => parse_diff(rest),
         #[cfg(feature = "sagitta-analysis")]
-        "ana" | "analysis" => parse_analysis(rest),
+        name if is_alias(name, ANALYSIS_ALIASES) => parse_analysis(rest),
         #[cfg(feature = "memory")]
-        "mem" => parse_memory(rest),
+        name if is_alias(name, MEMORY_ALIASES) => parse_memory(rest),
         #[cfg(feature = "disasm")]
-        "dis" | "disassemble" => match rest.map(str::trim) {
+        name if is_alias(name, DISASSEMBLE_ALIASES) => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Disassemble { arch: None }),
             Some("off") => Ok(Command::DisassembleOff),
             Some(arg) => Ok(Command::Disassemble {
@@ -125,7 +133,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             }),
         },
         #[cfg(feature = "disasm")]
-        "dis!" | "disassemble!" => {
+        name if is_alias(name, DISASSEMBLE_FORCE_ALIASES) => {
             let rest = rest.ok_or(HxError::MissingArgument("arch offset"))?;
             let mut parts = rest.split_whitespace();
             let arch = parts.next().ok_or(HxError::MissingArgument("arch"))?;
@@ -139,12 +147,12 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             })
         }
         #[cfg(feature = "symbols")]
-        "sym" | "symbols" => match rest.map(str::trim) {
+        name if is_alias(name, SYMBOL_PANEL_ALIASES) => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Symbols),
             Some("off") => Ok(Command::SymbolsOff),
             Some(other) => Err(HxError::UnknownCommand(format!("sym {other}"))),
         },
-        "data" => match rest.map(str::trim) {
+        name if is_alias(name, DATA_ALIASES) => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Data),
             Some("off") => Ok(Command::DataOff),
             Some(other) => Err(HxError::UnknownCommand(format!("data {other}"))),
@@ -593,6 +601,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn quit_aliases_parse() {
+        assert_eq!(parse_command("q").unwrap(), Command::Quit { force: false });
+        assert_eq!(
+            parse_command("quit!").unwrap(),
+            Command::Quit { force: true }
+        );
+    }
+
+    #[test]
     fn inspector_aliases_parse() {
         assert_eq!(parse_command("insp").unwrap(), Command::Inspector);
         assert_eq!(parse_command("inspector").unwrap(), Command::Inspector);
@@ -932,6 +949,20 @@ mod tests {
         );
         assert_eq!(
             parse_command("symbol! entry").unwrap(),
+            Command::SearchSymbol {
+                pattern: "entry".to_owned(),
+                backward: true,
+            }
+        );
+        assert_eq!(
+            parse_command("search-symbol entry").unwrap(),
+            Command::SearchSymbol {
+                pattern: "entry".to_owned(),
+                backward: false,
+            }
+        );
+        assert_eq!(
+            parse_command("search-symbol! entry").unwrap(),
             Command::SearchSymbol {
                 pattern: "entry".to_owned(),
                 backward: true,

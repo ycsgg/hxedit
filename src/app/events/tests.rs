@@ -339,9 +339,8 @@ fn hidden_inspector_focus_falls_back_to_normal_mode() {
     app4.handle_action(Action::ToggleSidePanel);
     assert_eq!(app4.mode, Mode::Normal);
     assert!(app4.status_message.contains("no format detected"));
-    assert!(app4.status_message.contains(
-        "ELF / PNG / ZIP / SQLite / PCAP / PCAPNG / GZIP / GIF / BMP / WAV / TAR / JPEG"
-    ));
+    let supported_formats = crate::format::detect::supported_format_display_list();
+    assert!(app4.status_message.contains(supported_formats.as_str()));
 
     // View-only inspector reports read-only mode
     let mut app5 = app_with_inspector_field_editable("TEST", false);
@@ -381,9 +380,8 @@ fn entering_inspector_without_detected_format_stays_in_normal_with_hint() {
     assert!(app.show_side_panel);
     assert_eq!(app.status_level, crate::app::StatusLevel::Warning);
     assert!(app.status_message.contains("no format detected"));
-    assert!(app.status_message.contains(
-        "ELF / PNG / ZIP / SQLite / PCAP / PCAPNG / GZIP / GIF / BMP / WAV / TAR / JPEG"
-    ));
+    let supported_formats = crate::format::detect::supported_format_display_list();
+    assert!(app.status_message.contains(supported_formats.as_str()));
 }
 
 #[test]

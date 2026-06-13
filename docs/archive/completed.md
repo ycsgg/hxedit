@@ -10,7 +10,8 @@
 - [x] Rust 与 CI 基线已固定：`1.94.1` + `cargo fmt --check` + `cargo clippy --all-targets -- -D warnings` + `cargo test --all-targets`
 - [x] 当前对外命令面已经覆盖 `:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`
 - [x] 搜索支持 forward / backward / wrap-around，并在 hex grid 对同屏命中做叠加高亮
-- [x] Inspector 当前支持 ELF / PE/COFF / Mach-O / PNG / ZIP / GZIP / GIF / BMP / WAV / TAR / JPEG
+- [x] Inspector 当前支持 ELF / PE/COFF / Mach-O / PNG / ZIP / SQLite / PCAP / PCAPNG / GZIP / GIF / BMP / WAV / TAR / JPEG
+- [x] ELF inspector 已扩展到 section header / section data / dynamic entries / interpreter / notes / GNU property / string table / symbol table / relocation / SysV & GNU hash / version sections，并接入 `:insp more` 分页
 - [x] `collapsed_nodes` 已改为 `NodePath`，折叠态不再依赖脆弱的前序 `node_id`
 - [x] save 当前统一走 rewrite path；同路径保留权限位；hash / logical export 已走分块读取
 - [x] `default` / `full` 已提供 executable metadata detect、read-only disassembly、symbol search、symbol panel、data panel
