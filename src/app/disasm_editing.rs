@@ -184,9 +184,9 @@ impl App {
                     "cannot patch over deleted display slots".to_owned(),
                 ));
             }
-            let before = self.document.replacement_state(id);
+            let before = self.document.replacement_state(id)?;
             self.document.replace_display_byte_by_id(id, byte)?;
-            let after = self.document.replacement_state(id);
+            let after = self.document.replacement_state(id)?;
             if after != before {
                 changes.push(ReplacementChange { id, before, after });
             }

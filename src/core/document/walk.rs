@@ -117,7 +117,7 @@ impl Document {
                             continue;
                         }
                         scratch.push(if need_replacement_scan {
-                            self.replacement_for(id).unwrap_or(base)
+                            self.replacement_for(id, base).unwrap_or(base)
                         } else {
                             base
                         });
@@ -215,7 +215,7 @@ impl Document {
                     let id = CellId::from_source(piece.source, source_offset);
                     let deleted = need_tombstone_scan && self.is_tombstone(id);
                     let byte = if !deleted && need_replacement_scan {
-                        self.replacement_for(id).unwrap_or(base)
+                        self.replacement_for(id, base).unwrap_or(base)
                     } else {
                         base
                     };
@@ -326,7 +326,7 @@ impl Document {
                     let id = CellId::from_source(piece.source, source_offset);
                     let deleted = need_tombstone_scan && self.is_tombstone(id);
                     let byte = if !deleted && need_replacement_scan {
-                        self.replacement_for(id).unwrap_or(base)
+                        self.replacement_for(id, base).unwrap_or(base)
                     } else {
                         base
                     };

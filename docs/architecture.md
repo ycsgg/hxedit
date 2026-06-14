@@ -43,7 +43,7 @@
 - `:xor` 只读取 active selection 的 logical bytes，XOR 后以 hex 文本复制到剪贴板；`:xor!` 是 replacement 语义的原地覆盖，不改变 piece 布局；key 不带 `0x` 时按十进制解析，带 `0x` 时按 hex 解析
 - insert paste 会真实插入并右移后续 display offset
 - PNG / ZIP / TAR / GZIP / GIF 等 inspector 可编辑字段只代表“能写 byte”，**不代表结构安全**；合成可读字段仍是固定长度 replacement 写回，不自动修 CRC、checksum、descriptor、目录索引或 payload layout
-- `save` / `logical_bytes()` / `read_logical_range()` / `:hash` / `:export`(binary, `for_each_logical_chunk`) / dirty search / diff current-source / `:xor!`(`transform_visible_range_in_place`) 统一经 `src/core/document/walk.rs` 走 piece-walking + 分块 overlay：tombstone、replacement、Original/Add 的组合语义只在 walker 中判定；读原始文件时优先按 `Document::max_contiguous_read_len()`（约等于 `page_size * cache_pages`）裁剪，避免小 cache 配置下过度换页
+- `save` / `logical_bytes()` / `read_logical_range()` / `:hash` / `:export`(binary, `for_each_logical_chunk`) / dirty search / diff current-source 统一经 `src/core/document/walk.rs` 走 piece-walking + 分块 overlay：tombstone、replacement、Original/Add 的组合语义只在 walker 中判定；clean `:fill` / `:zero` / `:xor!` 可直接挂载 `ReplacementStore` range overlay，dirty/复杂 transform 仍复用 walker；读原始文件时优先按 `Document::max_contiguous_read_len()`（约等于 `page_size * cache_pages`）裁剪，避免小 cache 配置下过度换页
 - `:diff` 是只读同步滚动投影视图：current side 使用当前文档 logical bytes（跳过 tombstone、应用 replacement、包含 insert），other side 使用对比文件 raw bytes；不写入 `Document`，不进 undo/save；打开时只读打开 other 文件，不做全文件预扫描，render 时只读取当前可见页并在 `max_shift` 范围内局部重对齐后着色。`diff next` / `diff prev` 远距离 mismatch 查找按大块 stepper 推进，扫描中阻止其它输入，只允许 Esc 取消。着色约定：相同字节只在右侧灰色；同位置不同字节左右均 warning 亮黄色；current-only / other-only 的缺失侧补 `__` 并用 error 红色。other-only `__` 是投影 cell，需要参与鼠标 hit-test / 选区映射；切走或隐藏 diff panel 后必须停止投影，左侧不保留 `__` 或 diff 着色。
 
 ### CI / Release

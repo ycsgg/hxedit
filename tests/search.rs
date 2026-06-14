@@ -89,6 +89,15 @@ fn searches_across_large_chunk_boundary_with_replacements() {
 }
 
 #[test]
+fn searches_range_overlay_replacements() {
+    let (_dir, mut doc) = open_temp(b"xxxxxx");
+    doc.overwrite_run_pattern_overlay(0, 6, b"ababab").unwrap();
+
+    assert_eq!(doc.search_forward(0, b"baba").unwrap(), Some(1));
+    assert_eq!(doc.search_backward(doc.len(), b"baba").unwrap(), Some(1));
+}
+
+#[test]
 fn clean_memmem_scan_finds_match_straddling_read_chunk() {
     // Clean documents take the SIMD memmem path. With the default config the
     // per-read chunk caps at page_size * cache_pages (2 MiB), so place a match

@@ -145,9 +145,9 @@ pub(crate) fn write_field(
             let Some(id) = doc.cell_id_at(offset) else {
                 continue;
             };
-            let previous = doc.replacement_state(id);
+            let previous = doc.replacement_state(id)?;
             doc.replace_display_byte(offset, byte)?;
-            let after = doc.replacement_state(id);
+            let after = doc.replacement_state(id)?;
             if after != previous {
                 changes.push(ReplacementChange {
                     id,

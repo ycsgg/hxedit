@@ -200,7 +200,7 @@ fn undo_various_operations() {
     // Undo replacement
     let (_dir, mut doc5) = tmp_doc(b"abcd");
     let id = doc5.cell_id_at(1).unwrap();
-    let prev = doc5.replacement_state(id);
+    let prev = doc5.replacement_state(id).unwrap();
     doc5.replace_nibble(1, NibblePhase::High, 0x4).unwrap();
     doc5.replace_nibble(1, NibblePhase::Low, 0x1).unwrap();
     assert_eq!(doc5.byte_at(1).unwrap(), ByteSlot::Present(0x41));

@@ -83,15 +83,16 @@ impl App {
         let len_before = self.document.len();
         let is_eof_append = offset == len_before;
         let previous = if offset < len_before {
-            self.document
-                .cell_id_at(offset)
-                .and_then(|id| self.document.replacement_state(id))
+            match self.document.cell_id_at(offset) {
+                Some(id) => self.document.replacement_state(id)?,
+                None => None,
+            }
         } else {
             None
         };
         let id = self.document.replace_nibble(offset, phase, value)?;
 
-        let after = self.document.replacement_state(id);
+        let after = self.document.replacement_state(id)?;
         let cursor_before = self.cursor;
         let mode_before = self.mode;
         self.set_info_status(format!("edited 0x{:x}", offset));

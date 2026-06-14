@@ -1,9 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 mod edit;
 mod read;
+mod replacement_store;
 mod search;
 pub(crate) mod walk;
 
@@ -13,6 +14,8 @@ use crate::core::page_cache::CacheStats;
 use crate::core::piece_table::{CellId, Piece, PieceSource, PieceTable};
 use crate::core::save;
 use crate::error::{HxError, HxResult};
+
+use replacement_store::ReplacementStore;
 
 const SEARCH_CHUNK: usize = 64 * 1024;
 
@@ -37,9 +40,9 @@ pub enum ByteSlot {
 /// 2. **Tombstones** (`BTreeSet<CellId>`) — normal/visual-mode deletions.
 ///    The cell still occupies its display slot (shown as `Deleted`) but is
 ///    skipped on save.
-/// 3. **Replacements** (`BTreeMap<CellId, u8>`) — in-place byte edits
-///    (edit-mode nibble changes).  The replacement value overrides the base
-///    byte from the file or add-buffer.
+/// 3. **Replacements** (`ReplacementStore`) — in-place byte edits
+///    (edit-mode nibble changes and large range overlays).  The replacement
+///    value overrides the base byte from the file or add-buffer.
 ///
 /// All external interfaces use *display offsets* derived from the piece table.
 #[derive(Debug)]
@@ -53,7 +56,7 @@ pub struct Document {
     view: FileView,
     pieces: PieceTable,
     tombstones: BTreeSet<CellId>,
-    replacements: BTreeMap<CellId, u8>,
+    replacements: ReplacementStore,
 }
 
 impl Document {
@@ -88,7 +91,7 @@ impl Document {
             view,
             pieces: PieceTable::new(original_len),
             tombstones: BTreeSet::new(),
-            replacements: BTreeMap::new(),
+            replacements: ReplacementStore::default(),
         })
     }
 
@@ -104,7 +107,7 @@ impl Document {
             view: FileView::from_bytes(path, bytes, config.page_size, config.cache_pages),
             pieces: PieceTable::new(original_len),
             tombstones: BTreeSet::new(),
-            replacements: BTreeMap::new(),
+            replacements: ReplacementStore::default(),
         }
     }
 
@@ -235,11 +238,7 @@ impl Document {
 
     /// Check if any replacement falls within a CellId range (inclusive).
     pub fn has_replacement_in_range(&self, lo: CellId, hi: CellId) -> bool {
-        use std::ops::Bound;
-        self.replacements
-            .range((Bound::Included(lo), Bound::Included(hi)))
-            .next()
-            .is_some()
+        self.replacements.has_in_range(lo, hi)
     }
 
     /// Map a display offset to the corresponding logical byte offset.
@@ -313,9 +312,11 @@ impl Document {
         None
     }
 
-    /// Return the replacement value for a cell, if any.
-    pub fn replacement_for(&self, id: CellId) -> Option<u8> {
-        self.replacements.get(&id).copied()
+    /// Return the replacement value for a cell, if any. `base` must be the
+    /// unmodified byte for that cell; range overlays such as XOR derive their
+    /// visible byte from it.
+    pub fn replacement_for(&self, id: CellId, base: u8) -> Option<u8> {
+        self.replacements.get(id, base)
     }
 
     /// Return contiguous replacement runs keyed by original/display offset.
@@ -324,21 +325,57 @@ impl Document {
     /// remains the identity mapping and every replacement is an original cell.
     /// This helper gives the memory commit path compact write ranges without
     /// exposing the replacement map itself.
-    pub fn replacement_spans(&self) -> Vec<(u64, Vec<u8>)> {
+    pub fn replacement_spans(&mut self) -> HxResult<Vec<(u64, Vec<u8>)>> {
         let mut spans: Vec<(u64, Vec<u8>)> = Vec::new();
-        for (id, value) in &self.replacements {
-            let CellId::Original(offset) = *id else {
+        for (id, value) in self.replacements.sparse_values() {
+            if self.replacements.has_range_at(id) {
+                continue;
+            }
+            let CellId::Original(offset) = id else {
                 continue;
             };
             if let Some((start, bytes)) = spans.last_mut() {
                 if *start + bytes.len() as u64 == offset {
-                    bytes.push(*value);
+                    bytes.push(value);
                     continue;
                 }
             }
-            spans.push((offset, vec![*value]));
+            spans.push((offset, vec![value]));
         }
-        spans
+        for range in self.replacements.range_snapshots() {
+            if range.source != PieceSource::Original {
+                continue;
+            }
+            let mut offset = range.source_offset;
+            let end = offset + range.len;
+            while offset < end {
+                let batch = (end - offset).min(64 * 1024) as usize;
+                let raw = self.raw_range(offset, batch)?;
+                if raw.is_empty() {
+                    break;
+                }
+                let mut span_start = offset;
+                let mut bytes = Vec::new();
+                for (idx, &base) in raw.iter().enumerate() {
+                    let id = CellId::Original(offset + idx as u64);
+                    match self.replacements.get(id, base) {
+                        Some(value) => bytes.push(value),
+                        None => {
+                            push_span(&mut spans, span_start, std::mem::take(&mut bytes));
+                            span_start = offset + idx as u64 + 1;
+                        }
+                    }
+                }
+                push_span(&mut spans, span_start, bytes);
+                offset += raw.len() as u64;
+            }
+        }
+        spans.sort_by_key(|(offset, _)| *offset);
+        Ok(merge_spans(spans))
+    }
+
+    pub fn replacement_dirty_bytes(&self) -> usize {
+        self.replacements.dirty_bytes()
     }
 
     /// Clear all replacement overlays after an external fixed-size commit.
@@ -398,10 +435,11 @@ impl Document {
 
     /// Get the display value for a cell: replacement if present, else base byte.
     fn display_byte_for_id(&mut self, id: CellId) -> HxResult<u8> {
-        if let Some(value) = self.replacements.get(&id).copied() {
+        let base = self.base_byte(id)?;
+        if let Some(value) = self.replacements.get(id, base) {
             return Ok(value);
         }
-        self.base_byte(id)
+        Ok(base)
     }
 
     /// Set the display value for a cell. If the new value equals the base
@@ -409,9 +447,9 @@ impl Document {
     fn set_display_byte_by_id(&mut self, id: CellId, value: u8) -> HxResult<()> {
         let base = self.base_byte(id)?;
         if value == base {
-            self.replacements.remove(&id);
+            self.replacements.clear_cell(id);
         } else {
-            self.replacements.insert(id, value);
+            self.replacements.set_cell(id, value);
         }
         Ok(())
     }
@@ -440,6 +478,27 @@ impl Document {
             PieceSource::Add => Ok(self.add_slice(offset, len as u64).to_vec()),
         }
     }
+}
+
+fn push_span(spans: &mut Vec<(u64, Vec<u8>)>, offset: u64, bytes: Vec<u8>) {
+    if bytes.is_empty() {
+        return;
+    }
+    if let Some((start, existing)) = spans.last_mut() {
+        if *start + existing.len() as u64 == offset {
+            existing.extend_from_slice(&bytes);
+            return;
+        }
+    }
+    spans.push((offset, bytes));
+}
+
+fn merge_spans(spans: Vec<(u64, Vec<u8>)>) -> Vec<(u64, Vec<u8>)> {
+    let mut merged: Vec<(u64, Vec<u8>)> = Vec::new();
+    for (offset, bytes) in spans {
+        push_span(&mut merged, offset, bytes);
+    }
+    merged
 }
 
 #[cfg(test)]
@@ -526,7 +585,7 @@ mod tests {
         assert_eq!(doc.byte_at(0).unwrap(), ByteSlot::Present(0xaa));
         assert_eq!(doc.byte_at(1).unwrap(), ByteSlot::Present(0xbb));
         assert_eq!(doc.byte_at(3).unwrap(), ByteSlot::Present(0xcc));
-        assert_eq!(doc.replacement_spans(), spans);
+        assert_eq!(doc.replacement_spans().unwrap(), spans);
 
         // Out-of-bounds spans are rejected without changing length.
         assert!(matches!(
@@ -534,5 +593,92 @@ mod tests {
             Err(HxError::OffsetOutOfRange)
         ));
         assert_eq!(doc.len(), 4);
+    }
+
+    #[test]
+    fn pattern_overlay_supports_sparse_clears_and_span_export() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1000-0x1006"),
+            vec![0, 1, 2, 3, 4, 5],
+            &config,
+        );
+
+        let stats = doc
+            .overwrite_run_pattern_overlay(1, 4, &[0xaa, 0xbb])
+            .unwrap();
+        assert_eq!(stats.visited, 4);
+        assert_eq!(stats.changed, 4);
+        assert_eq!(
+            doc.logical_bytes(0, 5).unwrap(),
+            vec![0, 0xaa, 0xbb, 0xaa, 0xbb, 5]
+        );
+        assert_eq!(doc.replacement_dirty_bytes(), 4);
+
+        doc.replace_display_byte(2, 2).unwrap();
+        assert_eq!(doc.byte_at(2).unwrap(), ByteSlot::Present(2));
+        assert_eq!(doc.replacement_dirty_bytes(), 3);
+        assert_eq!(
+            doc.replacement_spans().unwrap(),
+            vec![(1, vec![0xaa]), (3, vec![0xaa, 0xbb])]
+        );
+
+        doc.clear_replacements_in_display_range(3, 1).unwrap();
+        assert_eq!(
+            doc.logical_bytes(0, 5).unwrap(),
+            vec![0, 0xaa, 2, 3, 0xbb, 5]
+        );
+        assert_eq!(doc.replacement_dirty_bytes(), 2);
+        assert_eq!(
+            doc.replacement_spans().unwrap(),
+            vec![(1, vec![0xaa]), (4, vec![0xbb])]
+        );
+    }
+
+    #[test]
+    fn pattern_overlay_treats_full_run_as_changed_even_when_bytes_match() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1000-0x1004"),
+            vec![0xaa, 0xbb, 0xaa, 0xbb],
+            &config,
+        );
+
+        let stats = doc
+            .overwrite_run_pattern_overlay(0, 4, &[0xaa, 0xbb])
+            .unwrap();
+
+        assert_eq!(stats.visited, 4);
+        assert_eq!(stats.changed, 4);
+        assert!(doc.is_dirty());
+        assert_eq!(doc.replacement_dirty_bytes(), 4);
+        assert_eq!(
+            doc.replacement_spans().unwrap(),
+            vec![(0, vec![0xaa, 0xbb, 0xaa, 0xbb])]
+        );
+    }
+
+    #[test]
+    fn xor_overlay_applies_without_expanding_replacements() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1000-0x1004"),
+            vec![0x00, 0xff, 0xaa, 0x55],
+            &config,
+        );
+
+        let stats = doc.xor_visible_range_overlay(0, 3, 0xff).unwrap();
+
+        assert_eq!(stats.visited, 4);
+        assert_eq!(stats.changed, 4);
+        assert_eq!(
+            doc.logical_bytes(0, 3).unwrap(),
+            vec![0xff, 0x00, 0x55, 0xaa]
+        );
+        assert_eq!(doc.replacement_dirty_bytes(), 4);
+        assert_eq!(
+            doc.replacement_spans().unwrap(),
+            vec![(0, vec![0xff, 0x00, 0x55, 0xaa])]
+        );
     }
 }

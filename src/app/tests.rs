@@ -1560,6 +1560,31 @@ fn fill_clean_range_uses_bulk_undo() {
 }
 
 #[test]
+fn fill_matching_pattern_still_pushes_undo_and_marks_dirty() {
+    let mut app = app_with_bytes(&[0xaa, 0xbb, 0xaa, 0xbb]);
+
+    app.execute_command(Command::Fill {
+        pattern: vec![0xaa, 0xbb],
+        len: 4,
+    })
+    .unwrap();
+
+    assert_eq!(app.undo_stack.len(), 1);
+    assert!(app.document.is_dirty());
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0xaa, 0xbb, 0xaa, 0xbb]
+    );
+
+    app.undo(1, true).unwrap();
+    assert!(!app.document.is_dirty());
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0xaa, 0xbb, 0xaa, 0xbb]
+    );
+}
+
+#[test]
 fn fill_existing_replacement_keeps_per_byte_undo() {
     let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
     app.cursor = 1;
@@ -3514,7 +3539,10 @@ fn mem_per_region_edits_survive_region_switch() {
     app.memory_runtime_mut().unwrap().selected_region = 0;
     app.open_selected_memory_region().unwrap();
     assert_eq!(app.memory_runtime().unwrap().opened_region, 0);
-    assert_eq!(app.document.replacement_spans(), vec![(1, vec![0xaa])]);
+    assert_eq!(
+        app.document.replacement_spans().unwrap(),
+        vec![(1, vec![0xaa])]
+    );
     assert!(app.document.is_dirty());
 }
 

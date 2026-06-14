@@ -65,11 +65,9 @@ impl App {
             .replacement_range_is_pristine(cursor_before, applied);
 
         let (written, changed_count, ops) = if use_bulk_undo {
-            let stats = self.document.overwrite_run_positional_compact(
-                cursor_before,
-                run_len,
-                |run_index| pattern[(run_index % pattern_len) as usize],
-            )?;
+            let stats =
+                self.document
+                    .overwrite_run_pattern_overlay(cursor_before, run_len, pattern)?;
             let ops = if stats.changed == 0 {
                 Vec::new()
             } else {
@@ -268,9 +266,7 @@ impl App {
                 .document
                 .replacement_range_is_pristine(start, range_len);
         let (visible_count, changed_count, ops) = if use_bulk_undo {
-            let stats =
-                self.document
-                    .transform_visible_range_in_place_compact(start, end, |byte| byte ^ key)?;
+            let stats = self.document.xor_visible_range_overlay(start, end, key)?;
             let ops = if stats.changed == 0 {
                 Vec::new()
             } else {
@@ -485,9 +481,9 @@ impl App {
                 if self.document.is_tombstone(id) {
                     return Err(HxError::OffsetOutOfRange);
                 }
-                let before = self.document.replacement_state(id);
+                let before = self.document.replacement_state(id)?;
                 self.document.replace_display_byte_by_id(id, byte)?;
-                let after = self.document.replacement_state(id);
+                let after = self.document.replacement_state(id)?;
                 if after != before {
                     changes.push(ReplacementChange { id, before, after });
                 }

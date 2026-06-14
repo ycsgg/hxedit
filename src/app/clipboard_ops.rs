@@ -254,9 +254,9 @@ impl App {
             if self.document.is_tombstone(id) {
                 return Err(HxError::OffsetOutOfRange);
             }
-            let previous = self.document.replacement_state(id);
+            let previous = self.document.replacement_state(id)?;
             self.document.replace_display_byte_by_id(id, byte)?;
-            let after = self.document.replacement_state(id);
+            let after = self.document.replacement_state(id)?;
             if after != previous {
                 ops.push(crate::app::ReplacementChange {
                     id,

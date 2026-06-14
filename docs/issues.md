@@ -102,9 +102,13 @@
 
 ## Performance / Maintenance
 
-- [ ] **[P1] 大范围 replacement 需要从按字节存储升级为区间 overlay**
-  - 现状：`:fill` / `:zero` / `:xor!` 等路径已按 chunk 流式写入；clean range 的 fill/zero/xor undo 已有 compact bulk op，但 `Document.replacements` 仍按 `CellId -> u8` 展开，dirty range / `:re` 等路径仍会退回 per-byte undo；随机大文件上执行 GB 级 replacement 仍可能把内存耗尽
-  - 建议：引入 `ReplacementStore`，支持按稳定 `CellId` 范围挂载 `SetPattern` / `SetBytes` / `TransformXor` 等 overlay layer；undo/redo 通过挂载/移除 layer 保持 replacement 语义，不退化成 real delete / insert
+- [ ] **[P1] `:re` / dirty range replacement 仍需避免 per-byte 展开**
+  - 现状：clean range 的 `:fill` / `:zero` / `:xor!` 已经走 `ReplacementStore` 稳定 `CellId` range overlay，undo/redo 通过 compact bulk op 清除/重放 pattern 或 xor，不再按字节写入 replacement；但已有 replacement/tombstone 的 dirty range 仍退回 per-byte undo，同长 `:re` 也仍按匹配逐字节写 replacement
+  - 建议：继续扩展 `ReplacementStore` 的分段 overlay 能力，优先覆盖同长 `:re` 的批量 `SetBytes/SetPattern` 场景；dirty range 需要能正确保留已有 sparse override / clear hole，不能为了省内存破坏 replacement-only 语义
+
+- [ ] **[P1] memory replacement spans 仍会展开 range overlay**
+  - 现状：文件 save / export 走 walker 流式消费 overlay，RSS 保持低；但 memory 模式的 `replacement_spans()` 会把 range overlay 展开成 `Vec<(offset, Vec<u8>)>`，用于 `:mem commit`、`:mem commit-all` 与 region switch stash。当前 256MB overlay span 峰值约 275MB RSS，1GB region 在 1C1G 环境有 OOM 风险
+  - 建议：active region commit 先改为 streaming span visitor，避免提交时一次性物化；region switch / stashed region 需要单独设计 snapshot 语义，不能简单保存 XOR/pattern overlay 后再基于之后的 live bytes 重算
 
 - [ ] **[P1] `:re` / `:re!` 需要批量 match job，避免一次性收集全量匹配**
   - 现状：replace 会先收集全部 match offset；低熵大文件上小 needle 可能产生海量 match，提前 OOM，且无进度/取消
@@ -121,7 +125,7 @@
 - [ ] **[P2] `:s` 大文件搜索后台 job + 进度/取消（阶段二，待办，按需）**
   - 已完成（阶段一）：clean 文档扫描换成 `memchr::memmem::find` / `rfind`（`search_clean_forward` / `_backward`），按 chunk + `pattern.len()-1` overlap 续接。256MB worst-case 从 ~307ms 降到 ~53ms，卡顿拐点从 ~256MB 推到 ~2GB
   - 已完成（选项 B）：dirty 文档不再整篇退回逐字节 KMP——`walk_visible_cells` / `_reverse` 逐 chunk 判定脏净，clean chunk 走 `scan_clean_chunk_forward` / `_backward`（memmem + 首尾 `P-1` 字节 KMP 衔接），只有含 tombstone / replacement 的 chunk 才逐 cell。256MB + 单 tombstone worst-case 从 ~333ms 降到 ~38ms（~8×），消除"GB 文件改几字节就退回 KMP"的退化
-  - 阶段二（降级为按需）：评测显示换 memmem 后 I/O 成主导（1GB ~120ms 热缓存），主流场景已无明显卡顿；完整后台 job（`std::thread + mpsc + Arc<AtomicBool>`、进度、`Esc` 取消）只为多 GB / 冷盘 / 编辑极密集场景，待出现真实诉求再做
+  - 阶段二（降级为按需）：评测显示 clean / sparse-dirty 换 memmem 后 I/O 成主导，主流场景已无明显卡顿；但 dense range overlay 会让每个 chunk 都走 dirty replacement 计算，当前 1GB overlay miss 约 4.7s、RSS 约 6.5MB。完整后台 job（`std::thread + mpsc + Arc<AtomicBool>`、进度、`Esc` 取消）或 range-aware search（例如 XOR overlay 把 needle 反变换后走 memmem）仍需按真实诉求推进
   - 同步项（阶段二）：搜索测试补 cancel / progress 覆盖；hint / README 说明搜索可中断
 
 - [ ] **[P2] crates.io 发布仍缺少 CI/CD 自动化**

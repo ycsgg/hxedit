@@ -641,7 +641,13 @@ impl App {
         let Some(opened) = self.memory_runtime.as_ref().map(|r| r.opened_region) else {
             return;
         };
-        let spans = self.document.replacement_spans();
+        let spans = match self.document.replacement_spans() {
+            Ok(spans) => spans,
+            Err(err) => {
+                self.set_error_status(err.to_string());
+                return;
+            }
+        };
         let undo = std::mem::take(&mut self.undo_stack);
         let redo = std::mem::take(&mut self.redo_stack);
         let cursor = self.cursor;
@@ -741,7 +747,7 @@ impl App {
             self.open_memory_panel("memory commit requires an active memory document");
             return Ok(());
         }
-        let spans = self.document.replacement_spans();
+        let spans = self.document.replacement_spans()?;
         if spans.is_empty() {
             self.open_memory_panel("memory document has no pending replacements");
             return Ok(());
@@ -831,7 +837,7 @@ impl App {
             .expect("checked above")
             .opened_region;
         let opened_spans = if self.document.is_fixed_size() {
-            self.document.replacement_spans()
+            self.document.replacement_spans()?
         } else {
             Vec::new()
         };
@@ -989,12 +995,7 @@ impl App {
             }
         }
         if self.document.is_fixed_size() {
-            let opened_bytes = self
-                .document
-                .replacement_spans()
-                .iter()
-                .map(|(_, b)| b.len())
-                .sum::<usize>();
+            let opened_bytes = self.document.replacement_dirty_bytes();
             if opened_bytes > 0 {
                 regions += 1;
                 bytes += opened_bytes;
@@ -1015,11 +1016,7 @@ impl App {
             return 0;
         };
         if index == runtime.opened_region && self.document.is_fixed_size() {
-            self.document
-                .replacement_spans()
-                .iter()
-                .map(|(_, b)| b.len())
-                .sum()
+            self.document.replacement_dirty_bytes()
         } else {
             runtime
                 .region_edits

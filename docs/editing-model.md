@@ -20,12 +20,12 @@ byte 级数据模型是 hxedit 的核心。改代码前先确定你操作的是�
 - 保留 display slot
 - save 时跳过
 
-### C. Replacement / `replacements: BTreeMap<CellId, u8>`
+### C. Replacement / `ReplacementStore`
 
 - 管 overwrite / nibble edit / inspector field edit
-- 只覆盖某个 `CellId` 的显示值
+- 只覆盖稳定 `CellId` 的显示值；大范围 clean `:fill` / `:zero` / `:xor!` 可挂载稳定 `CellId` range overlay，避免按字节展开
 - 不改变 piece 布局
-- 大范围 clean replacement 可使用 compact bulk undo op 记录“清除原 replacement / 重放 pattern 或 xor”，但当前实际 replacement 存储仍是 per-cell `BTreeMap`
+- compact bulk undo op 记录“清除原 replacement / 重放 pattern 或 xor”；dirty range / `:re` 仍可退回 per-byte replacement
 
 改代码时先确定你操作的是哪一类，不要“顺手写成另一种”。
 

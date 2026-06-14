@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::core::document::Document;
 use crate::core::piece_table::CellId;
 use crate::error::{HxError, HxResult};
@@ -21,8 +23,9 @@ pub struct CompactReplacementStats {
 impl Document {
     /// Get the current replacement value for a cell (used by undo to snapshot
     /// the "before" state).
-    pub fn replacement_state(&self, id: CellId) -> Option<u8> {
-        self.replacements.get(&id).copied()
+    pub fn replacement_state(&mut self, id: CellId) -> HxResult<Option<u8>> {
+        let base = self.base_byte(id)?;
+        Ok(self.replacements.get(id, base))
     }
 
     /// Restore a replacement to its previous state (used by undo).
@@ -32,10 +35,10 @@ impl Document {
         }
         match previous {
             Some(value) => {
-                self.replacements.insert(id, value);
+                self.replacements.set_cell(id, value);
             }
             None => {
-                self.replacements.remove(&id);
+                self.replacements.clear_cell(id);
             }
         }
         Ok(())
@@ -211,9 +214,9 @@ impl Document {
                 }
                 visited += 1;
                 let updated = transform(cell.byte);
-                let before = document.replacement_state(cell.id);
+                let before = document.replacement_state(cell.id)?;
                 document.set_display_byte_by_id(cell.id, updated)?;
-                let after = document.replacement_state(cell.id);
+                let after = document.replacement_state(cell.id)?;
                 if after != before {
                     changes.push((cell.id, before, after));
                 }
@@ -260,9 +263,9 @@ impl Document {
                     }
                     stats.visited += 1;
                     let updated = transform(cell.byte);
-                    let before = document.replacement_state(cell.id);
+                    let before = document.replacement_state(cell.id)?;
                     document.set_display_byte_by_id(cell.id, updated)?;
-                    let after = document.replacement_state(cell.id);
+                    let after = document.replacement_state(cell.id)?;
                     if after != before {
                         stats.changed += 1;
                     }
@@ -270,6 +273,59 @@ impl Document {
                 Ok(WalkControl::Continue)
             },
         )?;
+
+        Ok(stats)
+    }
+
+    /// Apply an XOR overlay over a clean display range without expanding one
+    /// replacement entry per byte. Callers must only use this when the range
+    /// has no existing tombstones/replacements.
+    pub fn xor_visible_range_overlay(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        key: u8,
+    ) -> HxResult<CompactReplacementStats> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let len = self.len();
+        if key == 0 || len == 0 || start > end_inclusive || start >= len {
+            return Ok(CompactReplacementStats {
+                visited: 0,
+                changed: 0,
+            });
+        }
+        let end = end_inclusive.min(len - 1) + 1;
+        let mut stats = CompactReplacementStats {
+            visited: 0,
+            changed: 0,
+        };
+
+        let pieces = self.pieces_snapshot();
+        let mut display_cursor = 0_u64;
+        for piece in pieces {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor + piece.len;
+            if piece_end <= start {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = start.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_start = piece.start + (overlap_start - display_cursor);
+                let range_len = overlap_end - overlap_start;
+                self.replacements
+                    .set_xor_range(piece.source, source_start, range_len, key);
+                stats.visited += range_len;
+                stats.changed += range_len;
+            }
+            display_cursor = piece_end;
+        }
 
         Ok(stats)
     }
@@ -309,9 +365,9 @@ impl Document {
                     return Err(HxError::OffsetOutOfRange);
                 }
                 let value = byte_at(written + i as u64);
-                let before = self.replacement_state(id);
+                let before = self.replacement_state(id)?;
                 self.set_display_byte_by_id(id, value)?;
-                let after = self.replacement_state(id);
+                let after = self.replacement_state(id)?;
                 if after != before {
                     changes.push((id, before, after));
                 }
@@ -358,14 +414,87 @@ impl Document {
                     return Err(HxError::OffsetOutOfRange);
                 }
                 let value = byte_at(stats.visited + i as u64);
-                let before = self.replacement_state(id);
+                let before = self.replacement_state(id)?;
                 self.set_display_byte_by_id(id, value)?;
-                let after = self.replacement_state(id);
+                let after = self.replacement_state(id)?;
                 if after != before {
                     stats.changed += 1;
                 }
             }
             stats.visited += batch;
+        }
+
+        Ok(stats)
+    }
+
+    /// Overwrite a display run with a repeating pattern using range overlays.
+    ///
+    /// This is the large clean-range fast path for `:fill` / `:zero`: the
+    /// command's overwrite intent marks every covered cell changed, so the
+    /// fast path can install one range per contiguous piece overlap without
+    /// scanning base bytes to detect no-op positions.
+    pub fn overwrite_run_pattern_overlay(
+        &mut self,
+        offset: u64,
+        run_len: u64,
+        pattern: &[u8],
+    ) -> HxResult<CompactReplacementStats> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let doc_len = self.len();
+        if pattern.is_empty() || run_len == 0 || offset >= doc_len {
+            return Ok(CompactReplacementStats {
+                visited: 0,
+                changed: 0,
+            });
+        }
+
+        let applied = run_len.min(doc_len - offset);
+        let end = offset + applied;
+        let pattern: Arc<[u8]> = Arc::from(pattern);
+        let pattern_len = pattern.len() as u64;
+        let mut stats = CompactReplacementStats {
+            visited: 0,
+            changed: 0,
+        };
+        let mut segments = Vec::new();
+
+        let pieces = self.pieces_snapshot();
+        let mut display_cursor = 0_u64;
+        for piece in pieces {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor + piece.len;
+            if piece_end <= offset {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = offset.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_start = piece.start + (overlap_start - display_cursor);
+                let range_len = overlap_end - overlap_start;
+                let phase = (overlap_start - offset) % pattern_len;
+                stats.visited += range_len;
+                stats.changed += range_len;
+                segments.push((piece.source, source_start, range_len, phase));
+            }
+            display_cursor = piece_end;
+        }
+
+        if stats.visited > 0 {
+            for (source, source_start, range_len, phase) in segments {
+                self.replacements.set_pattern_range(
+                    source,
+                    source_start,
+                    range_len,
+                    Arc::clone(&pattern),
+                    phase,
+                );
+            }
         }
 
         Ok(stats)
@@ -388,10 +517,36 @@ impl Document {
         let mut cleared = 0_u64;
         while cleared < len {
             let batch = (len - cleared).min(REPLACEMENT_CHUNK);
-            for id in self.cell_ids_range(offset + cleared, batch) {
-                self.replacements.remove(&id);
-            }
+            self.clear_replacement_display_subrange(offset + cleared, batch)?;
             cleared += batch;
+        }
+        Ok(())
+    }
+
+    fn clear_replacement_display_subrange(&mut self, offset: u64, len: u64) -> HxResult<()> {
+        let end = offset + len;
+        let pieces = self.pieces_snapshot();
+        let mut display_cursor = 0_u64;
+        for piece in pieces {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor + piece.len;
+            if piece_end <= offset {
+                display_cursor = piece_end;
+                continue;
+            }
+            let overlap_start = offset.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_start = piece.start + (overlap_start - display_cursor);
+                self.replacements.clear_source_range(
+                    piece.source,
+                    source_start,
+                    overlap_end - overlap_start,
+                );
+            }
+            display_cursor = piece_end;
         }
         Ok(())
     }

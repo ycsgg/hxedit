@@ -179,22 +179,16 @@ impl App {
                         "bulk replacement pattern must not be empty".to_owned(),
                     ));
                 }
-                let pattern_len = pattern.len() as u64;
                 self.document
-                    .overwrite_run_positional_compact(offset, len, |index| {
-                        pattern[(index % pattern_len) as usize]
-                    })?;
+                    .overwrite_run_pattern_overlay(offset, len, pattern)?;
                 Ok(())
             }
             BulkReplacement::Xor { key } => {
                 if len == 0 {
                     return Ok(());
                 }
-                self.document.transform_visible_range_in_place_compact(
-                    offset,
-                    offset + len - 1,
-                    |byte| byte ^ key,
-                )?;
+                self.document
+                    .xor_visible_range_overlay(offset, offset + len - 1, *key)?;
                 Ok(())
             }
         }

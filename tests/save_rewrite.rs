@@ -53,6 +53,19 @@ fn save_rewrite_survives_ranges_larger_than_page_cache_capacity() {
     assert_eq!(fs::read(&file).unwrap(), expected);
 }
 
+#[test]
+fn save_rewrites_range_overlay_replacements() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("overlay.bin");
+    fs::write(&file, b"0123456789").unwrap();
+
+    let mut doc = Document::open(&file, &Config::default()).unwrap();
+    doc.overwrite_run_pattern_overlay(2, 5, b"ab").unwrap();
+    doc.save(None).unwrap();
+
+    assert_eq!(fs::read(&file).unwrap(), b"01ababa789");
+}
+
 #[cfg(unix)]
 #[test]
 fn save_rewrite_preserves_existing_permission_bits() {
