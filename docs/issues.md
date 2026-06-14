@@ -103,7 +103,7 @@
 ## Performance / Maintenance
 
 - [ ] **[P1] 大范围 replacement 需要从按字节存储升级为区间 overlay**
-  - 现状：`:fill` / `:zero` / `:xor!` 等路径已按 chunk 流式写入，但 `Document.replacements` 与 undo 仍按 `CellId -> u8` / per-byte change 展开；随机大文件上执行 GB 级 replacement 会把内存耗尽
+  - 现状：`:fill` / `:zero` / `:xor!` 等路径已按 chunk 流式写入；clean range 的 fill/zero/xor undo 已有 compact bulk op，但 `Document.replacements` 仍按 `CellId -> u8` 展开，dirty range / `:re` 等路径仍会退回 per-byte undo；随机大文件上执行 GB 级 replacement 仍可能把内存耗尽
   - 建议：引入 `ReplacementStore`，支持按稳定 `CellId` 范围挂载 `SetPattern` / `SetBytes` / `TransformXor` 等 overlay layer；undo/redo 通过挂载/移除 layer 保持 replacement 语义，不退化成 real delete / insert
 
 - [ ] **[P1] `:re` / `:re!` 需要批量 match job，避免一次性收集全量匹配**

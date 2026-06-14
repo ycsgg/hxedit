@@ -54,31 +54,60 @@ impl App {
         }
         let cursor_before = self.cursor;
         let pattern_len = pattern.len() as u64;
-        let (written, changes) =
-            self.document
-                .overwrite_run_positional(cursor_before, run_len, |run_index| {
-                    pattern[(run_index % pattern_len) as usize]
-                })?;
+        let doc_len = self.document.len();
+        let applied = if cursor_before >= doc_len {
+            0
+        } else {
+            run_len.min(doc_len - cursor_before)
+        };
+        let use_bulk_undo = self
+            .document
+            .replacement_range_is_pristine(cursor_before, applied);
+
+        let (written, changed_count, ops) = if use_bulk_undo {
+            let stats = self.document.overwrite_run_positional_compact(
+                cursor_before,
+                run_len,
+                |run_index| pattern[(run_index % pattern_len) as usize],
+            )?;
+            let ops = if stats.changed == 0 {
+                Vec::new()
+            } else {
+                vec![EditOp::ReplaceBulk {
+                    offset: cursor_before,
+                    len: stats.visited,
+                    before: BulkReplacement::Clear,
+                    after: BulkReplacement::Pattern(pattern.to_vec()),
+                }]
+            };
+            (stats.visited, stats.changed as usize, ops)
+        } else {
+            let (written, changes) =
+                self.document
+                    .overwrite_run_positional(cursor_before, run_len, |run_index| {
+                        pattern[(run_index % pattern_len) as usize]
+                    })?;
+            let changes: Vec<ReplacementChange> = changes
+                .into_iter()
+                .map(|(id, before, after)| ReplacementChange { id, before, after })
+                .collect();
+            let changed_count = changes.len();
+            let ops = if changes.is_empty() {
+                Vec::new()
+            } else {
+                vec![EditOp::ReplaceBytes { changes }]
+            };
+            (written, changed_count, ops)
+        };
 
         if written == 0 {
             return Ok(0);
         }
 
-        let changes: Vec<ReplacementChange> = changes
-            .into_iter()
-            .map(|(id, before, after)| ReplacementChange { id, before, after })
-            .collect();
-
         let cursor_after =
             self.clamp_cursor_for_mode(cursor_before + written.saturating_sub(1), self.mode);
-        if !changes.is_empty() {
-            self.push_undo_step(
-                vec![EditOp::ReplaceBytes { changes }],
-                cursor_before,
-                self.mode,
-                cursor_after,
-                self.mode,
-            );
+        if changed_count > 0 {
+            self.push_undo_step(ops, cursor_before, self.mode, cursor_after, self.mode);
         }
         self.cursor = cursor_after;
         self.invalidate_disassembly_cache();
@@ -233,17 +262,46 @@ impl App {
         let mode_before = self.mode;
         // Stream the selection in 64 KB chunks: read → xor → write back as a
         // replacement, never materializing the whole logical range.
-        let (visible_count, raw_changes) =
-            self.document
-                .transform_visible_range_in_place(start, end, |byte| byte ^ key)?;
+        let range_len = end.saturating_sub(start).saturating_add(1);
+        let use_bulk_undo = key != 0
+            && self
+                .document
+                .replacement_range_is_pristine(start, range_len);
+        let (visible_count, changed_count, ops) = if use_bulk_undo {
+            let stats =
+                self.document
+                    .transform_visible_range_in_place_compact(start, end, |byte| byte ^ key)?;
+            let ops = if stats.changed == 0 {
+                Vec::new()
+            } else {
+                vec![EditOp::ReplaceBulk {
+                    offset: start,
+                    len: stats.visited,
+                    before: BulkReplacement::Clear,
+                    after: BulkReplacement::Xor { key },
+                }]
+            };
+            (stats.visited, stats.changed as usize, ops)
+        } else {
+            let (visible_count, raw_changes) =
+                self.document
+                    .transform_visible_range_in_place(start, end, |byte| byte ^ key)?;
+            let changes: Vec<ReplacementChange> = raw_changes
+                .into_iter()
+                .map(|(id, before, after)| ReplacementChange { id, before, after })
+                .collect();
+            let changed_count = changes.len();
+            let ops = if changes.is_empty() {
+                Vec::new()
+            } else {
+                vec![EditOp::ReplaceBytes { changes }]
+            };
+            (visible_count, changed_count, ops)
+        };
         if visible_count == 0 {
             self.set_info_status("xor!: no logical bytes in selection");
             return Ok(());
         }
-        let changes: Vec<ReplacementChange> = raw_changes
-            .into_iter()
-            .map(|(id, before, after)| ReplacementChange { id, before, after })
-            .collect();
         let visual_selection = self.selection_range();
         let inspector_selection = visual_selection.is_none()
             && self.active_side_panel == SidePanelKind::Inspector
@@ -268,8 +326,6 @@ impl App {
         let cursor_after = self.clamp_cursor_for_mode(start, mode_after);
         self.cursor = cursor_after;
 
-        let changed_count = changes.len();
-
         if changed_count > 0 {
             self.invalidate_disassembly_cache();
         }
@@ -280,13 +336,7 @@ impl App {
         }
         let cursor_after = self.cursor;
         if changed_count > 0 {
-            self.push_undo_step(
-                vec![EditOp::ReplaceBytes { changes }],
-                cursor_before,
-                mode_before,
-                cursor_after,
-                mode_after,
-            );
+            self.push_undo_step(ops, cursor_before, mode_before, cursor_after, mode_after);
         }
 
         if changed_count == 0 {

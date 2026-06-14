@@ -25,6 +25,7 @@ byte 级数据模型是 hxedit 的核心。改代码前先确定你操作的是�
 - 管 overwrite / nibble edit / inspector field edit
 - 只覆盖某个 `CellId` 的显示值
 - 不改变 piece 布局
+- 大范围 clean replacement 可使用 compact bulk undo op 记录“清除原 replacement / 重放 pattern 或 xor”，但当前实际 replacement 存储仍是 per-cell `BTreeMap`
 
 改代码时先确定你操作的是哪一类，不要“顺手写成另一种”。
 

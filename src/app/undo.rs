@@ -1,4 +1,4 @@
-use crate::app::{App, EditOp, UndoStep};
+use crate::app::{App, BulkReplacement, EditOp, UndoStep};
 use crate::error::HxResult;
 use crate::mode::Mode;
 
@@ -118,6 +118,9 @@ impl App {
                     self.document.restore_replacement(change.id, change.after)?;
                 }
             }
+            EditOp::ReplaceBulk {
+                offset, len, after, ..
+            } => self.apply_bulk_replacement(*offset, *len, after)?,
         }
         Ok(())
     }
@@ -140,8 +143,61 @@ impl App {
                         .restore_replacement(change.id, change.before)?;
                 }
             }
+            EditOp::ReplaceBulk {
+                offset,
+                len,
+                before,
+                ..
+            } => self.apply_bulk_replacement(*offset, *len, before)?,
         }
         Ok(())
+    }
+
+    fn apply_bulk_replacement(
+        &mut self,
+        offset: u64,
+        len: u64,
+        replacement: &BulkReplacement,
+    ) -> HxResult<()> {
+        let end = offset
+            .checked_add(len)
+            .ok_or(crate::error::HxError::OffsetOutOfRange)?;
+        if end > self.document.len() {
+            return Err(crate::error::HxError::OffsetOutOfRange);
+        }
+
+        match replacement {
+            BulkReplacement::Clear => self
+                .document
+                .clear_replacements_in_display_range(offset, len),
+            BulkReplacement::Pattern(pattern) => {
+                if len == 0 {
+                    return Ok(());
+                }
+                if pattern.is_empty() {
+                    return Err(crate::error::HxError::CommandError(
+                        "bulk replacement pattern must not be empty".to_owned(),
+                    ));
+                }
+                let pattern_len = pattern.len() as u64;
+                self.document
+                    .overwrite_run_positional_compact(offset, len, |index| {
+                        pattern[(index % pattern_len) as usize]
+                    })?;
+                Ok(())
+            }
+            BulkReplacement::Xor { key } => {
+                if len == 0 {
+                    return Ok(());
+                }
+                self.document.transform_visible_range_in_place_compact(
+                    offset,
+                    offset + len - 1,
+                    |byte| byte ^ key,
+                )?;
+                Ok(())
+            }
+        }
     }
 
     fn set_undo_status(&mut self, undone: usize) {
@@ -190,5 +246,8 @@ fn edit_op_has_effect(op: &EditOp) -> bool {
         EditOp::ReplaceBytes { changes } => {
             changes.iter().any(|change| change.before != change.after)
         }
+        EditOp::ReplaceBulk {
+            len, before, after, ..
+        } => *len > 0 && before != after,
     }
 }

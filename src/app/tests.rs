@@ -9,7 +9,7 @@ use std::io::{Seek, SeekFrom, Write};
 use tempfile::tempdir;
 
 use crate::action::Action;
-use crate::app::{App, SearchDirection, StatusLevel};
+use crate::app::{App, BulkReplacement, EditOp, SearchDirection, StatusLevel};
 use crate::cli::Cli;
 use crate::clipboard::test_clipboard_text;
 use crate::commands::types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm};
@@ -1525,6 +1525,63 @@ fn fill_command_repeats_pattern_with_undo() {
 }
 
 #[test]
+fn fill_clean_range_uses_bulk_undo() {
+    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13, 0x14]);
+    app.cursor = 1;
+
+    app.execute_command(Command::Fill {
+        pattern: vec![0xaa, 0xbb],
+        len: 3,
+    })
+    .unwrap();
+
+    let step = app.undo_stack.last().expect("fill should push undo");
+    assert_eq!(step.ops.len(), 1);
+    assert!(matches!(
+        &step.ops[0],
+        EditOp::ReplaceBulk {
+            offset: 1,
+            len: 3,
+            before: BulkReplacement::Clear,
+            after: BulkReplacement::Pattern(pattern),
+        } if pattern == &vec![0xaa, 0xbb]
+    ));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 4).unwrap(),
+        vec![0x10, 0x11, 0x12, 0x13, 0x14]
+    );
+    app.redo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 4).unwrap(),
+        vec![0x10, 0xaa, 0xbb, 0xaa, 0x14]
+    );
+}
+
+#[test]
+fn fill_existing_replacement_keeps_per_byte_undo() {
+    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
+    app.cursor = 1;
+    app.document.replace_display_byte(1, 0xab).unwrap();
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
+
+    app.cursor = 0;
+    app.execute_command(Command::Fill {
+        pattern: vec![0xff],
+        len: 3,
+    })
+    .unwrap();
+
+    let step = app.undo_stack.last().expect("fill should push undo");
+    assert!(matches!(&step.ops[0], EditOp::ReplaceBytes { .. }));
+    app.undo(1, true).unwrap();
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x10));
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
+    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
+}
+
+#[test]
 fn export_command_writes_logical_selection() {
     // From visual selection
     let mut app = app_with_bytes(b"abcd");
@@ -1643,6 +1700,42 @@ fn xor_bang_replaces_selection_in_place_with_undo() {
     assert_eq!(
         app.document.logical_bytes(0, 3).unwrap(),
         vec![0x0f, 0xf0, 0xaa, 0x55]
+    );
+}
+
+#[test]
+fn xor_bang_clean_range_uses_bulk_undo() {
+    let mut app = app_with_bytes(&[0x0f, 0xf0, 0xaa, 0x55]);
+    app.toggle_visual();
+    app.move_horizontal(2);
+
+    app.execute_command(Command::Xor {
+        key: 0xff,
+        in_place: true,
+    })
+    .unwrap();
+
+    let step = app.undo_stack.last().expect("xor! should push undo");
+    assert_eq!(step.ops.len(), 1);
+    assert!(matches!(
+        step.ops[0],
+        EditOp::ReplaceBulk {
+            offset: 0,
+            len: 3,
+            before: BulkReplacement::Clear,
+            after: BulkReplacement::Xor { key: 0xff },
+        }
+    ));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0x0f, 0xf0, 0xaa, 0x55]
+    );
+    app.redo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0xf0, 0x0f, 0x55, 0x55]
     );
 }
 
@@ -2289,6 +2382,27 @@ fn sagitta_validity_tracks_replacement_vs_layout_edits() {
     app.apply_paste_overwrite(&[0xff]).unwrap();
     assert_eq!(
         app.analysis_state.as_ref().unwrap().validity,
+        super::analysis_state::AnalysisValidity::OutdatedBytes
+    );
+
+    let mut bulk = app_with_bytes(&[0, 1, 2, 3]);
+    bulk.analysis_state = Some(super::analysis_state::SagittaAnalysisState {
+        status: super::analysis_state::SagittaStatus::Ready,
+        validity: super::analysis_state::AnalysisValidity::Current,
+        revision: bulk.document_revision,
+        snapshot: Some(sagitta_test_snapshot_for(0, Some(0x100), "sub_0")),
+    });
+    bulk.execute_command(Command::Fill {
+        pattern: vec![0xff],
+        len: 2,
+    })
+    .unwrap();
+    assert!(matches!(
+        bulk.undo_stack.last().unwrap().ops[0],
+        EditOp::ReplaceBulk { .. }
+    ));
+    assert_eq!(
+        bulk.analysis_state.as_ref().unwrap().validity,
         super::analysis_state::AnalysisValidity::OutdatedBytes
     );
 

@@ -10,6 +10,14 @@ use super::walk::WalkControl;
 /// the streaming in-place transforms so callers can build an undo record.
 pub type ReplacementDelta = (CellId, Option<u8>, Option<u8>);
 
+const REPLACEMENT_CHUNK: u64 = 64 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompactReplacementStats {
+    pub visited: u64,
+    pub changed: u64,
+}
+
 impl Document {
     /// Get the current replacement value for a cell (used by undo to snapshot
     /// the "before" state).
@@ -31,6 +39,50 @@ impl Document {
             }
         }
         Ok(())
+    }
+
+    /// True when a display range contains no tombstones and no replacement
+    /// entries. Such ranges can use compact undo records whose "before" state
+    /// is represented as clearing replacements rather than storing one delta
+    /// per byte.
+    pub fn replacement_range_is_pristine(&self, offset: u64, len: u64) -> bool {
+        if len == 0 || offset >= self.len() {
+            return true;
+        }
+        let end = offset.saturating_add(len).min(self.len());
+        let has_tombstones = self.has_tombstones();
+        let has_replacements = self.has_replacements();
+        if !has_tombstones && !has_replacements {
+            return true;
+        }
+
+        let mut display_cursor = 0_u64;
+        for piece in self.pieces_snapshot() {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor.saturating_add(piece.len);
+            if piece_end <= offset {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = offset.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_offset = piece.start + (overlap_start - display_cursor);
+                let range_len = overlap_end - overlap_start;
+                let lo = CellId::from_source(piece.source, source_offset);
+                let hi = CellId::from_source(piece.source, source_offset + range_len - 1);
+                if (has_tombstones && self.has_tombstone_in_range(lo, hi))
+                    || (has_replacements && self.has_replacement_in_range(lo, hi))
+                {
+                    return false;
+                }
+            }
+            display_cursor = piece_end;
+        }
+        true
     }
 
     /// Tombstone-delete a byte (normal/visual mode). The cell keeps its
@@ -172,6 +224,56 @@ impl Document {
         Ok((visited, changes))
     }
 
+    /// Streaming in-place transform without retaining per-byte undo deltas.
+    ///
+    /// Callers should only pair this with a compact undo record when the
+    /// pre-edit range was checked with [`replacement_range_is_pristine`].
+    pub fn transform_visible_range_in_place_compact(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        mut transform: impl FnMut(u8) -> u8,
+    ) -> HxResult<CompactReplacementStats> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let len = self.len();
+        if len == 0 || start > end_inclusive || start >= len {
+            return Ok(CompactReplacementStats {
+                visited: 0,
+                changed: 0,
+            });
+        }
+
+        let mut stats = CompactReplacementStats {
+            visited: 0,
+            changed: 0,
+        };
+        self.walk_visible_cells(
+            start,
+            end_inclusive,
+            REPLACEMENT_CHUNK as usize,
+            |document, chunk| {
+                for cell in chunk.cells {
+                    if cell.deleted {
+                        continue;
+                    }
+                    stats.visited += 1;
+                    let updated = transform(cell.byte);
+                    let before = document.replacement_state(cell.id);
+                    document.set_display_byte_by_id(cell.id, updated)?;
+                    let after = document.replacement_state(cell.id);
+                    if after != before {
+                        stats.changed += 1;
+                    }
+                }
+                Ok(WalkControl::Continue)
+            },
+        )?;
+
+        Ok(stats)
+    }
+
     /// Overwrite a run of consecutive display cells starting at `offset`,
     /// generating each cell's new byte from its zero-based position in the run
     /// via `byte_at`. Streams cell resolution in 64 KB batches so a multi-GB
@@ -195,14 +297,12 @@ impl Document {
         if run_len == 0 || offset >= doc_len {
             return Ok((0, Vec::new()));
         }
-
-        const OVERWRITE_CHUNK: u64 = 64 * 1024;
         let applied = run_len.min(doc_len - offset);
         let mut changes = Vec::new();
         let mut written = 0_u64;
 
         while written < applied {
-            let batch = (applied - written).min(OVERWRITE_CHUNK);
+            let batch = (applied - written).min(REPLACEMENT_CHUNK);
             let ids = self.cell_ids_range(offset + written, batch);
             for (i, id) in ids.into_iter().enumerate() {
                 if self.is_tombstone(id) {
@@ -220,6 +320,80 @@ impl Document {
         }
 
         Ok((applied, changes))
+    }
+
+    /// Overwrite a display run without retaining per-byte undo deltas.
+    ///
+    /// Returns the number of cells written and the number of replacement states
+    /// that changed. Callers are responsible for recording a compact undo op
+    /// when appropriate.
+    pub fn overwrite_run_positional_compact(
+        &mut self,
+        offset: u64,
+        run_len: u64,
+        mut byte_at: impl FnMut(u64) -> u8,
+    ) -> HxResult<CompactReplacementStats> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let doc_len = self.len();
+        if run_len == 0 || offset >= doc_len {
+            return Ok(CompactReplacementStats {
+                visited: 0,
+                changed: 0,
+            });
+        }
+
+        let applied = run_len.min(doc_len - offset);
+        let mut stats = CompactReplacementStats {
+            visited: 0,
+            changed: 0,
+        };
+
+        while stats.visited < applied {
+            let batch = (applied - stats.visited).min(REPLACEMENT_CHUNK);
+            let ids = self.cell_ids_range(offset + stats.visited, batch);
+            for (i, id) in ids.into_iter().enumerate() {
+                if self.is_tombstone(id) {
+                    return Err(HxError::OffsetOutOfRange);
+                }
+                let value = byte_at(stats.visited + i as u64);
+                let before = self.replacement_state(id);
+                self.set_display_byte_by_id(id, value)?;
+                let after = self.replacement_state(id);
+                if after != before {
+                    stats.changed += 1;
+                }
+            }
+            stats.visited += batch;
+        }
+
+        Ok(stats)
+    }
+
+    /// Clear replacement entries in a display range without changing piece
+    /// layout or tombstones.
+    pub fn clear_replacements_in_display_range(&mut self, offset: u64, len: u64) -> HxResult<()> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        if len == 0 {
+            return Ok(());
+        }
+        let end = offset.checked_add(len).ok_or(HxError::OffsetOutOfRange)?;
+        if end > self.len() {
+            return Err(HxError::OffsetOutOfRange);
+        }
+
+        let mut cleared = 0_u64;
+        while cleared < len {
+            let batch = (len - cleared).min(REPLACEMENT_CHUNK);
+            for id in self.cell_ids_range(offset + cleared, batch) {
+                self.replacements.remove(&id);
+            }
+            cleared += batch;
+        }
+        Ok(())
     }
 
     /// Re-apply a set of `(offset, bytes)` replacement spans onto this

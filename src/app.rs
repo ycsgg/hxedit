@@ -252,6 +252,20 @@ pub(crate) struct ReplacementChange {
     pub(crate) after: Option<u8>,
 }
 
+/// Compact replacement state used by bulk undo records.
+///
+/// These variants intentionally describe replacement-only effects over a
+/// display range. They never insert, tombstone, or real-delete bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BulkReplacement {
+    /// No replacement entries are present in the range.
+    Clear,
+    /// Repeating overwrite pattern, starting at the first display cell.
+    Pattern(Vec<u8>),
+    /// XOR every visible byte in the range with the given key.
+    Xor { key: u8 },
+}
+
 /// A single reversible edit operation.
 ///
 /// Each variant stores enough information to undo itself:
@@ -259,12 +273,30 @@ pub(crate) struct ReplacementChange {
 /// - `RealDelete` — undo by re-inserting the saved `cells` at `offset`.
 /// - `TombstoneDelete` — undo by clearing the tombstones for `ids`.
 /// - `ReplaceBytes` — undo by restoring each cell's previous replacement.
+/// - `ReplaceBulk` — undo/redo by applying compact replacement recipes to a
+///   display range whose pre-edit replacement state was proven simple.
 #[derive(Debug, Clone)]
 pub(crate) enum EditOp {
-    Insert { offset: u64, cells: Vec<CellId> },
-    RealDelete { offset: u64, cells: Vec<CellId> },
-    TombstoneDelete { ids: Vec<CellId> },
-    ReplaceBytes { changes: Vec<ReplacementChange> },
+    Insert {
+        offset: u64,
+        cells: Vec<CellId>,
+    },
+    RealDelete {
+        offset: u64,
+        cells: Vec<CellId>,
+    },
+    TombstoneDelete {
+        ids: Vec<CellId>,
+    },
+    ReplaceBytes {
+        changes: Vec<ReplacementChange>,
+    },
+    ReplaceBulk {
+        offset: u64,
+        len: u64,
+        before: BulkReplacement,
+        after: BulkReplacement,
+    },
 }
 
 /// One entry on the undo stack: the cursor/mode before the edit, plus the
