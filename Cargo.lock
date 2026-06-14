@@ -536,6 +536,7 @@ dependencies = [
  "digest",
  "directories",
  "hexpatch-keystone",
+ "libc",
  "md-5",
  "memchr",
  "object",

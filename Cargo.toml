@@ -67,6 +67,7 @@ keystone-engine = { package = "hexpatch-keystone", version = "0.9.4", optional =
 sagitta-rs = { version = "0.0.2", optional = true }
 
 [dev-dependencies]
+libc = "0.2"
 pretty_assertions = "1.4"
 tempfile = "3.14"
 

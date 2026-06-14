@@ -183,6 +183,19 @@ impl App {
                     .overwrite_run_pattern_overlay(offset, len, pattern)?;
                 Ok(())
             }
+            BulkReplacement::Bytes(bytes) => {
+                if len == 0 {
+                    return Ok(());
+                }
+                if bytes.len() as u64 != len {
+                    return Err(crate::error::HxError::CommandError(
+                        "bulk replacement byte run length mismatch".to_owned(),
+                    ));
+                }
+                self.document
+                    .overwrite_run_bytes_overlay(offset, std::sync::Arc::clone(bytes))?;
+                Ok(())
+            }
             BulkReplacement::Xor { key } => {
                 if len == 0 {
                     return Ok(());

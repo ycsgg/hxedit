@@ -3,7 +3,8 @@
 //! Run with: `cargo bench --bench perf_bench`
 
 use std::fs;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{BufWriter, Seek, SeekFrom, Write};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use digest::Digest;
@@ -13,11 +14,20 @@ use hxedit::core::document::Document;
 use hxedit::core::file_view::FileView;
 use hxedit::diff::{find_mismatch_forward, find_mismatch_forward_step};
 use hxedit::format;
+use hxedit::mode::NibblePhase;
 use tempfile::tempdir;
 
 type BenchResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 type BenchFn = fn() -> BenchResult;
 type BenchEntry = (&'static str, BenchFn);
+
+const BENCH_CHILD_ENV: &str = "HXEDIT_BENCH_CHILD";
+const EDIT_FILE_SIZE: usize = 8 * 1024 * 1024;
+const EDIT_SINGLE_OPS: usize = 200_000;
+const EDIT_BULK_BYTES: usize = 1024 * 1024;
+const EDIT_LARGE_FILE_SIZE: usize = 32 * 1024 * 1024;
+const EDIT_LARGE_BULK_BYTES: usize = 16 * 1024 * 1024;
+const EDIT_PER_BYTE_LARGE_BYTES: usize = 4 * 1024 * 1024;
 
 fn bench_config() -> Config {
     Config {
@@ -31,13 +41,28 @@ fn patterned_data(size: usize) -> Vec<u8> {
     (0..size).map(|i| (i % 256) as u8).collect()
 }
 
+fn shifted_patterned_data(size: usize) -> Vec<u8> {
+    (0..size)
+        .map(|i| ((i % 256) as u8).wrapping_add(1))
+        .collect()
+}
+
 fn write_patterned_file(
     name: &str,
     size: usize,
 ) -> BenchResult<(tempfile::TempDir, std::path::PathBuf)> {
     let dir = tempdir()?;
     let path = dir.path().join(name);
-    fs::write(&path, patterned_data(size))?;
+    let file = fs::File::create(&path)?;
+    let mut writer = BufWriter::new(file);
+    let chunk = patterned_data((64 * 1024).min(size.max(1)));
+    let mut written = 0usize;
+    while written < size {
+        let take = (size - written).min(chunk.len());
+        writer.write_all(&chunk[..take])?;
+        written += take;
+    }
+    writer.flush()?;
     Ok((dir, path))
 }
 
@@ -65,6 +90,52 @@ fn print(label: &str, elapsed: Duration, unit_count: usize) {
     let ns = elapsed.as_nanos();
     let per = ns as f64 / unit_count.max(1) as f64;
     eprintln!("[bench] {label:<48} total {ns:>12} ns  per-op {per:>10.1} ns  (N={unit_count})");
+}
+
+#[cfg(unix)]
+fn peak_rss_bytes() -> Option<u64> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if rc != 0 {
+        return None;
+    }
+    let max_rss = unsafe { usage.assume_init().ru_maxrss };
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        Some(max_rss as u64)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    {
+        Some((max_rss as u64).saturating_mul(1024))
+    }
+}
+
+#[cfg(not(unix))]
+fn peak_rss_bytes() -> Option<u64> {
+    None
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0usize;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn print_peak_rss(label: &str) {
+    match peak_rss_bytes() {
+        Some(bytes) => eprintln!("[bench] {label:<48} peak-rss {}", format_bytes(bytes)),
+        None => eprintln!("[bench] {label:<48} peak-rss unavailable"),
+    }
 }
 
 fn make_hasher(algorithm: HashAlgorithm) -> Box<dyn digest::DynDigest> {
@@ -290,6 +361,238 @@ fn bench_paste_overwrite_bulk_path() -> BenchResult {
         let _ = doc.replace_display_byte_by_id(id, b);
     }
     print("paste overwrite 200k bytes (bulk path)", t.elapsed(), n);
+    Ok(())
+}
+
+fn bench_edit_mode_replace_nibbles() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-replace-nibbles.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    for i in 0..EDIT_SINGLE_OPS {
+        let offset = ((i * 37) % EDIT_FILE_SIZE) as u64;
+        doc.replace_nibble(offset, NibblePhase::High, (i as u8) & 0x0f)?;
+        doc.replace_nibble(offset, NibblePhase::Low, (i as u8).wrapping_add(1) & 0x0f)?;
+    }
+    let elapsed = t.elapsed();
+    assert!(doc.has_replacements());
+    print(
+        "edit mode replacement nibbles",
+        elapsed,
+        EDIT_SINGLE_OPS * 2,
+    );
+    Ok(())
+}
+
+fn bench_edit_mode_insert_nibbles() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-insert-nibbles.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = EDIT_SINGLE_OPS / 2;
+    let mut cursor = (EDIT_FILE_SIZE / 2) as u64;
+
+    let t = Instant::now();
+    for i in 0..bytes {
+        let high = (i as u8) & 0x0f;
+        let low = (i as u8).wrapping_add(1) & 0x0f;
+        doc.insert_byte(cursor, high << 4)?;
+        doc.replace_display_byte(cursor, (high << 4) | low)?;
+        cursor += 1;
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), (EDIT_FILE_SIZE + bytes) as u64);
+    print("insert mode nibble compose", elapsed, bytes * 2);
+    Ok(())
+}
+
+fn bench_edit_mode_pending_insert_backspace() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-pending-backspace.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let cursor = (EDIT_FILE_SIZE / 2) as u64;
+
+    let t = Instant::now();
+    for i in 0..EDIT_SINGLE_OPS {
+        doc.insert_byte(cursor, ((i as u8) & 0x0f) << 4)?;
+        let removed = doc.delete_range_real(cursor, 1)?;
+        assert_eq!(removed.len(), 1);
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), EDIT_FILE_SIZE as u64);
+    print(
+        "insert mode pending byte backspace",
+        elapsed,
+        EDIT_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_mode_backspace_real_delete() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-real-delete.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let inserted = patterned_data(EDIT_SINGLE_OPS);
+    let offset = (EDIT_FILE_SIZE / 2) as u64;
+    doc.insert_bytes(offset, &inserted)?;
+
+    let t = Instant::now();
+    for remaining in (1..=EDIT_SINGLE_OPS).rev() {
+        let removed = doc.delete_range_real(offset + remaining as u64 - 1, 1)?;
+        assert_eq!(removed.len(), 1);
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), EDIT_FILE_SIZE as u64);
+    print(
+        "insert mode real-delete backspace",
+        elapsed,
+        EDIT_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_mode_normal_tombstone_delete() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-normal-tombstone.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    for i in 0..EDIT_SINGLE_OPS {
+        let offset = (i * 32) as u64;
+        let id = doc.delete_byte(offset)?;
+        assert!(id.is_some());
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.visible_len(), (EDIT_FILE_SIZE - EDIT_SINGLE_OPS) as u64);
+    print("normal mode tombstone delete", elapsed, EDIT_SINGLE_OPS);
+    Ok(())
+}
+
+fn bench_edit_mode_visual_tombstone_range() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-visual-tombstone.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let start = 1024 * 1024_u64;
+    let span = EDIT_SINGLE_OPS as u64;
+
+    let t = Instant::now();
+    let candidates = doc.cell_ids_range(start, span);
+    let mut deleted = 0usize;
+    for id in candidates {
+        if doc.is_tombstone(id) {
+            continue;
+        }
+        doc.mark_tombstones(&[id])?;
+        deleted += 1;
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(deleted, EDIT_SINGLE_OPS);
+    print("visual mode tombstone range", elapsed, EDIT_SINGLE_OPS);
+    Ok(())
+}
+
+fn bench_edit_mode_paste_overwrite_per_byte_1mb() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-paste-overwrite.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = shifted_patterned_data(EDIT_BULK_BYTES);
+
+    let t = Instant::now();
+    let (written, changes) =
+        doc.overwrite_run_positional(0, bytes.len() as u64, |idx| bytes[idx as usize])?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_BULK_BYTES as u64);
+    assert_eq!(changes.len(), EDIT_BULK_BYTES);
+    print(
+        "paste overwrite 1MB per-byte replacements",
+        elapsed,
+        EDIT_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_mode_paste_overwrite_1mb() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-paste-overwrite-compact.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = shifted_patterned_data(EDIT_BULK_BYTES);
+
+    let t = Instant::now();
+    let (written, runs) = doc.overwrite_run_bytes_overlay_changed(0, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_BULK_BYTES as u64);
+    assert_eq!(runs.len(), 1);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_BULK_BYTES);
+    print(
+        "paste overwrite 1MB bytes overlay",
+        elapsed,
+        EDIT_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_mode_paste_overwrite_16mb() -> BenchResult {
+    let (_dir, path) = write_patterned_file(
+        "edit-paste-overwrite-compact-16mb.bin",
+        EDIT_LARGE_FILE_SIZE,
+    )?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = shifted_patterned_data(EDIT_LARGE_BULK_BYTES);
+
+    let t = Instant::now();
+    let (written, runs) = doc.overwrite_run_bytes_overlay_changed(0, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_LARGE_BULK_BYTES as u64);
+    assert_eq!(runs.len(), 1);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_LARGE_BULK_BYTES);
+    print(
+        "paste overwrite 16MB bytes overlay",
+        elapsed,
+        EDIT_LARGE_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_mode_paste_overwrite_per_byte_4mb() -> BenchResult {
+    let (_dir, path) = write_patterned_file(
+        "edit-paste-overwrite-per-byte-4mb.bin",
+        EDIT_LARGE_FILE_SIZE,
+    )?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = shifted_patterned_data(EDIT_PER_BYTE_LARGE_BYTES);
+
+    let t = Instant::now();
+    let (written, changes) =
+        doc.overwrite_run_positional(0, bytes.len() as u64, |idx| bytes[idx as usize])?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_PER_BYTE_LARGE_BYTES as u64);
+    assert_eq!(changes.len(), EDIT_PER_BYTE_LARGE_BYTES);
+    print(
+        "paste overwrite 4MB per-byte replacements",
+        elapsed,
+        EDIT_PER_BYTE_LARGE_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_mode_paste_insert_1mb() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-paste-insert.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = patterned_data(EDIT_BULK_BYTES);
+    let offset = (EDIT_FILE_SIZE / 2) as u64;
+
+    let t = Instant::now();
+    let inserted = doc.insert_bytes(offset, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(inserted.len(), EDIT_BULK_BYTES);
+    assert_eq!(doc.len(), (EDIT_FILE_SIZE + EDIT_BULK_BYTES) as u64);
+    print("paste insert 1MB real insert", elapsed, EDIT_BULK_BYTES);
+    Ok(())
+}
+
+fn bench_edit_mode_fill_overlay_1mb() -> BenchResult {
+    let (_dir, path) = write_patterned_file("edit-fill-overlay.bin", EDIT_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let pattern = [0xde_u8, 0xad, 0xbe, 0xef];
+
+    let t = Instant::now();
+    let stats = doc.overwrite_run_pattern_overlay(0, EDIT_BULK_BYTES as u64, &pattern)?;
+    let elapsed = t.elapsed();
+    assert_eq!(stats.visited, EDIT_BULK_BYTES as u64);
+    assert_eq!(stats.changed, EDIT_BULK_BYTES as u64);
+    print("fill command 1MB range overlay", elapsed, EDIT_BULK_BYTES);
     Ok(())
 }
 
@@ -562,27 +865,43 @@ fn bench_diff_next_tail_mismatch(name: &str, size: usize) -> BenchResult {
     Ok(())
 }
 
-fn run(label: &str, bench: fn() -> BenchResult) -> bool {
+fn run_in_process(label: &str, bench: fn() -> BenchResult) -> bool {
     eprintln!("[bench] running {label}");
-    match bench() {
+    let success = match bench() {
         Ok(()) => true,
         Err(err) => {
             eprintln!("[bench] {label} failed: {err}");
             false
         }
+    };
+    print_peak_rss(label);
+    success
+}
+
+fn run_isolated(label: &str) -> bool {
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(err) => {
+            eprintln!("[bench] {label} failed: unable to resolve current executable: {err}");
+            return false;
+        }
+    };
+
+    match Command::new(exe)
+        .env(BENCH_CHILD_ENV, label)
+        .env("HXEDIT_RUN_BENCH", "1")
+        .status()
+    {
+        Ok(status) => status.success(),
+        Err(err) => {
+            eprintln!("[bench] {label} failed: unable to spawn isolated child: {err}");
+            false
+        }
     }
 }
 
-fn main() {
-    if cfg!(debug_assertions) && std::env::var_os("HXEDIT_RUN_BENCH").is_none() {
-        eprintln!(
-            "[bench] skipped in debug/test profile; run `cargo bench --bench perf_bench` for timings"
-        );
-        return;
-    }
-
-    let filter = std::env::var("HXEDIT_BENCH_FILTER").ok();
-    let benches: &[BenchEntry] = &[
+fn benches() -> &'static [BenchEntry] {
+    &[
         ("resolve_piece_heavy", bench_resolve_piece_heavy),
         ("save_16mb_with_insert", bench_save_16mb_with_insert),
         ("save_16mb_with_tombstones", bench_save_16mb_with_tombstones),
@@ -602,6 +921,48 @@ fn main() {
         ("parse_elf_format", bench_parse_elf_format),
         ("paste_overwrite_large", bench_paste_overwrite_large),
         ("paste_overwrite_bulk_path", bench_paste_overwrite_bulk_path),
+        ("edit_mode_replace_nibbles", bench_edit_mode_replace_nibbles),
+        ("edit_mode_insert_nibbles", bench_edit_mode_insert_nibbles),
+        (
+            "edit_mode_pending_insert_backspace",
+            bench_edit_mode_pending_insert_backspace,
+        ),
+        (
+            "edit_mode_backspace_real_delete",
+            bench_edit_mode_backspace_real_delete,
+        ),
+        (
+            "edit_mode_normal_tombstone_delete",
+            bench_edit_mode_normal_tombstone_delete,
+        ),
+        (
+            "edit_mode_visual_tombstone_range",
+            bench_edit_mode_visual_tombstone_range,
+        ),
+        (
+            "edit_mode_paste_overwrite_1mb",
+            bench_edit_mode_paste_overwrite_1mb,
+        ),
+        (
+            "edit_mode_paste_overwrite_per_byte_1mb",
+            bench_edit_mode_paste_overwrite_per_byte_1mb,
+        ),
+        (
+            "edit_mode_paste_overwrite_16mb",
+            bench_edit_mode_paste_overwrite_16mb,
+        ),
+        (
+            "edit_mode_paste_overwrite_per_byte_4mb",
+            bench_edit_mode_paste_overwrite_per_byte_4mb,
+        ),
+        (
+            "edit_mode_paste_insert_1mb",
+            bench_edit_mode_paste_insert_1mb,
+        ),
+        (
+            "edit_mode_fill_overlay_1mb",
+            bench_edit_mode_fill_overlay_1mb,
+        ),
         ("logical_bytes_large_copy", bench_logical_bytes_large_copy),
         ("export_stream_64mb", bench_export_stream_64mb),
         ("fill_stream_4mb", bench_fill_stream_4mb),
@@ -628,8 +989,34 @@ fn main() {
             "diff_next_tail_mismatch_256mb_stepper",
             bench_diff_next_tail_mismatch_256mb_stepper,
         ),
-    ];
+    ]
+}
 
+fn main() {
+    let benches = benches();
+    if let Some(child_label) = std::env::var_os(BENCH_CHILD_ENV) {
+        let child_label = child_label.to_string_lossy();
+        let Some((label, bench)) = benches
+            .iter()
+            .find(|(label, _)| *label == child_label.as_ref())
+        else {
+            eprintln!("[bench] unknown child bench {child_label}");
+            std::process::exit(1);
+        };
+        if !run_in_process(label, *bench) {
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    if cfg!(debug_assertions) && std::env::var_os("HXEDIT_RUN_BENCH").is_none() {
+        eprintln!(
+            "[bench] skipped in debug/test profile; run `cargo bench --bench perf_bench` for timings"
+        );
+        return;
+    }
+
+    let filter = std::env::var("HXEDIT_BENCH_FILTER").ok();
     let failed = benches
         .iter()
         .filter(|(label, _)| {
@@ -637,7 +1024,7 @@ fn main() {
                 .as_deref()
                 .is_none_or(|needle| label.contains(needle))
         })
-        .filter(|(label, bench)| !run(label, *bench))
+        .filter(|(label, _)| !run_isolated(label))
         .count();
     if failed > 0 {
         std::process::exit(1);

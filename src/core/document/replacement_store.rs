@@ -14,6 +14,7 @@ enum SparseReplacement {
 enum RangeReplacement {
     Pattern { pattern: Arc<[u8]>, phase: u64 },
     Xor { key: u8 },
+    Bytes { bytes: Arc<[u8]>, phase: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +98,30 @@ impl ReplacementStore {
                 start: id,
                 len,
                 value: RangeReplacement::Xor { key },
+            },
+        );
+    }
+
+    pub(crate) fn set_bytes_range(
+        &mut self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+        bytes: Arc<[u8]>,
+        phase: u64,
+    ) {
+        if len == 0 || bytes.is_empty() {
+            return;
+        }
+        debug_assert!(phase.saturating_add(len) <= bytes.len() as u64);
+        self.clear_source_range(source, start, len);
+        let id = CellId::from_source(source, start);
+        self.ranges.insert(
+            id,
+            ReplacementRange {
+                start: id,
+                len,
+                value: RangeReplacement::Bytes { bytes, phase },
             },
         );
     }
@@ -285,6 +310,11 @@ impl ReplacementRange {
                 pattern[index as usize]
             }
             RangeReplacement::Xor { key } => base ^ key,
+            RangeReplacement::Bytes { bytes, phase } => {
+                let local = offset_of(id) - self.source_offset();
+                let index = phase.saturating_add(local) as usize;
+                bytes.get(index).copied().unwrap_or(base)
+            }
         }
     }
 
@@ -299,6 +329,10 @@ impl ReplacementRange {
                 }
             }
             RangeReplacement::Xor { key } => RangeReplacement::Xor { key: *key },
+            RangeReplacement::Bytes { bytes, phase } => RangeReplacement::Bytes {
+                bytes: Arc::clone(bytes),
+                phase: phase.saturating_add(delta),
+            },
         };
         Self {
             start: CellId::from_source(self.source(), start),

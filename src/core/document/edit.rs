@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::core::document::Document;
+use crate::core::document::{BytesOverlayRun, Document};
 use crate::core::piece_table::CellId;
 use crate::error::{HxError, HxResult};
 use crate::mode::NibblePhase;
@@ -498,6 +498,138 @@ impl Document {
         }
 
         Ok(stats)
+    }
+
+    /// Overwrite a display run with explicit bytes using range overlays.
+    ///
+    /// This is the compact replacement primitive for clean overwrite-paste
+    /// runs. The bytes are not repeated; each covered display cell takes the
+    /// corresponding byte from `bytes`.
+    pub fn overwrite_run_bytes_overlay(
+        &mut self,
+        offset: u64,
+        bytes: Arc<[u8]>,
+    ) -> HxResult<CompactReplacementStats> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let doc_len = self.len();
+        if bytes.is_empty() || offset >= doc_len {
+            return Ok(CompactReplacementStats {
+                visited: 0,
+                changed: 0,
+            });
+        }
+
+        let applied = (bytes.len() as u64).min(doc_len - offset);
+        let end = offset + applied;
+        let mut stats = CompactReplacementStats {
+            visited: 0,
+            changed: 0,
+        };
+        let mut segments = Vec::new();
+
+        let pieces = self.pieces_snapshot();
+        let mut display_cursor = 0_u64;
+        for piece in pieces {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor + piece.len;
+            if piece_end <= offset {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = offset.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_start = piece.start + (overlap_start - display_cursor);
+                let range_len = overlap_end - overlap_start;
+                let phase = overlap_start - offset;
+                stats.visited += range_len;
+                stats.changed += range_len;
+                segments.push((piece.source, source_start, range_len, phase));
+            }
+            display_cursor = piece_end;
+        }
+
+        if stats.visited > 0 {
+            for (source, source_start, range_len, phase) in segments {
+                self.replacements.set_bytes_range(
+                    source,
+                    source_start,
+                    range_len,
+                    Arc::clone(&bytes),
+                    phase,
+                );
+            }
+        }
+
+        Ok(stats)
+    }
+
+    /// Apply bytes overlays only for cells whose current visible byte differs
+    /// from the pasted byte. Returns the clamped write length plus compact
+    /// `(display_offset, bytes)` runs suitable for undo/redo records.
+    pub fn overwrite_run_bytes_overlay_changed(
+        &mut self,
+        offset: u64,
+        bytes: &[u8],
+    ) -> HxResult<(u64, Vec<BytesOverlayRun>)> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let doc_len = self.len();
+        if bytes.is_empty() || offset >= doc_len {
+            return Ok((0, Vec::new()));
+        }
+
+        let applied = bytes.len().min((doc_len - offset) as usize);
+        let end_inclusive = offset + applied as u64 - 1;
+        let mut runs: Vec<BytesOverlayRun> = Vec::new();
+        let mut run_start = 0_u64;
+        let mut run_bytes = Vec::new();
+
+        self.walk_visible_cells(
+            offset,
+            end_inclusive,
+            REPLACEMENT_CHUNK as usize,
+            |_, chunk| {
+                for cell in chunk.cells {
+                    if cell.deleted {
+                        return Err(HxError::OffsetOutOfRange);
+                    }
+                    let index = (cell.display_offset - offset) as usize;
+                    let value = bytes[index];
+                    if cell.byte != value {
+                        if run_bytes.is_empty() {
+                            run_start = cell.display_offset;
+                        } else if run_start + run_bytes.len() as u64 != cell.display_offset {
+                            let bytes: Arc<[u8]> = Arc::from(std::mem::take(&mut run_bytes));
+                            runs.push((run_start, bytes));
+                            run_start = cell.display_offset;
+                        }
+                        run_bytes.push(value);
+                    } else if !run_bytes.is_empty() {
+                        let bytes: Arc<[u8]> = Arc::from(std::mem::take(&mut run_bytes));
+                        runs.push((run_start, bytes));
+                    }
+                }
+                Ok(WalkControl::Continue)
+            },
+        )?;
+
+        if !run_bytes.is_empty() {
+            let bytes: Arc<[u8]> = Arc::from(run_bytes);
+            runs.push((run_start, bytes));
+        }
+
+        for (run_offset, run_bytes) in &runs {
+            self.overwrite_run_bytes_overlay(*run_offset, Arc::clone(run_bytes))?;
+        }
+
+        Ok((applied as u64, runs))
     }
 
     /// Clear replacement entries in a display range without changing piece

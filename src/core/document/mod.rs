@@ -31,6 +31,8 @@ pub enum ByteSlot {
     Empty,
 }
 
+pub type BytesOverlayRun = (u64, std::sync::Arc<[u8]>);
+
 /// Backing document model for the editor.
 ///
 /// Composes three layers:
@@ -504,6 +506,7 @@ fn merge_spans(spans: Vec<(u64, Vec<u8>)>) -> Vec<(u64, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     use crate::config::Config;
     use crate::core::document::{ByteSlot, Document};
@@ -632,6 +635,35 @@ mod tests {
         assert_eq!(
             doc.replacement_spans().unwrap(),
             vec![(1, vec![0xaa]), (4, vec![0xbb])]
+        );
+    }
+
+    #[test]
+    fn bytes_overlay_supports_sparse_clears_and_span_export() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1000-0x1006"),
+            vec![0, 1, 2, 3, 4, 5],
+            &config,
+        );
+
+        let stats = doc
+            .overwrite_run_bytes_overlay(1, Arc::from(&[0xaa, 0xbb, 0xcc, 0xdd][..]))
+            .unwrap();
+        assert_eq!(stats.visited, 4);
+        assert_eq!(stats.changed, 4);
+        assert_eq!(
+            doc.logical_bytes(0, 5).unwrap(),
+            vec![0, 0xaa, 0xbb, 0xcc, 0xdd, 5]
+        );
+        assert_eq!(doc.replacement_dirty_bytes(), 4);
+
+        doc.replace_display_byte(2, 2).unwrap();
+        assert_eq!(doc.byte_at(2).unwrap(), ByteSlot::Present(2));
+        assert_eq!(doc.replacement_dirty_bytes(), 3);
+        assert_eq!(
+            doc.replacement_spans().unwrap(),
+            vec![(1, vec![0xaa]), (3, vec![0xcc, 0xdd])]
         );
     }
 

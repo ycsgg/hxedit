@@ -23,7 +23,7 @@ cargo clippy --all-targets
 
 - 默认级别 `cargo clippy --all-targets` 应保持无 warning；更严格的 pedantic 级别可分批推进
 - 性能类 benchmark 若继续增长，优先迁移到 `cargo bench`，不要长期混在 `cargo test` 主路径里拖慢 correctness 回归
-- 当前性能观测入口是 `cargo bench --bench perf_bench`，覆盖 16MB/64MB save、hash、logical_bytes、paste overwrite、piece lookup、ELF parse、当前 search；`cargo test` 里的大文件用例只保留 correctness 断言，不做 wall-clock 阈值
+- 当前性能观测入口是 `cargo bench --bench perf_bench`，每个 bench 以隔离子进程运行并输出用时与峰值 RSS；覆盖 16MB/64MB save、hash、logical_bytes、paste overwrite、piece lookup、ELF parse、search、diff，以及 replacement / real insert / tombstone delete / real delete 等编辑模式指令。可用 `HXEDIT_BENCH_FILTER=edit_mode cargo bench --bench perf_bench` 只跑编辑模式场景；`cargo test` 里的大文件用例只保留 correctness 断言，不做 wall-clock 阈值
 - `src/app/tests.rs` 已接入测试编译；新增 App 层测试时，优先放到真正会执行的位置
 - 如果你改了 inspector / parse / render 相关路径，不要静默吞错；至少要在状态栏、panel 或 stderr 中留下可观测线索
 

@@ -1,4 +1,5 @@
 use std::fs;
+use std::sync::Arc;
 
 use hxedit::config::Config;
 use hxedit::core::document::Document;
@@ -64,6 +65,20 @@ fn save_rewrites_range_overlay_replacements() {
     doc.save(None).unwrap();
 
     assert_eq!(fs::read(&file).unwrap(), b"01ababa789");
+}
+
+#[test]
+fn save_rewrites_bytes_overlay_replacements() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("bytes-overlay.bin");
+    fs::write(&file, b"0123456789").unwrap();
+
+    let mut doc = Document::open(&file, &Config::default()).unwrap();
+    doc.overwrite_run_bytes_overlay(2, Arc::from(&b"ABCDE"[..]))
+        .unwrap();
+    doc.save(None).unwrap();
+
+    assert_eq!(fs::read(&file).unwrap(), b"01ABCDE789");
 }
 
 #[cfg(unix)]

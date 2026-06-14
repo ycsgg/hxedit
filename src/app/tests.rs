@@ -1500,6 +1500,76 @@ fn paste_overwrite_and_insert_with_undo_redo() {
     assert_eq!(app2.document.byte_at(1).unwrap(), ByteSlot::Present(0xaa));
 }
 
+#[test]
+fn paste_overwrite_clean_range_uses_bulk_bytes_undo() {
+    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13, 0x14]);
+    app.cursor = 1;
+
+    assert_eq!(app.apply_paste_overwrite(&[0xaa, 0x12, 0xbb]).unwrap(), 3);
+    assert_eq!(
+        app.document.logical_bytes(0, 4).unwrap(),
+        vec![0x10, 0xaa, 0x12, 0xbb, 0x14]
+    );
+    assert_eq!(app.document.replacement_dirty_bytes(), 2);
+
+    let step = app.undo_stack.last().expect("paste should push undo");
+    assert_eq!(step.ops.len(), 2);
+    match &step.ops[0] {
+        EditOp::ReplaceBulk {
+            offset,
+            len,
+            before: BulkReplacement::Clear,
+            after: BulkReplacement::Bytes(bytes),
+        } => {
+            assert_eq!((*offset, *len), (1, 1));
+            assert_eq!(bytes.as_ref(), &[0xaa]);
+        }
+        other => panic!("unexpected first paste op: {other:?}"),
+    }
+    match &step.ops[1] {
+        EditOp::ReplaceBulk {
+            offset,
+            len,
+            before: BulkReplacement::Clear,
+            after: BulkReplacement::Bytes(bytes),
+        } => {
+            assert_eq!((*offset, *len), (3, 1));
+            assert_eq!(bytes.as_ref(), &[0xbb]);
+        }
+        other => panic!("unexpected second paste op: {other:?}"),
+    }
+
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 4).unwrap(),
+        vec![0x10, 0x11, 0x12, 0x13, 0x14]
+    );
+    assert_eq!(app.document.replacement_dirty_bytes(), 0);
+
+    app.redo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 4).unwrap(),
+        vec![0x10, 0xaa, 0x12, 0xbb, 0x14]
+    );
+    assert_eq!(app.document.replacement_dirty_bytes(), 2);
+}
+
+#[test]
+fn paste_overwrite_existing_replacement_keeps_per_byte_undo() {
+    let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
+    app.document.replace_display_byte(1, 0xab).unwrap();
+    app.cursor = 0;
+
+    assert_eq!(app.apply_paste_overwrite(&[0xff, 0xee, 0xdd]).unwrap(), 3);
+
+    let step = app.undo_stack.last().expect("paste should push undo");
+    assert!(matches!(&step.ops[0], EditOp::ReplaceBytes { .. }));
+    app.undo(1, true).unwrap();
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x10));
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
+    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Fill, Export, Replace commands
 // ═══════════════════════════════════════════════════════════════════════════

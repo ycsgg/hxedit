@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::io;
 #[cfg(feature = "sagitta-analysis")]
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "sagitta-analysis")]
@@ -262,6 +263,8 @@ pub(crate) enum BulkReplacement {
     Clear,
     /// Repeating overwrite pattern, starting at the first display cell.
     Pattern(Vec<u8>),
+    /// Exact overwrite bytes, starting at the first display cell.
+    Bytes(Arc<[u8]>),
     /// XOR every visible byte in the range with the given key.
     Xor { key: u8 },
 }

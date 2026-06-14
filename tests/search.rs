@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use hxedit::config::Config;
 use hxedit::core::document::Document;
@@ -95,6 +96,16 @@ fn searches_range_overlay_replacements() {
 
     assert_eq!(doc.search_forward(0, b"baba").unwrap(), Some(1));
     assert_eq!(doc.search_backward(doc.len(), b"baba").unwrap(), Some(1));
+}
+
+#[test]
+fn searches_bytes_overlay_replacements() {
+    let (_dir, mut doc) = open_temp(b"xxxxxx");
+    doc.overwrite_run_bytes_overlay(1, Arc::from(&b"hello"[..]))
+        .unwrap();
+
+    assert_eq!(doc.search_forward(0, b"ell").unwrap(), Some(2));
+    assert_eq!(doc.search_backward(doc.len(), b"ell").unwrap(), Some(2));
 }
 
 #[test]
