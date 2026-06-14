@@ -28,6 +28,11 @@ const EDIT_BULK_BYTES: usize = 1024 * 1024;
 const EDIT_LARGE_FILE_SIZE: usize = 32 * 1024 * 1024;
 const EDIT_LARGE_BULK_BYTES: usize = 16 * 1024 * 1024;
 const EDIT_PER_BYTE_LARGE_BYTES: usize = 4 * 1024 * 1024;
+const EDIT_256_FILE_SIZE: usize = 256 * 1024 * 1024;
+const EDIT_256_SINGLE_OPS: usize = 1_000_000;
+const EDIT_256_BULK_BYTES: usize = 64 * 1024 * 1024;
+const EDIT_256_INSERT_BYTES: usize = 16 * 1024 * 1024;
+const EDIT_256_PER_BYTE_BYTES: usize = 8 * 1024 * 1024;
 
 fn bench_config() -> Config {
     Config {
@@ -63,6 +68,17 @@ fn write_patterned_file(
         written += take;
     }
     writer.flush()?;
+    Ok((dir, path))
+}
+
+fn write_sparse_zero_file(
+    name: &str,
+    size: usize,
+) -> BenchResult<(tempfile::TempDir, std::path::PathBuf)> {
+    let dir = tempdir()?;
+    let path = dir.path().join(name);
+    let file = fs::File::create(&path)?;
+    file.set_len(size as u64)?;
     Ok((dir, path))
 }
 
@@ -596,6 +612,219 @@ fn bench_edit_mode_fill_overlay_1mb() -> BenchResult {
     Ok(())
 }
 
+fn bench_edit_256mb_replace_nibbles() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-replace-nibbles.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    for i in 0..EDIT_256_SINGLE_OPS {
+        let offset = (i * 257) as u64;
+        doc.replace_nibble(offset, NibblePhase::High, (i as u8) & 0x0f)?;
+        doc.replace_nibble(offset, NibblePhase::Low, (i as u8).wrapping_add(1) & 0x0f)?;
+    }
+    let elapsed = t.elapsed();
+    assert!(doc.has_replacements());
+    print(
+        "edit 256MB replacement nibbles",
+        elapsed,
+        EDIT_256_SINGLE_OPS * 2,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_insert_nibbles() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-insert-nibbles.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let mut cursor = (EDIT_256_FILE_SIZE / 2) as u64;
+
+    let t = Instant::now();
+    for i in 0..EDIT_256_SINGLE_OPS {
+        let high = (i as u8) & 0x0f;
+        let low = (i as u8).wrapping_add(1) & 0x0f;
+        doc.insert_byte(cursor, high << 4)?;
+        doc.replace_display_byte(cursor, (high << 4) | low)?;
+        cursor += 1;
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), (EDIT_256_FILE_SIZE + EDIT_256_SINGLE_OPS) as u64);
+    print(
+        "edit 256MB insert nibble compose",
+        elapsed,
+        EDIT_256_SINGLE_OPS * 2,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_pending_insert_backspace() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("edit-256-pending-backspace.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let cursor = (EDIT_256_FILE_SIZE / 2) as u64;
+
+    let t = Instant::now();
+    for i in 0..EDIT_256_SINGLE_OPS {
+        doc.insert_byte(cursor, ((i as u8) & 0x0f) << 4)?;
+        let removed = doc.delete_range_real(cursor, 1)?;
+        assert_eq!(removed.len(), 1);
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), EDIT_256_FILE_SIZE as u64);
+    print(
+        "edit 256MB pending byte backspace",
+        elapsed,
+        EDIT_256_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_backspace_real_delete() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-real-delete.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let offset = (EDIT_256_FILE_SIZE / 2) as u64;
+    let inserted = vec![0x5a; EDIT_256_SINGLE_OPS];
+    doc.insert_bytes(offset, &inserted)?;
+
+    let t = Instant::now();
+    for remaining in (1..=EDIT_256_SINGLE_OPS).rev() {
+        let removed = doc.delete_range_real(offset + remaining as u64 - 1, 1)?;
+        assert_eq!(removed.len(), 1);
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), EDIT_256_FILE_SIZE as u64);
+    print(
+        "edit 256MB real-delete backspace",
+        elapsed,
+        EDIT_256_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_normal_tombstone_delete() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-normal-tombstone.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    for i in 0..EDIT_256_SINGLE_OPS {
+        let offset = (i * 257) as u64;
+        let id = doc.delete_byte(offset)?;
+        assert!(id.is_some());
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(
+        doc.visible_len(),
+        (EDIT_256_FILE_SIZE - EDIT_256_SINGLE_OPS) as u64
+    );
+    print(
+        "edit 256MB normal tombstone delete",
+        elapsed,
+        EDIT_256_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_visual_tombstone_range() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-visual-tombstone.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let start = 64 * 1024 * 1024_u64;
+    let span = EDIT_256_SINGLE_OPS as u64;
+
+    let t = Instant::now();
+    let candidates = doc.cell_ids_range(start, span);
+    let mut deleted = 0usize;
+    for id in candidates {
+        if doc.is_tombstone(id) {
+            continue;
+        }
+        doc.mark_tombstones(&[id])?;
+        deleted += 1;
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(deleted, EDIT_256_SINGLE_OPS);
+    print(
+        "edit 256MB visual tombstone range",
+        elapsed,
+        EDIT_256_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_paste_overwrite_overlay_64mb() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("edit-256-paste-overwrite-overlay.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = vec![1_u8; EDIT_256_BULK_BYTES];
+
+    let t = Instant::now();
+    let (written, runs) = doc.overwrite_run_bytes_overlay_changed(0, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(runs.len(), 1);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "edit 256MB paste overwrite 64MB overlay",
+        elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_paste_overwrite_per_byte_8mb() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("edit-256-paste-overwrite-per-byte.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = vec![1_u8; EDIT_256_PER_BYTE_BYTES];
+
+    let t = Instant::now();
+    let (written, changes) =
+        doc.overwrite_run_positional(0, bytes.len() as u64, |idx| bytes[idx as usize])?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_256_PER_BYTE_BYTES as u64);
+    assert_eq!(changes.len(), EDIT_256_PER_BYTE_BYTES);
+    print(
+        "edit 256MB paste overwrite 8MB per-byte",
+        elapsed,
+        EDIT_256_PER_BYTE_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_paste_insert_16mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-paste-insert.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = vec![0x5a; EDIT_256_INSERT_BYTES];
+    let offset = (EDIT_256_FILE_SIZE / 2) as u64;
+
+    let t = Instant::now();
+    let inserted = doc.insert_bytes(offset, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(inserted.len(), EDIT_256_INSERT_BYTES);
+    assert_eq!(
+        doc.len(),
+        (EDIT_256_FILE_SIZE + EDIT_256_INSERT_BYTES) as u64
+    );
+    print(
+        "edit 256MB paste insert 16MB",
+        elapsed,
+        EDIT_256_INSERT_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_fill_overlay_64mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-fill-overlay.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let pattern = [0x7f_u8];
+
+    let t = Instant::now();
+    let stats = doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &pattern)?;
+    let elapsed = t.elapsed();
+    assert_eq!(stats.visited, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(stats.changed, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print("edit 256MB fill 64MB overlay", elapsed, EDIT_256_BULK_BYTES);
+    Ok(())
+}
+
 fn bench_logical_bytes_large_copy() -> BenchResult {
     let (_dir, path) = write_patterned_file("logical-bytes.bin", 8 * 1024 * 1024)?;
     let mut doc = Document::open(&path, &bench_config())?;
@@ -962,6 +1191,43 @@ fn benches() -> &'static [BenchEntry] {
         (
             "edit_mode_fill_overlay_1mb",
             bench_edit_mode_fill_overlay_1mb,
+        ),
+        (
+            "edit_256mb_replace_nibbles",
+            bench_edit_256mb_replace_nibbles,
+        ),
+        ("edit_256mb_insert_nibbles", bench_edit_256mb_insert_nibbles),
+        (
+            "edit_256mb_pending_insert_backspace",
+            bench_edit_256mb_pending_insert_backspace,
+        ),
+        (
+            "edit_256mb_backspace_real_delete",
+            bench_edit_256mb_backspace_real_delete,
+        ),
+        (
+            "edit_256mb_normal_tombstone_delete",
+            bench_edit_256mb_normal_tombstone_delete,
+        ),
+        (
+            "edit_256mb_visual_tombstone_range",
+            bench_edit_256mb_visual_tombstone_range,
+        ),
+        (
+            "edit_256mb_paste_overwrite_overlay_64mb",
+            bench_edit_256mb_paste_overwrite_overlay_64mb,
+        ),
+        (
+            "edit_256mb_paste_overwrite_per_byte_8mb",
+            bench_edit_256mb_paste_overwrite_per_byte_8mb,
+        ),
+        (
+            "edit_256mb_paste_insert_16mb",
+            bench_edit_256mb_paste_insert_16mb,
+        ),
+        (
+            "edit_256mb_fill_overlay_64mb",
+            bench_edit_256mb_fill_overlay_64mb,
         ),
         ("logical_bytes_large_copy", bench_logical_bytes_large_copy),
         ("export_stream_64mb", bench_export_stream_64mb),

@@ -325,7 +325,7 @@ fn side_panel_visible_rows_use_actual_panel_body_height() {
 
 #[cfg(any(feature = "disasm-capstone", feature = "sagitta-analysis"))]
 fn build_disassembly_elf64(code: &[u8]) -> Vec<u8> {
-    let mut bytes = vec![0_u8; 0x200];
+    let mut bytes = vec![0_u8; (0x100 + code.len()).max(0x200)];
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 2;
     bytes[5] = 1;
@@ -3113,6 +3113,47 @@ fn disassembly_search_variants() {
     })
     .unwrap();
     assert_eq!(app2.cursor, 0x102);
+}
+
+#[cfg(feature = "disasm-capstone")]
+#[test]
+fn disassembly_instruction_search_does_not_pollute_view_cache() {
+    let code = vec![0x90; 4096];
+    let bytes = build_disassembly_elf64(&code);
+    let mut app = app_with_bytes(&bytes);
+    app.config.search_wrap = false;
+    app.view_rows = 8;
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+
+    let state = match &app.main_view {
+        crate::app::MainView::Disassembly(state) => state.clone(),
+        crate::app::MainView::Hex => panic!("expected disassembly view"),
+    };
+    let visible_rows = app
+        .collect_disassembly_rows(&state, state.viewport_top, 8)
+        .unwrap();
+    assert!(!visible_rows.is_empty());
+    let before = app
+        .disasm_cache
+        .as_ref()
+        .map(|cache| cache.cached_row_count())
+        .unwrap_or_default();
+
+    app.execute_command(Command::SearchInstruction {
+        pattern: "ret".to_owned(),
+        backward: false,
+    })
+    .unwrap();
+
+    let after = app
+        .disasm_cache
+        .as_ref()
+        .map(|cache| cache.cached_row_count())
+        .unwrap_or_default();
+    assert_eq!(after, before);
+    assert!(app.status_message.contains("not found"));
+    assert!(app.status_message.contains("wrap off"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

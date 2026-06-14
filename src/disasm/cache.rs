@@ -10,16 +10,42 @@ use crate::executable::ExecutableInfo;
 
 const PREFETCH_ROWS: usize = 32;
 const CHECKPOINT_STRIDE: usize = 32;
+const DEFAULT_MAX_ROWS: usize = 8192;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DisasmCache {
     rows: BTreeMap<u64, DisasmRow>,
     checkpoints: BTreeSet<u64>,
+    region_starts: BTreeSet<u64>,
+    max_rows: usize,
+}
+
+impl Default for DisasmCache {
+    fn default() -> Self {
+        Self {
+            rows: BTreeMap::new(),
+            checkpoints: BTreeSet::new(),
+            region_starts: BTreeSet::new(),
+            max_rows: DEFAULT_MAX_ROWS,
+        }
+    }
 }
 
 impl DisasmCache {
     pub fn new(info: &ExecutableInfo, doc_len: u64) -> Self {
-        let mut cache = Self::default();
+        Self::with_max_rows_inner(info, doc_len, DEFAULT_MAX_ROWS)
+    }
+
+    #[cfg(test)]
+    fn with_max_rows(info: &ExecutableInfo, doc_len: u64, max_rows: usize) -> Self {
+        Self::with_max_rows_inner(info, doc_len, max_rows)
+    }
+
+    fn with_max_rows_inner(info: &ExecutableInfo, doc_len: u64, max_rows: usize) -> Self {
+        let mut cache = Self {
+            max_rows: max_rows.max(PREFETCH_ROWS),
+            ..Self::default()
+        };
         cache.reset(info, doc_len);
         cache
     }
@@ -27,9 +53,21 @@ impl DisasmCache {
     pub fn reset(&mut self, info: &ExecutableInfo, doc_len: u64) {
         self.rows.clear();
         self.checkpoints.clear();
+        self.region_starts.clear();
         for region in visible_regions(info, doc_len) {
             self.checkpoints.insert(region.start);
+            self.region_starts.insert(region.start);
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn checkpoint_count(&self) -> usize {
+        self.checkpoints.len()
     }
 
     pub fn collect_rows(
@@ -109,7 +147,7 @@ impl DisasmCache {
                 if decoded.is_empty() {
                     return Ok(None);
                 }
-                self.insert_rows(decoded);
+                self.insert_rows(decoded, cursor, Some((cursor, cursor)));
                 match self.rows.get(&cursor).cloned() {
                     Some(row) => row,
                     None => return Ok(None),
@@ -140,7 +178,7 @@ impl DisasmCache {
         start: u64,
         row_count: usize,
     ) -> HxResult<()> {
-        let target_rows = row_count.saturating_add(PREFETCH_ROWS);
+        let target_rows = row_count.saturating_add(PREFETCH_ROWS).min(self.max_rows);
         let mut cursor = start;
         let mut cached = 0usize;
 
@@ -160,19 +198,92 @@ impl DisasmCache {
             if decoded.is_empty() {
                 break;
             }
-            self.insert_rows(decoded);
+            self.insert_rows(decoded, cursor, Some((start, cursor)));
         }
 
         Ok(())
     }
 
-    fn insert_rows(&mut self, rows: Vec<DisasmRow>) {
+    fn insert_rows(&mut self, rows: Vec<DisasmRow>, anchor: u64, protected: Option<(u64, u64)>) {
         for (idx, row) in rows.into_iter().enumerate() {
             if idx == 0 || idx % CHECKPOINT_STRIDE == 0 {
                 self.checkpoints.insert(row.offset);
             }
             self.rows.insert(row.offset, row);
         }
+        self.prune_around(anchor, protected);
+    }
+
+    fn prune_around(&mut self, anchor: u64, protected: Option<(u64, u64)>) {
+        self.prune_rows_around(anchor, protected);
+        self.prune_checkpoints_around(anchor);
+    }
+
+    fn prune_rows_around(&mut self, anchor: u64, protected: Option<(u64, u64)>) {
+        while self.rows.len() > self.max_rows {
+            let Some(first) = self
+                .rows
+                .keys()
+                .find(|offset| !Self::is_protected(**offset, protected))
+                .copied()
+            else {
+                break;
+            };
+            let Some(last) = self
+                .rows
+                .keys()
+                .rev()
+                .find(|offset| !Self::is_protected(**offset, protected))
+                .copied()
+            else {
+                break;
+            };
+            let remove = if first.abs_diff(anchor) > last.abs_diff(anchor) {
+                first
+            } else {
+                last
+            };
+            self.rows.remove(&remove);
+        }
+    }
+
+    fn is_protected(offset: u64, protected: Option<(u64, u64)>) -> bool {
+        protected.is_some_and(|(start, end)| offset >= start && offset <= end)
+    }
+
+    fn prune_checkpoints_around(&mut self, anchor: u64) {
+        while self.non_region_checkpoint_count() > self.max_rows {
+            let Some(first) = self
+                .checkpoints
+                .iter()
+                .find(|offset| !self.region_starts.contains(*offset))
+                .copied()
+            else {
+                break;
+            };
+            let Some(last) = self
+                .checkpoints
+                .iter()
+                .rev()
+                .find(|offset| !self.region_starts.contains(*offset))
+                .copied()
+            else {
+                break;
+            };
+            let remove = if first.abs_diff(anchor) > last.abs_diff(anchor) {
+                first
+            } else {
+                last
+            };
+            self.checkpoints.remove(&remove);
+        }
+    }
+
+    fn non_region_checkpoint_count(&self) -> usize {
+        self.checkpoints
+            .iter()
+            .filter(|offset| !self.region_starts.contains(*offset))
+            .count()
     }
 
     fn cached_prev_row_start(&self, offset: u64) -> Option<u64> {
@@ -226,7 +337,7 @@ mod tests {
     }
 
     fn x86_64_elf(code: &[u8]) -> Vec<u8> {
-        let mut bytes = vec![0_u8; 0x200];
+        let mut bytes = vec![0_u8; (0x100 + code.len()).max(0x200)];
         bytes[0..4].copy_from_slice(b"\x7fELF");
         bytes[4] = 2;
         bytes[5] = 1;
@@ -283,5 +394,30 @@ mod tests {
         assert_eq!(first[1].offset, 0x101);
         assert_eq!(second[0].offset, 0x101);
         assert_eq!(second[1].offset, 0x104);
+    }
+
+    #[test]
+    fn cache_prunes_rows_without_losing_decoding_coverage() {
+        let code = vec![0x90; 4096];
+        let mut doc = doc_with_bytes(&x86_64_elf(&code));
+        let info = detect_executable_info(&mut doc).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
+        let mut cache = DisasmCache::with_max_rows(&info, doc.len(), 64);
+
+        for start in (0x100_u64..0x900).step_by(64) {
+            let rows = cache
+                .collect_rows(&mut doc, &info, backend.as_ref(), start, 32)
+                .unwrap();
+            assert!(!rows.is_empty());
+            assert!(cache.cached_row_count() <= 64);
+            assert!(cache.checkpoint_count() <= cache.region_starts.len() + 64);
+        }
+
+        let rows = cache
+            .collect_rows(&mut doc, &info, backend.as_ref(), 0x100, 8)
+            .unwrap();
+        assert_eq!(rows[0].offset, 0x100);
+        assert!(cache.cached_row_count() <= 64);
+        assert!(cache.checkpoint_count() <= cache.region_starts.len() + 64);
     }
 }
