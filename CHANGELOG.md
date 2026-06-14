@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-06-14
+
+### Added
+
+- Lightweight SQLite, PCAP, and PCAPNG inspectors
+- Deeper ZIP parsing, including central directory, EOCD, ZIP64, and data descriptor awareness
+- Readable editable fields for common timestamps and packed values, including classic PCAP packet timestamps, GZIP/PE Unix timestamps, ZIP DOS modification time, TAR octal mode/size/mtime, and GIF frame delay
+
+### Changed
+
+- `:re` now accepts the same mode-delimiter syntax as `:s`, including `/text/`, `x/hex/`, `b/byte/`, and typed integer modes; the legacy `hex/ascii <needle> -> <replacement>` form remains supported
+- Clean `:fill`, `:zero`, `:xor!`, and equal-length clean `:re` ranges now use compact replacement range overlays and bulk undo records instead of storing per-byte undo data
+- Equal-length `:re` now requires `--force` when more than 65535 matches are found, and `:re --force` scans and applies in batches
+
+### Fixed
+
+- `:diff next` / `:diff prev` now scan large files in cancellable progress-reporting steps instead of blocking the UI until the full scan finishes
+- Diff projection rendering is more efficient for visible pages
+- Clean and sparse-dirty search paths use chunked `memmem` scanning, avoiding whole-document KMP fallback after small edits
+
 ## [0.3.1] - 2026-06-13
 
 ### Added
@@ -121,6 +141,8 @@ Initial release.
 - CI on Ubuntu and Windows (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --all-targets`)
 - Release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, published with `SHA256SUMS.txt`
 
+[0.3.2]: https://github.com/ycsgg/hxedit/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/ycsgg/hxedit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ycsgg/hxedit/compare/v0.2.1...v0.3.0
 [0.2.0]: https://github.com/ycsgg/hxedit/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ycsgg/hxedit/compare/v0.1.0...v0.1.1
