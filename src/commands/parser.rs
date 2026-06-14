@@ -538,6 +538,7 @@ fn parse_xor_key(input: &str) -> HxResult<u8> {
 fn parse_replace(name: &str, input: Option<&str>) -> HxResult<Command> {
     let allow_resize = name.ends_with('!');
     let rest = input.ok_or(HxError::MissingArgument("replace arguments"))?;
+    let (force, rest) = parse_replace_force(rest);
     let (mode, body) = parse_replace_mode(rest);
     let (needle_src, replacement_src) = body
         .split_once("->")
@@ -563,7 +564,19 @@ fn parse_replace(name: &str, input: Option<&str>) -> HxResult<Command> {
         needle,
         replacement,
         allow_resize,
+        force,
     })
+}
+
+fn parse_replace_force(input: &str) -> (bool, &str) {
+    let trimmed = input.trim_start();
+    let Some(rest) = trimmed.strip_prefix("--force") else {
+        return (false, input);
+    };
+    if rest.is_empty() || rest.starts_with(char::is_whitespace) {
+        return (true, rest.trim_start());
+    }
+    (false, input)
 }
 
 fn parse_replace_mode(input: &str) -> (ReplaceInputMode, &str) {

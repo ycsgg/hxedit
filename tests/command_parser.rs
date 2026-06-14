@@ -151,6 +151,7 @@ fn parses_basic_commands() {
             needle: vec![0xde, 0xad],
             replacement: vec![0xbe, 0xef],
             allow_resize: false,
+            force: false,
         }
     );
     assert_eq!(
@@ -159,6 +160,16 @@ fn parses_basic_commands() {
             needle: b"hello".to_vec(),
             replacement: b"world".to_vec(),
             allow_resize: false,
+            force: false,
+        }
+    );
+    assert_eq!(
+        parse_command("re --force ascii hello -> world").unwrap(),
+        Command::Replace {
+            needle: b"hello".to_vec(),
+            replacement: b"world".to_vec(),
+            allow_resize: false,
+            force: true,
         }
     );
     assert_eq!(
@@ -167,6 +178,7 @@ fn parses_basic_commands() {
             needle: b"hello".to_vec(),
             replacement: b"hi".to_vec(),
             allow_resize: true,
+            force: false,
         }
     );
     assert_eq!(

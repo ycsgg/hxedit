@@ -102,17 +102,17 @@
 
 ## Performance / Maintenance
 
-- [ ] **[P1] `:re` / dirty range replacement 仍需避免 per-byte 展开**
-  - 现状：clean range 的 `:fill` / `:zero` / `:xor!` 已经走 `ReplacementStore` 稳定 `CellId` range overlay，undo/redo 通过 compact bulk op 清除/重放 pattern 或 xor，不再按字节写入 replacement；但已有 replacement/tombstone 的 dirty range 仍退回 per-byte undo，同长 `:re` 也仍按匹配逐字节写 replacement
-  - 建议：继续扩展 `ReplacementStore` 的分段 overlay 能力，优先覆盖同长 `:re` 的批量 `SetBytes/SetPattern` 场景；dirty range 需要能正确保留已有 sparse override / clear hole，不能为了省内存破坏 replacement-only 语义
+- [ ] **[P1] dirty range replacement 仍需避免 per-byte 展开**
+  - 现状：clean range 的 `:fill` / `:zero` / `:xor!` 已经走 `ReplacementStore` 稳定 `CellId` range overlay，undo/redo 通过 compact bulk op 清除/重放 pattern 或 xor，不再按字节写入 replacement；等长 clean `:re` 也会分批扫描并把连续命中压成 pattern range overlay；但已有 replacement/tombstone 的 dirty range 仍退回 per-byte undo
+  - 建议：继续扩展 `ReplacementStore` 的分段 overlay 能力，覆盖 dirty range 的批量 `SetBytes/SetPattern` 场景；dirty range 需要能正确保留已有 sparse override / clear hole，不能为了省内存破坏 replacement-only 语义
 
 - [ ] **[P1] memory replacement spans 仍会展开 range overlay**
   - 现状：文件 save / export 走 walker 流式消费 overlay，RSS 保持低；但 memory 模式的 `replacement_spans()` 会把 range overlay 展开成 `Vec<(offset, Vec<u8>)>`，用于 `:mem commit`、`:mem commit-all` 与 region switch stash。当前 256MB overlay span 峰值约 275MB RSS，1GB region 在 1C1G 环境有 OOM 风险
   - 建议：active region commit 先改为 streaming span visitor，避免提交时一次性物化；region switch / stashed region 需要单独设计 snapshot 语义，不能简单保存 XOR/pattern overlay 后再基于之后的 live bytes 重算
 
-- [ ] **[P1] `:re` / `:re!` 需要批量 match job，避免一次性收集全量匹配**
-  - 现状：replace 会先收集全部 match offset；低熵大文件上小 needle 可能产生海量 match，提前 OOM，且无进度/取消
-  - 建议：以 job/stepper 扫描，单步最多收集固定数量 match（例如 65535）或扫描固定字节预算；同长 `:re` 可逐批应用，变长 `:re!` 需要基于替换前快照搜索并用 delta 映射到 live document，避免新插入内容影响后续匹配语义
+- [ ] **[P1] `:re!` 仍需要批量 match job，避免一次性收集全量匹配**
+  - 现状：等长 `:re` 已加 65535 命中二次确认，`--force` 后按批扫描 / 应用，不再一次性收集全量 match；但变长 `:re!` 仍会先收集全部 match offset，低熵大文件上小 needle 仍可能产生海量 match，提前 OOM，且无进度/取消
+  - 建议：`:re!` 需要基于替换前快照搜索并用 delta 映射到 live document，避免新插入内容影响后续匹配语义；实现形态应是 job/stepper 或受预算的批处理，带进度与取消
 
 - [ ] **[P2] 格式检测 / Inspector 单字段扫描缺少预算**
   - 现状：entry cap 只限制结构数量；GZIP FNAME/FCOMMENT、JPEG scan data、GIF sub-block 等单字段仍可能在畸形大文件中同步扫到 EOF，导致 UI 长时间无响应

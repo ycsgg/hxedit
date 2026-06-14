@@ -1,6 +1,11 @@
 use std::io::Write;
 
+use crate::core::document::walk::WalkControl;
+
 use super::*;
+
+const REPLACE_CONFIRM_LIMIT: usize = 65_535;
+const REPLACE_BATCH_LIMIT: usize = 65_535;
 
 #[derive(Debug, Clone, Copy)]
 struct ReplaceStats {
@@ -12,8 +17,97 @@ struct ReplaceStats {
 
 #[derive(Debug)]
 struct ReplaceOutcome {
+    first_match: u64,
     ops: Vec<EditOp>,
     stats: ReplaceStats,
+}
+
+#[derive(Debug)]
+enum ReplaceApplyResult {
+    Applied(ReplaceOutcome),
+    NoMatches,
+    TooManyMatches { limit: usize },
+}
+
+struct ReplaceMatchCollector<'a> {
+    pattern: &'a [u8],
+    limit: usize,
+    matches: Vec<u64>,
+    tail: Vec<u8>,
+    tail_start: u64,
+    next_start: u64,
+}
+
+impl<'a> ReplaceMatchCollector<'a> {
+    fn new(pattern: &'a [u8], limit: usize, start: u64) -> Self {
+        Self {
+            pattern,
+            limit,
+            matches: Vec::new(),
+            tail: Vec::with_capacity(pattern.len().saturating_sub(1)),
+            tail_start: start,
+            next_start: start,
+        }
+    }
+
+    fn is_full(&self) -> bool {
+        self.matches.len() >= self.limit
+    }
+
+    fn finish(self) -> (Vec<u64>, u64) {
+        (self.matches, self.next_start)
+    }
+
+    fn feed_segment(&mut self, display_start: u64, bytes: &[u8]) {
+        if bytes.is_empty() || self.is_full() {
+            return;
+        }
+        if !self.tail.is_empty()
+            && self.tail_start.saturating_add(self.tail.len() as u64) != display_start
+        {
+            self.tail.clear();
+            self.tail_start = display_start;
+        }
+
+        let base = if self.tail.is_empty() {
+            display_start
+        } else {
+            self.tail_start
+        };
+        let mut searchable = Vec::with_capacity(self.tail.len() + bytes.len());
+        searchable.extend_from_slice(&self.tail);
+        searchable.extend_from_slice(bytes);
+
+        let pattern_len = self.pattern.len();
+        let pattern_len_u64 = pattern_len as u64;
+        let mut scan_pos = self
+            .next_start
+            .saturating_sub(base)
+            .min(searchable.len() as u64) as usize;
+
+        while scan_pos + pattern_len <= searchable.len() && !self.is_full() {
+            let Some(relative) = memchr::memmem::find(&searchable[scan_pos..], self.pattern) else {
+                break;
+            };
+            let found_pos = scan_pos + relative;
+            let found = base + found_pos as u64;
+            self.matches.push(found);
+            self.next_start = found.saturating_add(pattern_len_u64);
+            scan_pos = found_pos + pattern_len;
+        }
+
+        let min_tail_index = self
+            .next_start
+            .saturating_sub(base)
+            .min(searchable.len() as u64) as usize;
+        let suffix_start = searchable
+            .len()
+            .saturating_sub(pattern_len.saturating_sub(1));
+        let tail_start_index = suffix_start.max(min_tail_index);
+        self.tail.clear();
+        self.tail.extend_from_slice(&searchable[tail_start_index..]);
+        self.tail_start = base + tail_start_index as u64;
+    }
 }
 
 impl App {
@@ -352,6 +446,7 @@ impl App {
         needle: &[u8],
         replacement: &[u8],
         allow_resize: bool,
+        force: bool,
     ) -> HxResult<()> {
         if needle.is_empty() {
             return Err(HxError::InvalidReplace(
@@ -377,19 +472,30 @@ impl App {
         let visual_selection = self.selection_range();
         let active_selection = self.active_selection_range();
         let (start, end) = active_selection.unwrap_or((0, self.document.len() - 1));
-        let matches = self.collect_replace_matches(start, end, needle)?;
-        if matches.is_empty() {
-            self.set_info_status("replace: no matches");
-            return Ok(());
-        }
 
         let cursor_before = self.cursor;
         let mode_before = self.mode;
-        let cursor_after = matches[0];
         let outcome = if allow_resize {
+            let matches = self.collect_replace_matches(start, end, needle)?;
+            if matches.is_empty() {
+                self.set_info_status("replace: no matches");
+                return Ok(());
+            }
             self.apply_replace_resizing(&matches, needle, replacement)?
         } else {
-            self.apply_replace_same_size(&matches, replacement)?
+            match self.apply_replace_same_size_streaming(start, end, needle, replacement, force)? {
+                ReplaceApplyResult::Applied(outcome) => outcome,
+                ReplaceApplyResult::NoMatches => {
+                    self.set_info_status("replace: no matches");
+                    return Ok(());
+                }
+                ReplaceApplyResult::TooManyMatches { limit } => {
+                    self.set_warning_status(format!(
+                        "replace found more than {limit} matches; rerun with --force to apply"
+                    ));
+                    return Ok(());
+                }
+            }
         };
 
         if visual_selection.is_some() {
@@ -401,7 +507,7 @@ impl App {
         } else {
             self.mode
         };
-        let cursor_after = self.clamp_cursor_for_mode(cursor_after, mode_after);
+        let cursor_after = self.clamp_cursor_for_mode(outcome.first_match, mode_after);
         self.cursor = cursor_after;
         if !outcome.ops.is_empty() {
             self.invalidate_disassembly_cache();
@@ -466,17 +572,212 @@ impl App {
         Ok(matches)
     }
 
-    fn apply_replace_same_size(
+    fn collect_replace_match_batch(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        needle: &[u8],
+        limit: usize,
+    ) -> HxResult<(Vec<u64>, u64)> {
+        if start > end_inclusive || needle.is_empty() || limit == 0 {
+            return Ok((Vec::new(), start));
+        }
+
+        let end = end_inclusive.min(self.document.len().saturating_sub(1));
+        if start > end || end.saturating_sub(start) + 1 < needle.len() as u64 {
+            return Ok((Vec::new(), start));
+        }
+
+        let mut collector = ReplaceMatchCollector::new(needle, limit, start);
+        self.document
+            .walk_visible_byte_segments(start, end, 64 * 1024, |segment| {
+                collector.feed_segment(segment.display_start, segment.bytes);
+                Ok(if collector.is_full() {
+                    WalkControl::Stop
+                } else {
+                    WalkControl::Continue
+                })
+            })?;
+
+        let (matches, next_start) = collector.finish();
+        let filtered = matches
+            .into_iter()
+            .take_while(|offset| {
+                offset
+                    .checked_add(needle.len() as u64 - 1)
+                    .is_some_and(|found_end| found_end <= end)
+            })
+            .collect::<Vec<_>>();
+        let next_start = filtered
+            .last()
+            .map(|offset| offset.saturating_add(needle.len() as u64))
+            .unwrap_or(next_start);
+        Ok((filtered, next_start))
+    }
+
+    fn apply_replace_same_size_streaming(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        needle: &[u8],
+        replacement: &[u8],
+        force: bool,
+    ) -> HxResult<ReplaceApplyResult> {
+        if !force {
+            let (matches, _) = self.collect_replace_match_batch(
+                start,
+                end_inclusive,
+                needle,
+                REPLACE_CONFIRM_LIMIT + 1,
+            )?;
+            if matches.is_empty() {
+                return Ok(ReplaceApplyResult::NoMatches);
+            }
+            if matches.len() > REPLACE_CONFIRM_LIMIT {
+                return Ok(ReplaceApplyResult::TooManyMatches {
+                    limit: REPLACE_CONFIRM_LIMIT,
+                });
+            }
+            let outcome = self.apply_replace_same_size_matches(&matches, needle, replacement)?;
+            return Ok(ReplaceApplyResult::Applied(outcome));
+        }
+
+        let mut all_ops = Vec::new();
+        let mut stats = ReplaceStats {
+            match_count: 0,
+            before_bytes: 0,
+            after_bytes: 0,
+            changed_bytes: 0,
+        };
+        let mut first_match = None;
+        let mut search_start = start;
+
+        loop {
+            let (matches, next_start) = self.collect_replace_match_batch(
+                search_start,
+                end_inclusive,
+                needle,
+                REPLACE_BATCH_LIMIT,
+            )?;
+            if matches.is_empty() {
+                break;
+            }
+
+            first_match.get_or_insert(matches[0]);
+            let outcome = self.apply_replace_same_size_matches(&matches, needle, replacement)?;
+            all_ops.extend(outcome.ops);
+            stats.match_count += outcome.stats.match_count;
+            stats.before_bytes += outcome.stats.before_bytes;
+            stats.after_bytes += outcome.stats.after_bytes;
+            stats.changed_bytes += outcome.stats.changed_bytes;
+
+            if next_start <= search_start || next_start > end_inclusive {
+                break;
+            }
+            search_start = next_start;
+        }
+
+        let Some(first_match) = first_match else {
+            return Ok(ReplaceApplyResult::NoMatches);
+        };
+
+        Ok(ReplaceApplyResult::Applied(ReplaceOutcome {
+            first_match,
+            ops: all_ops,
+            stats,
+        }))
+    }
+
+    fn apply_replace_same_size_matches(
         &mut self,
         matches: &[u64],
+        needle: &[u8],
         replacement: &[u8],
     ) -> HxResult<ReplaceOutcome> {
-        let mut changes = Vec::new();
+        let first_match = matches[0];
+        if needle == replacement {
+            return Ok(ReplaceOutcome {
+                first_match,
+                ops: Vec::new(),
+                stats: ReplaceStats {
+                    match_count: matches.len(),
+                    before_bytes: matches.len() * needle.len(),
+                    after_bytes: matches.len() * replacement.len(),
+                    changed_bytes: 0,
+                },
+            });
+        }
 
-        for &offset in matches {
-            let ids = self
-                .document
-                .cell_ids_range(offset, replacement.len() as u64);
+        let needle_len = needle.len() as u64;
+        let mut ops = Vec::new();
+        let mut changed_bytes = 0usize;
+
+        let mut run_start = matches[0];
+        let mut run_matches = 1usize;
+        let mut previous = matches[0];
+        for &offset in &matches[1..] {
+            if offset == previous + needle_len {
+                run_matches += 1;
+            } else {
+                changed_bytes += self.apply_replace_same_size_run(
+                    run_start,
+                    run_matches,
+                    needle_len,
+                    replacement,
+                    &mut ops,
+                )?;
+                run_start = offset;
+                run_matches = 1;
+            }
+            previous = offset;
+        }
+        changed_bytes += self.apply_replace_same_size_run(
+            run_start,
+            run_matches,
+            needle_len,
+            replacement,
+            &mut ops,
+        )?;
+
+        Ok(ReplaceOutcome {
+            first_match,
+            ops,
+            stats: ReplaceStats {
+                match_count: matches.len(),
+                before_bytes: matches.len() * needle.len(),
+                after_bytes: matches.len() * replacement.len(),
+                changed_bytes,
+            },
+        })
+    }
+
+    fn apply_replace_same_size_run(
+        &mut self,
+        offset: u64,
+        match_count: usize,
+        needle_len: u64,
+        replacement: &[u8],
+        ops: &mut Vec<EditOp>,
+    ) -> HxResult<usize> {
+        let run_len = needle_len
+            .checked_mul(match_count as u64)
+            .ok_or(HxError::OffsetOutOfRange)?;
+        if self.document.replacement_range_is_pristine(offset, run_len) {
+            self.document
+                .overwrite_run_pattern_overlay(offset, run_len, replacement)?;
+            ops.push(EditOp::ReplaceBulk {
+                offset,
+                len: run_len,
+                before: BulkReplacement::Clear,
+                after: BulkReplacement::Pattern(replacement.to_vec()),
+            });
+            return Ok(run_len as usize);
+        }
+
+        let mut changes = Vec::new();
+        for match_index in 0..match_count {
+            let match_offset = offset + needle_len * match_index as u64;
+            let ids = self.document.cell_ids_range(match_offset, needle_len);
             for (id, &byte) in ids.into_iter().zip(replacement.iter()) {
                 if self.document.is_tombstone(id) {
                     return Err(HxError::OffsetOutOfRange);
@@ -490,21 +791,11 @@ impl App {
             }
         }
 
-        Ok(ReplaceOutcome {
-            ops: if changes.is_empty() {
-                Vec::new()
-            } else {
-                vec![EditOp::ReplaceBytes {
-                    changes: changes.clone(),
-                }]
-            },
-            stats: ReplaceStats {
-                match_count: matches.len(),
-                before_bytes: matches.len() * replacement.len(),
-                after_bytes: matches.len() * replacement.len(),
-                changed_bytes: changes.len(),
-            },
-        })
+        let changed = changes.len();
+        if !changes.is_empty() {
+            ops.push(EditOp::ReplaceBytes { changes });
+        }
+        Ok(changed)
     }
 
     fn apply_replace_resizing(
@@ -536,6 +827,7 @@ impl App {
         }
 
         Ok(ReplaceOutcome {
+            first_match: matches[0],
             ops,
             stats: ReplaceStats {
                 match_count: matches.len(),

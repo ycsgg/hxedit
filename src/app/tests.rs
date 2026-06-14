@@ -1646,6 +1646,7 @@ fn replace_command_variants() {
         needle: b"ab".to_vec(),
         replacement: b"xy".to_vec(),
         allow_resize: false,
+        force: false,
     })
     .unwrap();
     assert_eq!(app.document.len(), 6);
@@ -1660,6 +1661,7 @@ fn replace_command_variants() {
         needle: b"ab".to_vec(),
         replacement: b"Z".to_vec(),
         allow_resize: true,
+        force: false,
     })
     .unwrap();
     assert_eq!(app2.document.len(), 4);
@@ -1674,10 +1676,123 @@ fn replace_command_variants() {
         needle: b"ab".to_vec(),
         replacement: b"xy".to_vec(),
         allow_resize: false,
+        force: false,
     })
     .unwrap();
     assert_eq!(app3.document.logical_bytes(0, 5).unwrap(), b"xyxxab");
     assert_eq!(app3.mode, Mode::Normal);
+}
+
+#[test]
+fn replace_same_size_over_match_limit_requires_force() {
+    let bytes = vec![0_u8; 65_536];
+    let mut app = app_with_bytes(&bytes);
+
+    app.execute_command(Command::Replace {
+        needle: vec![0],
+        replacement: vec![1],
+        allow_resize: false,
+        force: false,
+    })
+    .unwrap();
+
+    assert!(app.undo_stack.is_empty());
+    assert!(app.status_message.contains("more than 65535 matches"));
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
+    assert_eq!(app.document.byte_at(65_535).unwrap(), ByteSlot::Present(0));
+
+    let mut forced = app_with_bytes(&bytes);
+    forced
+        .execute_command(Command::Replace {
+            needle: vec![0],
+            replacement: vec![1],
+            allow_resize: false,
+            force: true,
+        })
+        .unwrap();
+
+    assert_eq!(forced.document.byte_at(0).unwrap(), ByteSlot::Present(1));
+    assert_eq!(
+        forced.document.byte_at(65_535).unwrap(),
+        ByteSlot::Present(1)
+    );
+    assert!(forced.status_message.contains("replaced 65536 matches"));
+    forced.undo(1, true).unwrap();
+    assert_eq!(forced.document.byte_at(0).unwrap(), ByteSlot::Present(0));
+    assert_eq!(
+        forced.document.byte_at(65_535).unwrap(),
+        ByteSlot::Present(0)
+    );
+}
+
+#[test]
+fn replace_same_size_uses_non_overlapping_matches() {
+    let mut app = app_with_bytes(b"aaaaa");
+
+    app.execute_command(Command::Replace {
+        needle: b"aa".to_vec(),
+        replacement: b"bb".to_vec(),
+        allow_resize: false,
+        force: false,
+    })
+    .unwrap();
+
+    assert_eq!(app.document.logical_bytes(0, 4).unwrap(), b"bbbba");
+    assert!(app.status_message.contains("replaced 2 matches"));
+}
+
+#[test]
+fn replace_same_size_finds_match_across_scan_chunk_boundary() {
+    let mut bytes = vec![0x11_u8; 64 * 1024 + 4];
+    bytes[64 * 1024 - 1] = 0xaa;
+    bytes[64 * 1024] = 0xbb;
+    let mut app = app_with_bytes(&bytes);
+
+    app.execute_command(Command::Replace {
+        needle: vec![0xaa, 0xbb],
+        replacement: vec![0xcc, 0xdd],
+        allow_resize: false,
+        force: false,
+    })
+    .unwrap();
+
+    assert_eq!(
+        app.document.byte_at(64 * 1024 - 1).unwrap(),
+        ByteSlot::Present(0xcc)
+    );
+    assert_eq!(
+        app.document.byte_at(64 * 1024).unwrap(),
+        ByteSlot::Present(0xdd)
+    );
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.byte_at(64 * 1024 - 1).unwrap(),
+        ByteSlot::Present(0xaa)
+    );
+    assert_eq!(
+        app.document.byte_at(64 * 1024).unwrap(),
+        ByteSlot::Present(0xbb)
+    );
+}
+
+#[test]
+fn replace_same_size_does_not_match_across_tombstone() {
+    let mut app = app_with_bytes(&[0xaa, 0xbb, 0xcc]);
+    app.cursor = 1;
+    app.delete_current().unwrap();
+
+    app.execute_command(Command::Replace {
+        needle: vec![0xaa, 0xcc],
+        replacement: vec![0x11, 0x22],
+        allow_resize: false,
+        force: false,
+    })
+    .unwrap();
+
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0xaa));
+    assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Deleted);
+    assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0xcc));
+    assert!(app.status_message.contains("no matches"));
 }
 
 #[test]
@@ -2481,6 +2596,7 @@ fn sagitta_invalidates_tombstone_real_delete_and_resize_replace() {
             needle: vec![1],
             replacement: vec![0xaa, 0xbb],
             allow_resize: true,
+            force: false,
         })
         .unwrap();
     assert_eq!(
@@ -3884,6 +4000,7 @@ fn disassembly_insert_blocked_and_replace_restricted() {
         needle: vec![0x90],
         replacement: vec![0xcc],
         allow_resize: false,
+        force: false,
     })
     .unwrap();
     let state2 = match &app2.main_view {
@@ -3903,6 +4020,7 @@ fn disassembly_insert_blocked_and_replace_restricted() {
         needle: vec![0x90],
         replacement: vec![0xcc, 0xcc],
         allow_resize: true,
+        force: false,
     });
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("overwrite-only"));

@@ -134,6 +134,7 @@ pub enum Command {
         needle: Vec<u8>,
         replacement: Vec<u8>,
         allow_resize: bool,
+        force: bool,
     },
     SearchAscii {
         pattern: Vec<u8>,

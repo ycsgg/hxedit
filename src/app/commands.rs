@@ -60,7 +60,8 @@ impl App {
                 needle,
                 replacement,
                 allow_resize,
-            } => self.execute_replace_command(&needle, &replacement, allow_resize),
+                force,
+            } => self.execute_replace_command(&needle, &replacement, allow_resize, force),
             Command::Inspector => {
                 self.close_diff_projection_for_side_panel_switch();
                 self.execute_inspector_command();
