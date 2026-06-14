@@ -1555,7 +1555,7 @@ fn paste_overwrite_clean_range_uses_bulk_bytes_undo() {
 }
 
 #[test]
-fn paste_overwrite_existing_replacement_keeps_per_byte_undo() {
+fn paste_overwrite_existing_replacement_uses_mixed_patch_undo() {
     let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
     app.document.replace_display_byte(1, 0xab).unwrap();
     app.cursor = 0;
@@ -1563,11 +1563,23 @@ fn paste_overwrite_existing_replacement_keeps_per_byte_undo() {
     assert_eq!(app.apply_paste_overwrite(&[0xff, 0xee, 0xdd]).unwrap(), 3);
 
     let step = app.undo_stack.last().expect("paste should push undo");
-    assert!(matches!(&step.ops[0], EditOp::ReplaceBytes { .. }));
+    assert!(matches!(
+        &step.ops[0],
+        EditOp::ReplacePatch {
+            offset: 0,
+            len: 3,
+            ..
+        }
+    ));
     app.undo(1, true).unwrap();
     assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x10));
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
     assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
+    app.redo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0xff, 0xee, 0xdd, 0x13]
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1655,7 +1667,7 @@ fn fill_matching_pattern_still_pushes_undo_and_marks_dirty() {
 }
 
 #[test]
-fn fill_existing_replacement_keeps_per_byte_undo() {
+fn fill_existing_replacement_uses_mixed_patch_undo() {
     let mut app = app_with_bytes(&[0x10, 0x11, 0x12, 0x13]);
     app.cursor = 1;
     app.document.replace_display_byte(1, 0xab).unwrap();
@@ -1669,11 +1681,23 @@ fn fill_existing_replacement_keeps_per_byte_undo() {
     .unwrap();
 
     let step = app.undo_stack.last().expect("fill should push undo");
-    assert!(matches!(&step.ops[0], EditOp::ReplaceBytes { .. }));
+    assert!(matches!(
+        &step.ops[0],
+        EditOp::ReplacePatch {
+            offset: 0,
+            len: 3,
+            ..
+        }
+    ));
     app.undo(1, true).unwrap();
     assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0x10));
     assert_eq!(app.document.byte_at(1).unwrap(), ByteSlot::Present(0xab));
     assert_eq!(app.document.byte_at(2).unwrap(), ByteSlot::Present(0x12));
+    app.redo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0xff, 0xff, 0xff, 0x13]
+    );
 }
 
 #[test]
@@ -1751,6 +1775,42 @@ fn replace_command_variants() {
     .unwrap();
     assert_eq!(app3.document.logical_bytes(0, 5).unwrap(), b"xyxxab");
     assert_eq!(app3.mode, Mode::Normal);
+}
+
+#[test]
+fn replace_same_size_dirty_range_uses_mixed_patch_undo() {
+    let mut app = app_with_bytes(b"abcabc");
+    app.document
+        .overwrite_run_pattern_overlay(0, 2, b"ab")
+        .unwrap();
+    assert!(app.document.is_dirty());
+    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"abcabc");
+
+    app.execute_command(Command::Replace {
+        needle: b"ab".to_vec(),
+        replacement: b"xy".to_vec(),
+        allow_resize: false,
+        force: false,
+    })
+    .unwrap();
+
+    let step = app.undo_stack.last().expect("replace should push undo");
+    assert!(step.ops.iter().any(|op| matches!(
+        op,
+        EditOp::ReplacePatch {
+            offset: 0,
+            len: 2,
+            ..
+        }
+    )));
+    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"xycxyc");
+
+    app.undo(1, true).unwrap();
+    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"abcabc");
+    assert_eq!(app.document.replacement_dirty_bytes(), 2);
+
+    app.redo(1, true).unwrap();
+    assert_eq!(app.document.logical_bytes(0, 5).unwrap(), b"xycxyc");
 }
 
 #[test]
@@ -1942,6 +2002,50 @@ fn xor_bang_clean_range_uses_bulk_undo() {
         app.document.logical_bytes(0, 3).unwrap(),
         vec![0x0f, 0xf0, 0xaa, 0x55]
     );
+    app.redo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0xf0, 0x0f, 0x55, 0x55]
+    );
+}
+
+#[test]
+fn xor_bang_dirty_range_uses_mixed_patch_undo() {
+    let mut app = app_with_bytes(&[0x0f, 0xf0, 0xaa, 0x55]);
+    app.document
+        .overwrite_run_pattern_overlay(0, 3, &[0x0f, 0xf0, 0xaa])
+        .unwrap();
+    assert!(app.document.is_dirty());
+    app.toggle_visual();
+    app.move_horizontal(2);
+
+    app.execute_command(Command::Xor {
+        key: 0xff,
+        in_place: true,
+    })
+    .unwrap();
+
+    let step = app.undo_stack.last().expect("xor! should push undo");
+    assert!(matches!(
+        &step.ops[0],
+        EditOp::ReplacePatch {
+            offset: 0,
+            len: 3,
+            ..
+        }
+    ));
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0xf0, 0x0f, 0x55, 0x55]
+    );
+
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0x0f, 0xf0, 0xaa, 0x55]
+    );
+    assert_eq!(app.document.replacement_dirty_bytes(), 3);
+
     app.redo(1, true).unwrap();
     assert_eq!(
         app.document.logical_bytes(0, 3).unwrap(),

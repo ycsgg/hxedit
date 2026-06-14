@@ -41,7 +41,7 @@ use ratatui::Terminal;
 use crate::action::Action;
 use crate::cli::{Cli, CliTarget};
 use crate::config::Config;
-use crate::core::document::Document;
+use crate::core::document::{Document, ReplacementPatch};
 use crate::core::piece_table::CellId;
 use crate::disasm::{DisasmCache, DisassemblyState};
 use crate::format::parse::{InspectorRow, NodePath};
@@ -278,6 +278,8 @@ pub(crate) enum BulkReplacement {
 /// - `ReplaceBytes` — undo by restoring each cell's previous replacement.
 /// - `ReplaceBulk` — undo/redo by applying compact replacement recipes to a
 ///   display range whose pre-edit replacement state was proven simple.
+/// - `ReplacePatch` — undo/redo by restoring a run-based replacement snapshot
+///   for dirty or mixed ranges without expanding one entry per byte.
 #[derive(Debug, Clone)]
 pub(crate) enum EditOp {
     Insert {
@@ -299,6 +301,12 @@ pub(crate) enum EditOp {
         len: u64,
         before: BulkReplacement,
         after: BulkReplacement,
+    },
+    ReplacePatch {
+        offset: u64,
+        len: u64,
+        before: ReplacementPatch,
+        after: ReplacementPatch,
     },
 }
 

@@ -103,9 +103,9 @@ fn write_sparse_diff_pair(
 }
 
 fn print(label: &str, elapsed: Duration, unit_count: usize) {
-    let ns = elapsed.as_nanos();
-    let per = ns as f64 / unit_count.max(1) as f64;
-    eprintln!("[bench] {label:<48} total {ns:>12} ns  per-op {per:>10.1} ns  (N={unit_count})");
+    let ms = elapsed.as_secs_f64() * 1000.0;
+    let per = elapsed.as_nanos() as f64 / unit_count.max(1) as f64;
+    eprintln!("[bench] {label:<48} total {ms:>12.6} ms  per-op {per:>10.1} ns  (N={unit_count})");
 }
 
 #[cfg(unix)]
@@ -825,6 +825,68 @@ fn bench_edit_256mb_fill_overlay_64mb() -> BenchResult {
     Ok(())
 }
 
+fn bench_edit_256mb_mixed_paste_overwrite_64mb() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("edit-256-mixed-paste-overwrite.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &[0x7f])?;
+    assert!(!doc.replacement_range_is_pristine(0, EDIT_256_BULK_BYTES as u64));
+    let bytes = vec![1_u8; EDIT_256_BULK_BYTES];
+
+    let t = Instant::now();
+    let (written, runs) = doc.overwrite_run_bytes_overlay_changed(0, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(runs.len(), 1);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "edit 256MB mixed paste overwrite 64MB",
+        elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_mixed_fill_overlay_64mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-mixed-fill.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &[0x11])?;
+    assert!(!doc.replacement_range_is_pristine(0, EDIT_256_BULK_BYTES as u64));
+
+    let t = Instant::now();
+    let stats = doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &[0x22, 0x33])?;
+    let elapsed = t.elapsed();
+    assert_eq!(stats.visited, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(stats.changed, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "edit 256MB mixed fill 64MB overlay",
+        elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_mixed_xor_overlay_64mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-mixed-xor.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &[0x11, 0x22])?;
+    assert!(!doc.replacement_range_is_pristine(0, EDIT_256_BULK_BYTES as u64));
+
+    let t = Instant::now();
+    let stats = doc.xor_visible_range_mixed_overlay(0, EDIT_256_BULK_BYTES as u64 - 1, 0x5a)?;
+    let elapsed = t.elapsed();
+    assert_eq!(stats.visited, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(stats.changed, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "edit 256MB mixed xor 64MB overlay",
+        elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
 fn bench_logical_bytes_large_copy() -> BenchResult {
     let (_dir, path) = write_patterned_file("logical-bytes.bin", 8 * 1024 * 1024)?;
     let mut doc = Document::open(&path, &bench_config())?;
@@ -1228,6 +1290,18 @@ fn benches() -> &'static [BenchEntry] {
         (
             "edit_256mb_fill_overlay_64mb",
             bench_edit_256mb_fill_overlay_64mb,
+        ),
+        (
+            "edit_256mb_mixed_paste_overwrite_64mb",
+            bench_edit_256mb_mixed_paste_overwrite_64mb,
+        ),
+        (
+            "edit_256mb_mixed_fill_overlay_64mb",
+            bench_edit_256mb_mixed_fill_overlay_64mb,
+        ),
+        (
+            "edit_256mb_mixed_xor_overlay_64mb",
+            bench_edit_256mb_mixed_xor_overlay_64mb,
         ),
         ("logical_bytes_large_copy", bench_logical_bytes_large_copy),
         ("export_stream_64mb", bench_export_stream_64mb),

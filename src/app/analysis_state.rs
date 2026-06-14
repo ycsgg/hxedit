@@ -802,6 +802,11 @@ fn validity_for_edit_ops(ops: &[EditOp]) -> Option<AnalysisValidity> {
             } if *len > 0 && before != after => {
                 validity = Some(AnalysisValidity::OutdatedBytes);
             }
+            EditOp::ReplacePatch {
+                len, before, after, ..
+            } if *len > 0 && before != after => {
+                validity = Some(AnalysisValidity::OutdatedBytes);
+            }
             _ => {}
         }
     }

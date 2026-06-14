@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::core::document::{BytesOverlayRun, Document};
+use crate::core::document::{BytesOverlayRun, Document, ReplacementPatch};
 use crate::core::piece_table::CellId;
 use crate::error::{HxError, HxResult};
 use crate::mode::NibblePhase;
@@ -86,6 +86,125 @@ impl Document {
             display_cursor = piece_end;
         }
         true
+    }
+
+    pub(crate) fn replacement_patch_for_display_range(
+        &self,
+        offset: u64,
+        len: u64,
+    ) -> HxResult<ReplacementPatch> {
+        if len == 0 {
+            return Ok(ReplacementPatch::default());
+        }
+        let end = offset.checked_add(len).ok_or(HxError::OffsetOutOfRange)?;
+        if end > self.len() {
+            return Err(HxError::OffsetOutOfRange);
+        }
+
+        let mut patch = ReplacementPatch::default();
+        let mut display_cursor = 0_u64;
+        for piece in self.pieces_snapshot() {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor.saturating_add(piece.len);
+            if piece_end <= offset {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = offset.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_start = piece.start + (overlap_start - display_cursor);
+                patch.extend(self.replacements.patch_for_source_range(
+                    piece.source,
+                    source_start,
+                    overlap_end - overlap_start,
+                ));
+            }
+            display_cursor = piece_end;
+        }
+        Ok(patch)
+    }
+
+    pub(crate) fn restore_replacement_patch_in_display_range(
+        &mut self,
+        offset: u64,
+        len: u64,
+        patch: &ReplacementPatch,
+    ) -> HxResult<()> {
+        self.clear_replacements_in_display_range(offset, len)?;
+        self.replacements.apply_patch(patch);
+        Ok(())
+    }
+
+    pub(crate) fn display_range_has_tombstone(&self, offset: u64, len: u64) -> bool {
+        if len == 0 || offset >= self.len() || !self.has_tombstones() {
+            return false;
+        }
+        let end = offset.saturating_add(len).min(self.len());
+        let mut display_cursor = 0_u64;
+        for piece in self.pieces_snapshot() {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor.saturating_add(piece.len);
+            if piece_end <= offset {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = offset.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_start = piece.start + (overlap_start - display_cursor);
+                let lo = CellId::from_source(piece.source, source_start);
+                let hi = CellId::from_source(
+                    piece.source,
+                    source_start + overlap_end - overlap_start - 1,
+                );
+                if self.has_tombstone_in_range(lo, hi) {
+                    return true;
+                }
+            }
+            display_cursor = piece_end;
+        }
+        false
+    }
+
+    pub(crate) fn display_range_has_sparse_replacement(&self, offset: u64, len: u64) -> bool {
+        if len == 0 || offset >= self.len() || !self.has_replacements() {
+            return false;
+        }
+        let end = offset.saturating_add(len).min(self.len());
+        let mut display_cursor = 0_u64;
+        for piece in self.pieces_snapshot() {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor.saturating_add(piece.len);
+            if piece_end <= offset {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = offset.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_start = piece.start + (overlap_start - display_cursor);
+                let lo = CellId::from_source(piece.source, source_start);
+                let hi = CellId::from_source(
+                    piece.source,
+                    source_start + overlap_end - overlap_start - 1,
+                );
+                if self.replacements.has_sparse_in_range(lo, hi) {
+                    return true;
+                }
+            }
+            display_cursor = piece_end;
+        }
+        false
     }
 
     /// Tombstone-delete a byte (normal/visual mode). The cell keeps its
@@ -328,6 +447,138 @@ impl Document {
         }
 
         Ok(stats)
+    }
+
+    pub fn xor_visible_range_bytes_overlay_changed(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        key: u8,
+    ) -> HxResult<CompactReplacementStats> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let len = self.len();
+        if len == 0 || start > end_inclusive || start >= len {
+            return Ok(CompactReplacementStats {
+                visited: 0,
+                changed: 0,
+            });
+        }
+
+        let mut stats = CompactReplacementStats {
+            visited: 0,
+            changed: 0,
+        };
+        self.walk_visible_cells(
+            start,
+            end_inclusive,
+            REPLACEMENT_CHUNK as usize,
+            |document, chunk| {
+                let mut run_start = 0_u64;
+                let mut run_bytes = Vec::new();
+
+                for cell in chunk.cells {
+                    if cell.deleted {
+                        document.flush_bytes_overlay_run(run_start, &mut run_bytes)?;
+                        continue;
+                    }
+
+                    stats.visited += 1;
+                    let updated = cell.byte ^ key;
+                    if updated == cell.byte {
+                        document.flush_bytes_overlay_run(run_start, &mut run_bytes)?;
+                        continue;
+                    }
+
+                    stats.changed += 1;
+                    if run_bytes.is_empty() {
+                        run_start = cell.display_offset;
+                    } else if run_start + run_bytes.len() as u64 != cell.display_offset {
+                        document.flush_bytes_overlay_run(run_start, &mut run_bytes)?;
+                        run_start = cell.display_offset;
+                    }
+                    run_bytes.push(updated);
+                }
+
+                document.flush_bytes_overlay_run(run_start, &mut run_bytes)?;
+                Ok(WalkControl::Continue)
+            },
+        )?;
+
+        Ok(stats)
+    }
+
+    pub fn xor_visible_range_mixed_overlay(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        key: u8,
+    ) -> HxResult<CompactReplacementStats> {
+        if self.readonly {
+            return Err(HxError::ReadOnly);
+        }
+        let len = self.len();
+        if len == 0 || start > end_inclusive || start >= len {
+            return Ok(CompactReplacementStats {
+                visited: 0,
+                changed: 0,
+            });
+        }
+
+        let end = end_inclusive.min(len - 1) + 1;
+        let range_len = end - start;
+        if self.display_range_has_tombstone(start, range_len)
+            || self.display_range_has_sparse_replacement(start, range_len)
+        {
+            return self.xor_visible_range_bytes_overlay_changed(start, end - 1, key);
+        }
+
+        let mut stats = CompactReplacementStats {
+            visited: 0,
+            changed: 0,
+        };
+        let pieces = self.pieces_snapshot();
+        let mut display_cursor = 0_u64;
+        for piece in pieces {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor + piece.len;
+            if piece_end <= start {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = start.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_start = piece.start + (overlap_start - display_cursor);
+                let segment_len = overlap_end - overlap_start;
+                self.replacements.xor_source_range_composed(
+                    piece.source,
+                    source_start,
+                    segment_len,
+                    key,
+                );
+                stats.visited += segment_len;
+                if key != 0 {
+                    stats.changed += segment_len;
+                }
+            }
+            display_cursor = piece_end;
+        }
+
+        Ok(stats)
+    }
+
+    fn flush_bytes_overlay_run(&mut self, run_start: u64, run_bytes: &mut Vec<u8>) -> HxResult<()> {
+        if run_bytes.is_empty() {
+            return Ok(());
+        }
+        let bytes: Arc<[u8]> = Arc::from(std::mem::take(run_bytes));
+        self.overwrite_run_bytes_overlay(run_start, bytes)?;
+        Ok(())
     }
 
     /// Overwrite a run of consecutive display cells starting at `offset`,

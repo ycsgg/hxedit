@@ -147,7 +147,6 @@ impl App {
             return Err(HxError::ReadOnly);
         }
         let cursor_before = self.cursor;
-        let pattern_len = pattern.len() as u64;
         let doc_len = self.document.len();
         let applied = if cursor_before >= doc_len {
             0
@@ -174,22 +173,37 @@ impl App {
             };
             (stats.visited, stats.changed as usize, ops)
         } else {
-            let (written, changes) =
+            if self
+                .document
+                .display_range_has_tombstone(cursor_before, applied)
+            {
+                return Err(HxError::OffsetOutOfRange);
+            }
+            let before = self
+                .document
+                .replacement_patch_for_display_range(cursor_before, applied)?;
+            let stats =
                 self.document
-                    .overwrite_run_positional(cursor_before, run_len, |run_index| {
-                        pattern[(run_index % pattern_len) as usize]
-                    })?;
-            let changes: Vec<ReplacementChange> = changes
-                .into_iter()
-                .map(|(id, before, after)| ReplacementChange { id, before, after })
-                .collect();
-            let changed_count = changes.len();
-            let ops = if changes.is_empty() {
+                    .overwrite_run_pattern_overlay(cursor_before, run_len, pattern)?;
+            let after = self
+                .document
+                .replacement_patch_for_display_range(cursor_before, stats.visited)?;
+            let changed_count = if before == after {
+                0
+            } else {
+                stats.changed as usize
+            };
+            let ops = if before == after {
                 Vec::new()
             } else {
-                vec![EditOp::ReplaceBytes { changes }]
+                vec![EditOp::ReplacePatch {
+                    offset: cursor_before,
+                    len: stats.visited,
+                    before,
+                    after,
+                }]
             };
-            (written, changed_count, ops)
+            (stats.visited, changed_count, ops)
         };
 
         if written == 0 {
@@ -373,20 +387,31 @@ impl App {
             };
             (stats.visited, stats.changed as usize, ops)
         } else {
-            let (visible_count, raw_changes) =
-                self.document
-                    .transform_visible_range_in_place(start, end, |byte| byte ^ key)?;
-            let changes: Vec<ReplacementChange> = raw_changes
-                .into_iter()
-                .map(|(id, before, after)| ReplacementChange { id, before, after })
-                .collect();
-            let changed_count = changes.len();
-            let ops = if changes.is_empty() {
+            let before = self
+                .document
+                .replacement_patch_for_display_range(start, range_len)?;
+            let stats = self
+                .document
+                .xor_visible_range_mixed_overlay(start, end, key)?;
+            let after = self
+                .document
+                .replacement_patch_for_display_range(start, range_len)?;
+            let changed_count = if before == after {
+                0
+            } else {
+                stats.changed as usize
+            };
+            let ops = if before == after {
                 Vec::new()
             } else {
-                vec![EditOp::ReplaceBytes { changes }]
+                vec![EditOp::ReplacePatch {
+                    offset: start,
+                    len: range_len,
+                    before,
+                    after,
+                }]
             };
-            (visible_count, changed_count, ops)
+            (stats.visited, changed_count, ops)
         };
         if visible_count == 0 {
             self.set_info_status("xor!: no logical bytes in selection");
@@ -774,26 +799,31 @@ impl App {
             return Ok(run_len as usize);
         }
 
-        let mut changes = Vec::new();
-        for match_index in 0..match_count {
-            let match_offset = offset + needle_len * match_index as u64;
-            let ids = self.document.cell_ids_range(match_offset, needle_len);
-            for (id, &byte) in ids.into_iter().zip(replacement.iter()) {
-                if self.document.is_tombstone(id) {
-                    return Err(HxError::OffsetOutOfRange);
-                }
-                let before = self.document.replacement_state(id)?;
-                self.document.replace_display_byte_by_id(id, byte)?;
-                let after = self.document.replacement_state(id)?;
-                if after != before {
-                    changes.push(ReplacementChange { id, before, after });
-                }
-            }
+        if self.document.display_range_has_tombstone(offset, run_len) {
+            return Err(HxError::OffsetOutOfRange);
         }
+        let before = self
+            .document
+            .replacement_patch_for_display_range(offset, run_len)?;
+        let stats = self
+            .document
+            .overwrite_run_pattern_overlay(offset, run_len, replacement)?;
+        let after = self
+            .document
+            .replacement_patch_for_display_range(offset, stats.visited)?;
 
-        let changed = changes.len();
-        if !changes.is_empty() {
-            ops.push(EditOp::ReplaceBytes { changes });
+        let changed = if before == after {
+            0
+        } else {
+            stats.changed as usize
+        };
+        if before != after {
+            ops.push(EditOp::ReplacePatch {
+                offset,
+                len: stats.visited,
+                before,
+                after,
+            });
         }
         Ok(changed)
     }

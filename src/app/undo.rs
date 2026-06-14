@@ -121,6 +121,11 @@ impl App {
             EditOp::ReplaceBulk {
                 offset, len, after, ..
             } => self.apply_bulk_replacement(*offset, *len, after)?,
+            EditOp::ReplacePatch {
+                offset, len, after, ..
+            } => self
+                .document
+                .restore_replacement_patch_in_display_range(*offset, *len, after)?,
         }
         Ok(())
     }
@@ -149,6 +154,14 @@ impl App {
                 before,
                 ..
             } => self.apply_bulk_replacement(*offset, *len, before)?,
+            EditOp::ReplacePatch {
+                offset,
+                len,
+                before,
+                ..
+            } => self
+                .document
+                .restore_replacement_patch_in_display_range(*offset, *len, before)?,
         }
         Ok(())
     }
@@ -254,6 +267,9 @@ fn edit_op_has_effect(op: &EditOp) -> bool {
             changes.iter().any(|change| change.before != change.after)
         }
         EditOp::ReplaceBulk {
+            len, before, after, ..
+        } => *len > 0 && before != after,
+        EditOp::ReplacePatch {
             len, before, after, ..
         } => *len > 0 && before != after,
     }

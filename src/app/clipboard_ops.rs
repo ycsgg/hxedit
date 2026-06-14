@@ -264,28 +264,30 @@ impl App {
                 })
                 .collect()
         } else {
-            let ids = self.document.cell_ids_range(cursor_before, applied as u64);
-            let mut changes = Vec::with_capacity(applied);
-
-            for (byte, id) in bytes[..applied].iter().copied().zip(ids.into_iter()) {
-                if self.document.is_tombstone(id) {
-                    return Err(HxError::OffsetOutOfRange);
-                }
-                let previous = self.document.replacement_state(id)?;
-                self.document.replace_display_byte_by_id(id, byte)?;
-                let after = self.document.replacement_state(id)?;
-                if after != previous {
-                    changes.push(crate::app::ReplacementChange {
-                        id,
-                        before: previous,
-                        after,
-                    });
-                }
+            let len = applied as u64;
+            if self
+                .document
+                .display_range_has_tombstone(cursor_before, len)
+            {
+                return Err(HxError::OffsetOutOfRange);
             }
-            if changes.is_empty() {
+            let before = self
+                .document
+                .replacement_patch_for_display_range(cursor_before, len)?;
+            self.document
+                .overwrite_run_bytes_overlay_changed(cursor_before, &bytes[..applied])?;
+            let after = self
+                .document
+                .replacement_patch_for_display_range(cursor_before, len)?;
+            if before == after {
                 Vec::new()
             } else {
-                vec![EditOp::ReplaceBytes { changes }]
+                vec![EditOp::ReplacePatch {
+                    offset: cursor_before,
+                    len,
+                    before,
+                    after,
+                }]
             }
         };
 
