@@ -121,7 +121,7 @@ cache_pages = 128                  # page-cache capacity
 | `:export <path>` / `:export c` / `:export py` | Export logical bytes |
 | `:xor <key>` / `:xor! <key>` | XOR active selection to clipboard / XOR in place (`key`: decimal `0..255` or hex `0x00..0xff`) |
 | `:fill <pattern> <len>` / `:zero <len>` | Overwrite transforms |
-| `:re [--force] ...` / `:re! ...` | Equal-length replace / length-changing replace; `:re` asks for `--force` when more than 65535 matches are found |
+| `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | Replace using the same modes as `:s` (`/text/`, `x/hex/`, `b/byte/`, typed integers). `:re` is equal-length and asks for `--force` when more than 65535 matches are found; `:re!` allows length changes. Legacy `hex/ascii <needle> -> <replacement>` remains accepted |
 | `:hash md5|sha1|sha256|sha512|crc32` | Hash |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh|next|prev|off` | Show a synchronized page comparing current logical bytes with another file; visible pages realign inserted/deleted bytes within `N`, equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__`; `next` / `prev` scan in large progress-reporting steps, block other input while scanning, and Esc cancels |
 | `:insp` / `:insp more` | Open inspector / reveal more paginated entries |

@@ -67,3 +67,22 @@
 - [x] **[P2] 性能类测试应迁移到 `cargo bench` 管理**
   - 现状：性能观测已迁移到 `cargo bench --bench perf_bench`，覆盖 16MB/64MB save 场景、hash / logical_bytes / paste overwrite / piece lookup / ELF parse / 当前 search 路径
   - 已完成：`cargo test` 中的大文件用例只保留 correctness 断言，不再使用 wall-clock 阈值；benchmark 输出统一由 bench harness 管理
+
+- [x] **[P1] clean range replacement undo 避免 per-byte 展开**
+  - 已解决：`ReplacementStore` 支持稳定 `CellId` range overlay；clean `:fill` / `:zero` / `:xor!` 走 compact `EditOp::ReplaceBulk`，undo/redo 通过 clear / pattern / xor bulk record 恢复，不再为大范围 clean overwrite 保存逐字节 undo
+  - 已解决：`:fill` / `:zero` 的语义是覆盖范围全部改变，clean fast path 不再额外扫描 base bytes 统计 changed，避免大范围 no-op 检测拖慢 apply
+  - 范围之外：已有 replacement/tombstone 的 dirty range 仍保留在当前 backlog，不能用 clean range 语义直接覆盖
+
+- [x] **[P1] 等长 `:re` 避免默认 OOM**
+  - 已解决：等长 `:re` 默认先预检至多 65536 个 match，超过 65535 不执行并提示使用 `--force`
+  - 已解决：等长 `:re --force` 按批扫描 / 应用，不再一次性收集全量 match；clean 连续命中压成 pattern range overlay + compact undo，tombstone 会切断可匹配 segment
+  - 范围之外：变长 `:re!` 仍在当前 backlog，需要单独设计快照搜索和 offset delta 映射
+
+- [x] **[P2] `:diff` next/prev mismatch 避免不可取消同步全量扫描**
+  - 已解决：diff mismatch navigation 改为分块扫描 / 可取消 stepper；长距离 mismatch 查找期间只允许 `Esc` 取消，并定期刷新进度，避免 1GB 级文件上长时间无反馈卡住 UI
+  - 范围之外：跨页 shift-aware alignment cache / progress 仍保留为后续可选 backlog
+
+- [x] **[P2] 文件搜索 clean / sparse-dirty 路径换成 chunked memmem**
+  - 已解决：clean 文档扫描换成 `memchr::memmem::find` / `rfind`，保留 chunk + `pattern.len()-1` overlap；256MB worst-case 从约 307ms 降到约 53ms
+  - 已解决：dirty 文档不再整篇退回逐字节 KMP；逐 chunk 判定脏净，clean chunk 走 memmem，只有含 tombstone / replacement 的 chunk 才逐 cell；256MB + 单 tombstone worst-case 从约 333ms 降到约 38ms
+  - 范围之外：dense range overlay search 仍可能同步卡顿，保留在当前 backlog

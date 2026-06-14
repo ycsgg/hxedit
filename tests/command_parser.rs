@@ -182,6 +182,42 @@ fn parses_basic_commands() {
         }
     );
     assert_eq!(
+        parse_command("re /hello/world/").unwrap(),
+        Command::Replace {
+            needle: b"hello".to_vec(),
+            replacement: b"world".to_vec(),
+            allow_resize: false,
+            force: false,
+        }
+    );
+    assert_eq!(
+        parse_command("re --force x/de ad/be ef/").unwrap(),
+        Command::Replace {
+            needle: vec![0xde, 0xad],
+            replacement: vec![0xbe, 0xef],
+            allow_resize: false,
+            force: true,
+        }
+    );
+    assert_eq!(
+        parse_command("re u32be/0x01020304/0x05060708/").unwrap(),
+        Command::Replace {
+            needle: vec![0x01, 0x02, 0x03, 0x04],
+            replacement: vec![0x05, 0x06, 0x07, 0x08],
+            allow_resize: false,
+            force: false,
+        }
+    );
+    assert_eq!(
+        parse_command("re! @hello/world@hi@").unwrap(),
+        Command::Replace {
+            needle: b"hello/world".to_vec(),
+            replacement: b"hi".to_vec(),
+            allow_resize: true,
+            force: false,
+        }
+    );
+    assert_eq!(
         parse_command("s hello").unwrap(),
         Command::SearchAscii {
             pattern: b"hello".to_vec(),
@@ -262,6 +298,8 @@ fn rejects_invalid_commands() {
     assert!(parse_command("re de ad -> be").is_err());
     assert!(parse_command("re!").is_err());
     assert!(parse_command("re ascii hello world").is_err());
+    assert!(parse_command("re /hello/world").is_err());
+    assert!(parse_command("re /hello/x/ trailing").is_err());
     assert!(parse_command("undo nope").is_err());
     assert!(parse_command("undo 0").is_err());
     assert!(parse_command("redo nope").is_err());

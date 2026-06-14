@@ -55,7 +55,7 @@
 - `:export` 始终导出 logical bytes；如果 display span 与逻辑字节数不同，状态栏文案要区分清楚；binary 导出走 `Document::for_each_logical_chunk` 边读边写 `BufWriter`，不要回退成 `logical_bytes` 整段物化（C array / Python bytes 文本导出仍可整段）
 - `:xor` 只复制 active selection 的 XOR 后 logical bytes；`:xor!` 是 replacement 语义原地覆盖，不做 real delete / insert；key 不带 `0x` 时按十进制解析；`:xor!` clean range 走 compact bulk undo + `ReplacementStore` xor range overlay，复杂 range 回退 per-byte undo；不要回退成整段读出
 - 任何按 chunk 读 original 的路径都应通过 `Document` walker，或显式复用 `Document::max_contiguous_read_len()` 裁剪单次读长，避免小 cache 配置下过度换页；`PageCache::read_range` 本身必须能安全组装跨 cache-capacity 的范围
-- `:re` 默认只能做等长 replacement；命中数超过 65535 时要求用户用 `--force` 二次确认，确认后按批次扫描 / 应用，clean 连续命中走 compact bulk undo + `ReplacementStore` pattern range overlay，dirty/复杂 run 可退回 per-byte undo；`:re!` 才允许 real delete + insert，仍走变长路径，别把两者写混
+- `:re` 使用与 `:s` 相同的 `[mode]<delim><needle><delim><replacement><delim>` 解析（旧 `hex/ascii <needle> -> <replacement>` 仍兼容），默认只能做等长 replacement；命中数超过 65535 时要求用户用 `--force` 二次确认，确认后按批次扫描 / 应用，clean 连续命中走 compact bulk undo + `ReplacementStore` pattern range overlay，dirty/复杂 run 可退回 per-byte undo；`:re!` 才允许 real delete + insert，仍走变长路径，别把两者写混
 - `:re!` 在 visual selection 上执行后应退出 Visual，避免旧 display range 在长度变化后继续悬空
 - 当前 `:diff` 已落地，并且必须继续保持为“只读同步滚动 side panel”：current side 是 current logical bytes，other side 是对比文件 raw bytes；打开时不要全文件预扫描，不要写入 `Document`，不要进入 undo / save
 - `:diff` 可见页会在 `max_shift` 范围内做局部重对齐，避免一个 insert / delete 后把后续整页全部染成 replace；不要为了修局部对齐退回打开时全文件扫描

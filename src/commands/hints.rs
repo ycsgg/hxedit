@@ -53,12 +53,12 @@ pub fn hint_for(input: &str) -> CommandHint {
             details: "overwrite bytes from cursor with 0x00 for len bytes".to_owned(),
         },
         name if is_alias(name, REPLACE_ALIASES) => CommandHint {
-            syntax: format!("{name} [--force] [hex|ascii] <needle> -> <replacement>"),
+            syntax: format!("{name} [--force] [mode]<delim><needle><delim><replacement><delim>"),
             details: if name.ends_with('!') {
                 "replace all non-overlapping matches in the active selection (visual or selected inspector field) or entire file; ! allows length changes via real delete/insert"
                     .to_owned()
             } else {
-                "replace all non-overlapping matches with equal-length data; defaults to hex mode, or use ascii for text; --force applies when more than 65535 matches are found"
+                "replace all non-overlapping matches with equal-length data; modes match :s (/text/, x/hex/, b/byte/, u32/u64 and signed variants); --force applies when more than 65535 matches are found"
                     .to_owned()
             },
         },
@@ -504,9 +504,9 @@ mod tests {
     }
 
     #[test]
-    fn replace_hint_mentions_ascii_and_resize_mode() {
+    fn replace_hint_mentions_mode_and_resize_mode() {
         let hint = hint_for("re!");
-        assert!(hint.syntax.contains("ascii"));
+        assert!(hint.syntax.contains("[mode]<delim>"));
         assert!(hint.details.contains("length changes"));
     }
 }

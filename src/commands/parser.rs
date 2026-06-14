@@ -270,6 +270,10 @@ fn parse_search_delimited_pattern(input: &str) -> HxResult<Option<(&str, &str, &
 }
 
 fn parse_search_pattern(mode: &str, body: &str) -> HxResult<(Vec<u8>, bool)> {
+    parse_mode_pattern("s", mode, body)
+}
+
+fn parse_mode_pattern(command: &str, mode: &str, body: &str) -> HxResult<(Vec<u8>, bool)> {
     match mode {
         "" | "s" | "str" | "utf8" => Ok((body.as_bytes().to_vec(), true)),
         "x" | "hex" => parse_hex_stream(body).map(|bytes| (bytes, false)),
@@ -286,7 +290,7 @@ fn parse_search_pattern(mode: &str, body: &str) -> HxResult<(Vec<u8>, bool)> {
         "i32be" => parse_i32(body).map(|value| (value.to_be_bytes().to_vec(), false)),
         "i64" | "i64le" => parse_i64(body).map(|value| (value.to_le_bytes().to_vec(), false)),
         "i64be" => parse_i64(body).map(|value| (value.to_be_bytes().to_vec(), false)),
-        other => Err(HxError::UnknownCommand(format!("s {other}/.../"))),
+        other => Err(HxError::UnknownCommand(format!("{command} {other}/.../"))),
     }
 }
 
@@ -539,14 +543,29 @@ fn parse_replace(name: &str, input: Option<&str>) -> HxResult<Command> {
     let allow_resize = name.ends_with('!');
     let rest = input.ok_or(HxError::MissingArgument("replace arguments"))?;
     let (force, rest) = parse_replace_force(rest);
-    let (mode, body) = parse_replace_mode(rest);
-    let (needle_src, replacement_src) = body
-        .split_once("->")
-        .or_else(|| body.split_once("=>"))
-        .ok_or_else(|| HxError::InvalidReplace("expected <needle> -> <replacement>".to_owned()))?;
+    let (needle, replacement) = if let Some((mode, needle_src, replacement_src)) =
+        parse_replace_delimited(rest)?
+    {
+        (
+            parse_replace_delimited_bytes(mode, needle_src)?,
+            parse_replace_delimited_bytes(mode, replacement_src)?,
+        )
+    } else {
+        let (mode, body) = parse_replace_mode(rest);
+        let (needle_src, replacement_src) = body
+            .split_once("->")
+            .or_else(|| body.split_once("=>"))
+            .ok_or_else(|| {
+                HxError::InvalidReplace(
+                    "expected [mode]/needle/replacement/ or <needle> -> <replacement>".to_owned(),
+                )
+            })?;
 
-    let needle = parse_replace_bytes(mode, needle_src.trim())?;
-    let replacement = parse_replace_bytes(mode, replacement_src.trim())?;
+        (
+            parse_replace_bytes(mode, needle_src.trim())?,
+            parse_replace_bytes(mode, replacement_src.trim())?,
+        )
+    };
 
     if needle.is_empty() {
         return Err(HxError::InvalidReplace(
@@ -579,6 +598,42 @@ fn parse_replace_force(input: &str) -> (bool, &str) {
     (false, input)
 }
 
+fn parse_replace_delimited(input: &str) -> HxResult<Option<(&str, &str, &str)>> {
+    let input = input.trim();
+    let Some((delim_idx, delimiter)) = input
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_ascii_alphanumeric()).then_some((idx, ch)))
+    else {
+        return Ok(None);
+    };
+    if delimiter.is_whitespace() {
+        return Ok(None);
+    }
+
+    let mode = &input[..delim_idx];
+    let body_start = delim_idx + delimiter.len_utf8();
+    let body = &input[body_start..];
+    let Some(needle_end) = body.find(delimiter) else {
+        return Err(HxError::MissingArgument("replace needle closing delimiter"));
+    };
+    let needle = &body[..needle_end];
+
+    let replacement_start = needle_end + delimiter.len_utf8();
+    let replacement_and_rest = &body[replacement_start..];
+    let Some(replacement_end) = replacement_and_rest.find(delimiter) else {
+        return Err(HxError::MissingArgument(
+            "replace replacement closing delimiter",
+        ));
+    };
+    let replacement = &replacement_and_rest[..replacement_end];
+    let rest = replacement_and_rest[replacement_end + delimiter.len_utf8()..].trim();
+    if !rest.is_empty() {
+        return Err(HxError::UnknownCommand(format!("re {rest}")));
+    }
+
+    Ok(Some((mode, needle, replacement)))
+}
+
 fn parse_replace_mode(input: &str) -> (ReplaceInputMode, &str) {
     let trimmed = input.trim();
     for (prefix, mode) in [
@@ -600,6 +655,10 @@ fn parse_replace_bytes(mode: ReplaceInputMode, input: &str) -> HxResult<Vec<u8>>
         ReplaceInputMode::Hex => parse_hex_stream(input),
         ReplaceInputMode::Ascii => Ok(strip_wrapping_quotes(input).as_bytes().to_vec()),
     }
+}
+
+fn parse_replace_delimited_bytes(mode: &str, input: &str) -> HxResult<Vec<u8>> {
+    parse_mode_pattern("re", mode, input).map(|(bytes, _)| bytes)
 }
 
 fn strip_wrapping_quotes(input: &str) -> &str {
