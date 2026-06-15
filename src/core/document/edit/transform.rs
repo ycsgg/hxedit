@@ -236,6 +236,9 @@ impl Document {
         if self.display_range_has_tombstone(start, range_len)
             || self.display_range_has_sparse_replacement(start, range_len)
         {
+            if !self.display_range_has_replacement_range(start, range_len) {
+                return self.xor_visible_range_sparse_overlay(start, end - 1, key);
+            }
             return self.xor_visible_range_bytes_overlay_changed(start, end - 1, key);
         }
 
@@ -277,6 +280,118 @@ impl Document {
         Ok(stats)
     }
 
+    fn xor_visible_range_sparse_overlay(
+        &mut self,
+        start: u64,
+        end_inclusive: u64,
+        key: u8,
+    ) -> HxResult<CompactReplacementStats> {
+        let len = self.len();
+        if key == 0 || len == 0 || start > end_inclusive || start >= len {
+            return Ok(CompactReplacementStats {
+                visited: 0,
+                changed: 0,
+            });
+        }
+
+        let end = end_inclusive.min(len - 1) + 1;
+        let mut stats = CompactReplacementStats {
+            visited: 0,
+            changed: 0,
+        };
+        let pieces = self.pieces_snapshot();
+        let mut display_cursor = 0_u64;
+
+        for piece in pieces {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor + piece.len;
+            if piece_end <= start {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = start.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start >= overlap_end {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let source_start = piece.start + (overlap_start - display_cursor);
+            let segment_len = overlap_end - overlap_start;
+            let segment_end = source_start + segment_len;
+            let tombstones =
+                self.tombstones_in_source_range(piece.source, source_start, segment_len);
+            let replacements =
+                self.sparse_replacements_in_source_range(piece.source, source_start, segment_len);
+            let mut tombstone_idx = 0usize;
+            let mut replacement_idx = 0usize;
+            let mut cursor = source_start;
+
+            while tombstone_idx < tombstones.len() || replacement_idx < replacements.len() {
+                let next_tombstone = tombstones.get(tombstone_idx).copied();
+                let next_replacement = replacements.get(replacement_idx).map(|(offset, _)| *offset);
+                let Some(next_dirty) = min_u64_option(next_tombstone, next_replacement) else {
+                    break;
+                };
+
+                if cursor < next_dirty {
+                    let span_len = next_dirty - cursor;
+                    self.replacements.xor_source_range_composed(
+                        piece.source,
+                        cursor,
+                        span_len,
+                        key,
+                    );
+                    stats.visited += span_len;
+                    stats.changed += span_len;
+                }
+
+                let mut is_tombstone = false;
+                while tombstones
+                    .get(tombstone_idx)
+                    .is_some_and(|offset| *offset == next_dirty)
+                {
+                    is_tombstone = true;
+                    tombstone_idx += 1;
+                }
+
+                let mut replacement = None;
+                while replacements
+                    .get(replacement_idx)
+                    .is_some_and(|(offset, _)| *offset == next_dirty)
+                {
+                    replacement = replacements.get(replacement_idx).map(|(_, value)| *value);
+                    replacement_idx += 1;
+                }
+
+                if !is_tombstone {
+                    if let Some(value) = replacement {
+                        let id = CellId::from_source(piece.source, next_dirty);
+                        self.set_display_byte_by_id(id, value ^ key)?;
+                        stats.visited += 1;
+                        stats.changed += 1;
+                    }
+                }
+                cursor = next_dirty.saturating_add(1);
+            }
+
+            if cursor < segment_end {
+                let span_len = segment_end - cursor;
+                self.replacements
+                    .xor_source_range_composed(piece.source, cursor, span_len, key);
+                stats.visited += span_len;
+                stats.changed += span_len;
+            }
+
+            display_cursor = piece_end;
+        }
+
+        Ok(stats)
+    }
+
     fn flush_bytes_overlay_run(&mut self, run_start: u64, run_bytes: &mut Vec<u8>) -> HxResult<()> {
         if run_bytes.is_empty() {
             return Ok(());
@@ -284,5 +399,14 @@ impl Document {
         let bytes: Arc<[u8]> = Arc::from(std::mem::take(run_bytes));
         self.overwrite_run_bytes_overlay(run_start, bytes)?;
         Ok(())
+    }
+}
+
+fn min_u64_option(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
     }
 }

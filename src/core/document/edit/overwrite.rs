@@ -262,24 +262,29 @@ impl Document {
         let mut run_start = 0_u64;
         let mut run_bytes = Vec::new();
 
-        self.walk_visible_cells(
+        let mut expected_display = offset;
+        self.walk_visible_byte_segments(
             offset,
             end_inclusive,
             REPLACEMENT_CHUNK as usize,
-            |_, chunk| {
-                for cell in chunk.cells {
-                    if cell.deleted {
-                        return Err(HxError::OffsetOutOfRange);
-                    }
-                    let index = (cell.display_offset - offset) as usize;
-                    let value = bytes[index];
-                    if cell.byte != value {
+            |segment| {
+                if segment.display_start != expected_display {
+                    return Err(HxError::OffsetOutOfRange);
+                }
+
+                let start_index = (segment.display_start - offset) as usize;
+                let end_index = start_index + segment.bytes.len();
+                let target = &bytes[start_index..end_index];
+                for (idx, (&current, &value)) in segment.bytes.iter().zip(target.iter()).enumerate()
+                {
+                    let display_offset = segment.display_start + idx as u64;
+                    if current != value {
                         if run_bytes.is_empty() {
-                            run_start = cell.display_offset;
-                        } else if run_start + run_bytes.len() as u64 != cell.display_offset {
+                            run_start = display_offset;
+                        } else if run_start + run_bytes.len() as u64 != display_offset {
                             let bytes: Arc<[u8]> = Arc::from(std::mem::take(&mut run_bytes));
                             runs.push((run_start, bytes));
-                            run_start = cell.display_offset;
+                            run_start = display_offset;
                         }
                         run_bytes.push(value);
                     } else if !run_bytes.is_empty() {
@@ -287,9 +292,13 @@ impl Document {
                         runs.push((run_start, bytes));
                     }
                 }
+                expected_display = segment.display_start + segment.bytes.len() as u64;
                 Ok(WalkControl::Continue)
             },
         )?;
+        if expected_display != offset + applied as u64 {
+            return Err(HxError::OffsetOutOfRange);
+        }
 
         if !run_bytes.is_empty() {
             let bytes: Arc<[u8]> = Arc::from(run_bytes);

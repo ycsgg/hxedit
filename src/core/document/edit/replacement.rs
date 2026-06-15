@@ -187,6 +187,39 @@ impl Document {
         false
     }
 
+    pub(crate) fn display_range_has_replacement_range(&self, offset: u64, len: u64) -> bool {
+        if len == 0 || offset >= self.len() || !self.has_replacements() {
+            return false;
+        }
+        let end = offset.saturating_add(len).min(self.len());
+        let mut display_cursor = 0_u64;
+        for piece in self.pieces_snapshot() {
+            if display_cursor >= end {
+                break;
+            }
+            let piece_end = display_cursor.saturating_add(piece.len);
+            if piece_end <= offset {
+                display_cursor = piece_end;
+                continue;
+            }
+
+            let overlap_start = offset.max(display_cursor);
+            let overlap_end = end.min(piece_end);
+            if overlap_start < overlap_end {
+                let source_start = piece.start + (overlap_start - display_cursor);
+                if self.has_replacement_range_in_source_range(
+                    piece.source,
+                    source_start,
+                    overlap_end - overlap_start,
+                ) {
+                    return true;
+                }
+            }
+            display_cursor = piece_end;
+        }
+        false
+    }
+
     /// Clear replacement entries in a display range without changing piece
     /// layout or tombstones.
     pub fn clear_replacements_in_display_range(&mut self, offset: u64, len: u64) -> HxResult<()> {

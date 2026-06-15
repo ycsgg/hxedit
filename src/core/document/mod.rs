@@ -244,6 +244,49 @@ impl Document {
         self.replacements.has_in_range(lo, hi)
     }
 
+    pub(crate) fn has_replacement_range_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> bool {
+        self.replacements
+            .has_range_in_source_range(source, start, len)
+    }
+
+    pub(crate) fn sparse_replacements_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> Vec<(u64, u8)> {
+        self.replacements
+            .sparse_values_in_source_range(source, start, len)
+    }
+
+    pub(crate) fn tombstones_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> Vec<u64> {
+        if len == 0 || !self.has_tombstones() {
+            return Vec::new();
+        }
+        let end = start.saturating_add(len);
+        let lo = CellId::from_source(source, start);
+        let hi = CellId::from_source(source, end.saturating_sub(1));
+        use std::ops::Bound;
+        self.tombstones
+            .range((Bound::Included(lo), Bound::Included(hi)))
+            .filter_map(|id| match (source, *id) {
+                (PieceSource::Original, CellId::Original(offset))
+                | (PieceSource::Add, CellId::Add(offset)) => Some(offset),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Map a display offset to the corresponding logical byte offset.
     ///
     /// Tombstoned display slots have no logical byte and return `None`.

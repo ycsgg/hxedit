@@ -38,6 +38,124 @@ fn read_all(doc: &mut Document) -> Vec<u8> {
     out
 }
 
+struct TestRng {
+    state: u64,
+}
+
+impl TestRng {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.state
+    }
+
+    fn range(&mut self, upper_exclusive: usize) -> usize {
+        if upper_exclusive == 0 {
+            return 0;
+        }
+        (self.next_u64() as usize) % upper_exclusive
+    }
+
+    fn byte(&mut self) -> u8 {
+        (self.next_u64() >> 32) as u8
+    }
+}
+
+#[derive(Debug)]
+struct ReferenceDoc {
+    slots: Vec<Option<u8>>,
+}
+
+impl ReferenceDoc {
+    fn new(bytes: &[u8]) -> Self {
+        Self {
+            slots: bytes.iter().copied().map(Some).collect(),
+        }
+    }
+
+    fn logical_bytes(&self) -> Vec<u8> {
+        self.slots.iter().filter_map(|slot| *slot).collect()
+    }
+
+    fn has_tombstone_in_range(&self, offset: usize, len: usize) -> bool {
+        self.slots[offset..offset + len].iter().any(Option::is_none)
+    }
+
+    fn assert_matches(&self, doc: &mut Document, step: usize) {
+        assert_eq!(doc.len() as usize, self.slots.len(), "step {step}: len");
+        let logical = self.logical_bytes();
+        assert_eq!(
+            doc.visible_len() as usize,
+            logical.len(),
+            "step {step}: visible_len"
+        );
+
+        if self.slots.is_empty() {
+            assert_eq!(doc.byte_at(0).unwrap(), ByteSlot::Empty, "step {step}");
+            return;
+        }
+
+        assert_eq!(
+            doc.logical_bytes(0, doc.len() - 1).unwrap(),
+            logical,
+            "step {step}: logical bytes"
+        );
+        assert_eq!(
+            doc.logical_byte_count(0, doc.len() - 1).unwrap(),
+            logical.len() as u64,
+            "step {step}: logical byte count"
+        );
+
+        let mut logical_offset = 0_u64;
+        for (display_offset, expected) in self.slots.iter().enumerate() {
+            let display_offset = display_offset as u64;
+            match expected {
+                Some(value) => {
+                    assert_eq!(
+                        doc.byte_at(display_offset).unwrap(),
+                        ByteSlot::Present(*value),
+                        "step {step}: display slot {display_offset}"
+                    );
+                    assert_eq!(
+                        doc.logical_offset_for_display_offset(display_offset),
+                        Some(logical_offset),
+                        "step {step}: display->logical {display_offset}"
+                    );
+                    assert_eq!(
+                        doc.display_offset_for_logical_offset(logical_offset),
+                        Some(display_offset),
+                        "step {step}: logical->display {logical_offset}"
+                    );
+                    logical_offset += 1;
+                }
+                None => {
+                    assert_eq!(
+                        doc.byte_at(display_offset).unwrap(),
+                        ByteSlot::Deleted,
+                        "step {step}: tombstone slot {display_offset}"
+                    );
+                    assert_eq!(
+                        doc.logical_offset_for_display_offset(display_offset),
+                        None,
+                        "step {step}: tombstone logical offset"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            doc.byte_at(doc.len()).unwrap(),
+            ByteSlot::Empty,
+            "step {step}: EOF slot"
+        );
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Insert basics: nibble editing and offset shifts
 // ═══════════════════════════════════════════════════════════════════════════
@@ -331,6 +449,170 @@ fn logical_stream_paths_agree_for_mixed_piece_overlays() {
     }
     assert_eq!(diff_stream, expected);
 
+    doc.save(None).unwrap();
+    assert_eq!(fs::read(path).unwrap(), expected);
+}
+
+#[test]
+fn deterministic_mixed_document_edit_fuzz_matches_reference_model() {
+    let initial = (0..64).map(|idx| idx as u8).collect::<Vec<_>>();
+    let (_dir, path, mut doc) = tmp_doc_with_config(
+        &initial,
+        &Config {
+            page_size: 8,
+            cache_pages: 2,
+            ..Config::default()
+        },
+    );
+    let mut model = ReferenceDoc::new(&initial);
+    let mut rng = TestRng::new(0x1234_5678_9abc_def0);
+
+    for step in 0..1500 {
+        if model.slots.is_empty() {
+            let value = rng.byte();
+            doc.insert_bytes(0, &[value]).unwrap();
+            model.slots.push(Some(value));
+            model.assert_matches(&mut doc, step);
+            continue;
+        }
+
+        match rng.range(8) {
+            0 => {
+                let offset = rng.range(model.slots.len());
+                let value = rng.byte();
+                let result = doc.replace_display_byte(offset as u64, value);
+                if model.slots[offset].is_some() {
+                    result.unwrap();
+                    model.slots[offset] = Some(value);
+                } else {
+                    assert!(result.is_err(), "step {step}: replace tombstone");
+                }
+            }
+            1 => {
+                let offset_upper = if model.slots.len() < 256 {
+                    model.slots.len() + 1
+                } else {
+                    model.slots.len()
+                };
+                let offset = rng.range(offset_upper);
+                let phase = if rng.range(2) == 0 {
+                    NibblePhase::High
+                } else {
+                    NibblePhase::Low
+                };
+                let nibble = rng.byte() & 0x0f;
+                let result = doc.replace_nibble(offset as u64, phase, nibble);
+                if offset == model.slots.len() {
+                    if matches!(phase, NibblePhase::High) {
+                        result.unwrap();
+                        model.slots.push(Some(nibble << 4));
+                    } else {
+                        assert!(result.is_err(), "step {step}: invalid EOF nibble edit");
+                    }
+                } else {
+                    match (model.slots.get_mut(offset), phase) {
+                        (Some(Some(value)), NibblePhase::High) => {
+                            result.unwrap();
+                            *value = (nibble << 4) | (*value & 0x0f);
+                        }
+                        (Some(Some(value)), NibblePhase::Low) => {
+                            result.unwrap();
+                            *value = (*value & 0xf0) | nibble;
+                        }
+                        _ => {
+                            assert!(result.is_err(), "step {step}: invalid nibble edit");
+                        }
+                    }
+                }
+            }
+            2 => {
+                if model.slots.len() < 256 {
+                    let offset = rng.range(model.slots.len() + 1);
+                    let count = 1 + rng.range(4);
+                    let bytes = (0..count).map(|_| rng.byte()).collect::<Vec<_>>();
+                    doc.insert_bytes(offset as u64, &bytes).unwrap();
+                    model
+                        .slots
+                        .splice(offset..offset, bytes.into_iter().map(Some));
+                }
+            }
+            3 => {
+                let offset = rng.range(model.slots.len());
+                let result = doc.delete_byte(offset as u64).unwrap();
+                if model.slots[offset].is_some() {
+                    assert!(result.is_some(), "step {step}: tombstone should be new");
+                    model.slots[offset] = None;
+                } else {
+                    assert_eq!(result, None, "step {step}: tombstone already deleted");
+                }
+            }
+            4 => {
+                let offset = rng.range(model.slots.len());
+                let requested = 1 + rng.range(4);
+                let actual = requested.min(model.slots.len() - offset);
+                let removed = doc
+                    .delete_range_real(offset as u64, requested as u64)
+                    .unwrap();
+                assert_eq!(removed.len(), actual, "step {step}: real delete len");
+                model.slots.drain(offset..offset + actual);
+            }
+            5 => {
+                let offset = rng.range(model.slots.len());
+                let requested = 1 + rng.range(8);
+                let actual = requested.min(model.slots.len() - offset);
+                let bytes = (0..actual).map(|_| rng.byte()).collect::<Vec<_>>();
+                let result = doc.overwrite_run_bytes_overlay_changed(offset as u64, &bytes);
+                if model.has_tombstone_in_range(offset, actual) {
+                    assert!(result.is_err(), "step {step}: paste over tombstone");
+                } else {
+                    let (written, _) = result.unwrap();
+                    assert_eq!(written as usize, actual, "step {step}: paste len");
+                    for (slot, value) in model.slots[offset..offset + actual].iter_mut().zip(bytes)
+                    {
+                        *slot = Some(value);
+                    }
+                }
+            }
+            6 => {
+                let offset = rng.range(model.slots.len());
+                let requested = 1 + rng.range(16);
+                let actual = requested.min(model.slots.len() - offset);
+                let pattern = [rng.byte(), rng.byte().wrapping_add(1), rng.byte() | 1];
+                let stats = doc
+                    .overwrite_run_pattern_overlay(offset as u64, requested as u64, &pattern)
+                    .unwrap();
+                assert_eq!(stats.visited as usize, actual, "step {step}: fill len");
+                for (idx, slot) in model.slots[offset..offset + actual].iter_mut().enumerate() {
+                    if slot.is_some() {
+                        *slot = Some(pattern[idx % pattern.len()]);
+                    }
+                }
+            }
+            _ => {
+                let offset = rng.range(model.slots.len());
+                let requested = 1 + rng.range(16);
+                let actual = requested.min(model.slots.len() - offset);
+                let key = rng.byte() | 1;
+                let stats = doc
+                    .xor_visible_range_mixed_overlay(
+                        offset as u64,
+                        (offset + actual - 1) as u64,
+                        key,
+                    )
+                    .unwrap();
+                let mut visited = 0_u64;
+                for value in model.slots[offset..offset + actual].iter_mut().flatten() {
+                    *value ^= key;
+                    visited += 1;
+                }
+                assert_eq!(stats.visited, visited, "step {step}: xor visited");
+            }
+        }
+
+        model.assert_matches(&mut doc, step);
+    }
+
+    let expected = model.logical_bytes();
     doc.save(None).unwrap();
     assert_eq!(fs::read(path).unwrap(), expected);
 }

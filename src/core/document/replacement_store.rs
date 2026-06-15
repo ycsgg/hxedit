@@ -363,6 +363,45 @@ impl ReplacementStore {
             .is_some()
     }
 
+    pub(crate) fn has_range_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> bool {
+        if len == 0 {
+            return false;
+        }
+        let end = start.saturating_add(len);
+        self.has_in_range_same_source(source, start, end)
+    }
+
+    pub(crate) fn sparse_values_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> Vec<(u64, u8)> {
+        if len == 0 {
+            return Vec::new();
+        }
+        let end = start.saturating_add(len);
+        let lo = CellId::from_source(source, start);
+        let hi = CellId::from_source(source, end.saturating_sub(1));
+        self.sparse
+            .range((Bound::Included(lo), Bound::Included(hi)))
+            .filter_map(|(id, value)| {
+                if source_of(*id) != source {
+                    return None;
+                }
+                match value {
+                    SparseReplacement::Value(value) => Some((offset_of(*id), *value)),
+                    SparseReplacement::Clear => None,
+                }
+            })
+            .collect()
+    }
+
     pub(crate) fn dirty_bytes(&self) -> usize {
         let mut total = self
             .ranges
