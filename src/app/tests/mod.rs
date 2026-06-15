@@ -157,7 +157,7 @@ fn sagitta_test_snapshot_for(
     )
 }
 
-#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm"))]
 fn sagitta_test_snapshot_with_block(
     entry_va: u64,
     entry_logical_offset: Option<u64>,
@@ -172,7 +172,7 @@ fn sagitta_test_snapshot_with_block(
     )
 }
 
-#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm"))]
 fn sagitta_test_snapshot_with_blocks(
     entry_va: u64,
     entry_logical_offset: Option<u64>,
@@ -222,7 +222,7 @@ fn sagitta_test_snapshot_with_blocks(
     )
 }
 
-#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm"))]
 fn sagitta_large_test_snapshot_with_target(
     function_count: usize,
 ) -> super::analysis_state::SagittaSnapshot {
@@ -323,7 +323,7 @@ fn side_panel_visible_rows_use_actual_panel_body_height() {
     assert_eq!(app.side_panel_visible_rows(), 9);
 }
 
-#[cfg(any(feature = "disasm-capstone", feature = "sagitta-analysis"))]
+#[cfg(any(feature = "disasm", feature = "sagitta-analysis"))]
 fn build_disassembly_elf64(code: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0_u8; (0x100 + code.len()).max(0x200)];
     bytes[0..4].copy_from_slice(b"\x7fELF");
@@ -347,7 +347,7 @@ fn build_disassembly_elf64(code: &[u8]) -> Vec<u8> {
     bytes
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[cfg(all(feature = "disasm", feature = "symbols"))]
 fn build_disassembly_elf64_with_symbol(code: &[u8], symbol_name: &str) -> Vec<u8> {
     let text_offset = 0x100usize;
     let text_addr = 0x401000u64;

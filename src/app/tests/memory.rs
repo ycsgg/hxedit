@@ -646,7 +646,7 @@ fn mem_attach_blocked_when_current_session_dirty() {
     assert!(app.document.is_dirty());
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 #[test]
 fn disassembly_insert_blocked_and_replace_restricted() {
     let bytes = build_disassembly_elf64(&[0x90, 0xc3]);

@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 use ratatui::layout::Rect;
 use tempfile::tempdir;
 
@@ -32,7 +32,7 @@ pub(super) fn app_with_bytes(bytes: &[u8]) -> App {
     app
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 fn elf64_with_executable_code(code: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0_u8; 0x200];
     bytes[0..4].copy_from_slice(b"ELF");
@@ -56,7 +56,7 @@ fn elf64_with_executable_code(code: &[u8]) -> Vec<u8> {
     bytes
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 fn disassembly_test_columns(width: u16) -> crate::view::layout::MainColumns {
     crate::view::layout::MainColumns {
         main_pane_kind: crate::view::layout::MainPaneKind::Disassembly,
@@ -361,7 +361,7 @@ fn diff_overlay_is_removed_when_diff_side_panel_is_not_active() {
     assert!(hidden_page.overlay_spans.is_empty());
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 #[test]
 fn disassembly_main_view_renders_decoded_instruction_lines() {
     let mut app = app_with_bytes(&elf64_with_executable_code(&[
@@ -384,7 +384,7 @@ fn disassembly_main_view_renders_decoded_instruction_lines() {
     }
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 #[test]
 fn disassembly_jump_rail_hides_when_symbol_panel_is_open() {
     let mut app = app_with_bytes(&elf64_with_executable_code(&[0xeb, 0x02, 0x90, 0x90, 0xc3]));

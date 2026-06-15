@@ -4,7 +4,7 @@ use super::*;
 // Disassembly: view switch, viewport alignment, symbols
 // ═══════════════════════════════════════════════════════════════════════════
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 #[test]
 fn disassemble_command_switches_view_and_aligns_viewport() {
     let bytes = {
@@ -52,7 +52,7 @@ fn disassemble_command_switches_view_and_aligns_viewport() {
     }
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[cfg(all(feature = "disasm", feature = "symbols"))]
 #[test]
 fn disassembly_symbols_and_call_targets() {
     // Symbol labels and virtual addresses
@@ -122,7 +122,7 @@ fn disassembly_symbols_and_call_targets() {
     assert_eq!(target.virtual_address, 0x401000);
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[cfg(all(feature = "disasm", feature = "symbols"))]
 #[test]
 fn symbol_search_finds_all_symbolized_occurrences() {
     let bytes = build_disassembly_elf64_with_symbol(
@@ -153,7 +153,7 @@ fn symbol_search_finds_all_symbolized_occurrences() {
     assert_eq!(app.cursor, 0x106);
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[cfg(all(feature = "disasm", feature = "symbols"))]
 #[test]
 fn symbol_panel_toggle_restores_symbol_page() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0xc3], "entry");
@@ -180,7 +180,7 @@ fn symbol_panel_toggle_restores_symbol_page() {
     assert_eq!(app.mode, Mode::SidePanel);
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[cfg(all(feature = "disasm", feature = "symbols"))]
 #[test]
 fn hex_edit_does_not_replace_symbol_panel_with_inspector() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0xc3], "entry");
@@ -546,7 +546,7 @@ fn sagitta_symbol_jump_outdated_allowed_invalid_layout_rejected() {
     assert!(err.to_string().contains("analysis offsets changed"));
 }
 
-#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm"))]
 #[test]
 fn sagitta_snapshot_annotates_disassembly_rows_and_symbol_search() {
     let bytes =
@@ -581,7 +581,7 @@ fn sagitta_snapshot_annotates_disassembly_rows_and_symbol_search() {
     assert_eq!(app.cursor, 0x101);
 }
 
-#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm"))]
 #[test]
 fn sagitta_result_adds_function_rail_to_cached_disassembly_rows() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0xC3], "entry");
@@ -640,7 +640,7 @@ fn sagitta_result_adds_function_rail_to_cached_disassembly_rows() {
     );
 }
 
-#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm"))]
 #[test]
 fn sagitta_large_snapshot_annotations_do_not_scan_all_functions_per_row() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0xC3], "entry");
@@ -673,7 +673,7 @@ fn sagitta_large_snapshot_annotations_do_not_scan_all_functions_per_row() {
     }
 }
 
-#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm"))]
 #[test]
 fn sagitta_function_rail_spans_alignment_gap_between_blocks() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0x90, 0xC3], "entry");
@@ -716,7 +716,7 @@ fn sagitta_function_rail_spans_alignment_gap_between_blocks() {
     );
 }
 
-#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm"))]
 #[test]
 fn sagitta_outdated_bytes_keep_function_rail_marked_stale() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0xC3], "entry");
@@ -743,7 +743,7 @@ fn sagitta_outdated_bytes_keep_function_rail_marked_stale() {
         .all(|row| row.function_scope.as_ref().is_some_and(|scope| scope.stale)));
 }
 
-#[cfg(all(feature = "sagitta-analysis", feature = "disasm-capstone"))]
+#[cfg(all(feature = "sagitta-analysis", feature = "disasm"))]
 #[test]
 fn sagitta_invalid_layout_disables_disassembly_annotations() {
     let bytes =
@@ -777,7 +777,7 @@ fn sagitta_invalid_layout_disables_disassembly_annotations() {
     assert!(rows.iter().all(|row| row.function_scope.is_none()));
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[cfg(all(feature = "disasm", feature = "symbols"))]
 #[test]
 fn symbol_panel_scrolls_and_mouse_click_navigates() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0x90, 0x90, 0xc3], "entry");
@@ -846,7 +846,7 @@ fn symbol_panel_scrolls_and_mouse_click_navigates() {
     assert!(app.symbol_state().unwrap().detail_scroll_offset > 0);
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 #[test]
 fn disassemble_force_and_off_commands() {
     // Force command with explicit arch
@@ -871,7 +871,7 @@ fn disassemble_force_and_off_commands() {
     assert!(app2.disasm_backend.is_none());
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 #[test]
 fn disassembly_navigation_and_scroll() {
     let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
@@ -921,7 +921,7 @@ fn disassembly_navigation_and_scroll() {
     }
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 #[test]
 fn disassembly_search_variants() {
     let bytes = build_disassembly_elf64(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]);
@@ -952,7 +952,7 @@ fn disassembly_search_variants() {
     assert_eq!(app2.cursor, 0x102);
 }
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 #[test]
 fn disassembly_instruction_search_does_not_pollute_view_cache() {
     let code = vec![0x90; 4096];
@@ -997,7 +997,7 @@ fn disassembly_instruction_search_does_not_pollute_view_cache() {
 // Disassembly view editing: nibble edit, undo, redo, fill, replace
 // ═══════════════════════════════════════════════════════════════════════════
 
-#[cfg(feature = "disasm-capstone")]
+#[cfg(feature = "disasm")]
 #[test]
 fn disassembly_editing_undo_redo_and_fill() {
     // Nibble edit updates instruction text
@@ -1077,7 +1077,7 @@ fn disassembly_editing_undo_redo_and_fill() {
     assert!(rows3[1].text.contains("int3"));
 }
 
-#[cfg(all(feature = "disasm-capstone", not(feature = "asm")))]
+#[cfg(all(feature = "disasm", not(feature = "asm")))]
 #[test]
 fn disassembly_inline_assemble_requires_asm_feature() {
     let bytes = build_disassembly_elf64(&[0x90, 0xc3]);
@@ -1095,7 +1095,7 @@ fn disassembly_inline_assemble_requires_asm_feature() {
         .contains("keystone backend is not enabled"));
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "asm"))]
+#[cfg(all(feature = "disasm", feature = "asm"))]
 #[test]
 fn disassembly_inline_assemble_invalid_submit_exits_with_error() {
     let bytes = build_disassembly_elf64(&[0x90, 0xc3]);
@@ -1115,7 +1115,7 @@ fn disassembly_inline_assemble_invalid_submit_exits_with_error() {
     assert!(app.status_message.contains("assembly error"));
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "asm"))]
+#[cfg(all(feature = "disasm", feature = "asm"))]
 #[test]
 fn disassembly_inline_assemble_shorter_patch_nop_fills_current_instruction() {
     let bytes = build_disassembly_elf64(&[0x48, 0x83, 0xec, 0x20, 0xc3]);
@@ -1136,7 +1136,7 @@ fn disassembly_inline_assemble_shorter_patch_nop_fills_current_instruction() {
     assert!(app.status_message.contains("3 trailing nop"));
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "asm"))]
+#[cfg(all(feature = "disasm", feature = "asm"))]
 #[test]
 fn disassembly_inline_assemble_longer_patch_warns_and_nops_truncated_tail() {
     let bytes = build_disassembly_elf64(&[0x83, 0xc0, 0x01, 0x55, 0x48, 0x89, 0xe5, 0xc3]);
@@ -1158,7 +1158,7 @@ fn disassembly_inline_assemble_longer_patch_warns_and_nops_truncated_tail() {
     assert!(app.status_message.contains("trailing nop 2"));
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols", feature = "asm"))]
+#[cfg(all(feature = "disasm", feature = "symbols", feature = "asm"))]
 #[test]
 fn disassembly_inline_assemble_uses_raw_text_without_breaking_symbolized_display() {
     let bytes =
@@ -1188,7 +1188,7 @@ fn disassembly_inline_assemble_uses_raw_text_without_breaking_symbolized_display
     );
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols", feature = "asm"))]
+#[cfg(all(feature = "disasm", feature = "symbols", feature = "asm"))]
 #[test]
 fn disassembly_inline_assemble_resolves_direct_symbol_name() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0x90, 0x90, 0x90, 0xc3], "entry");
@@ -1210,7 +1210,7 @@ fn disassembly_inline_assemble_resolves_direct_symbol_name() {
     assert!(app.status_message.contains("resolved entry -> 0x401000"));
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols", feature = "asm"))]
+#[cfg(all(feature = "disasm", feature = "symbols", feature = "asm"))]
 #[test]
 fn disassembly_inline_assemble_resolves_import_target_name() {
     let bytes = build_disassembly_elf64_with_symbol(&[0x90, 0x90, 0x90, 0x90, 0x90, 0xc3], "entry");
@@ -1241,7 +1241,7 @@ fn disassembly_inline_assemble_resolves_import_target_name() {
     assert!(app.status_message.contains("resolved strcmp -> 0x401030"));
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols", feature = "asm"))]
+#[cfg(all(feature = "disasm", feature = "symbols", feature = "asm"))]
 #[test]
 fn disassembly_inline_assemble_unknown_symbol_keeps_document_unchanged() {
     let bytes = build_disassembly_elf64(&[0x90, 0xc3]);

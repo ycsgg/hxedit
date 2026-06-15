@@ -67,7 +67,7 @@
 - 当前 `:dis` 已落地，并且必须继续保持为“主视图切换”而不是新的编辑语义；反汇编结果只能是当前 bytes 的投影，不能借机改写 replacement / tombstone / real delete 边界
 - `sagitta-analysis` 下的 `:ana` 必须只读取 current logical bytes：用 `Document::for_each_logical_chunk` 分块物化，先检查 `visible_len() <= 128 MiB`，不要用会把 tombstone 读成 `0x00` 的 render-ish 路径。Sagitta snapshot 属于 App/UI 层 owned data，不写入 `Document`，不参与 undo / save / search
 - Sagitta editing invalidation 挂在 App undo/edit 边界：replacement-only 标记 `OutdatedBytes`，insert / real delete / tombstone / resize replace 标记 `InvalidLayout`。不要为了追踪函数入口引入新的 document anchor 语义
-- 当前已有统一 disassembly backend 抽象；后续扩展时，App / render / cache 仍不应直接绑死 Capstone 或其他单一库 API
+- 当前已有统一 disassembly backend 抽象，按架构路由（`src/disasm/backend/registry.rs`）：默认 x86/x86_64 用 `IcedX86Backend`、aarch64 用 `YaxpeaxArmBackend`，capstone 为可选 fallback；后续扩展时，App / render / cache 仍不应直接绑死任一单一库 API。新增 backend 时实现 `DisassemblerBackend::decode_one` 并在 registry 注册，注意把架构特有的文本风格（如 yaxpeax PC-relative）归一化到既有显示/symbolize 管线
 - 继续推进 disassembly 相关能力时，请同步维护 `disassemble-design.md` 中的阶段边界，不要把 detect / backend / render / editing / patch 一次性揉成一个超大提交
 
 ### Memory 模式

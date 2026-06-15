@@ -200,7 +200,7 @@ pub fn hint_for(input: &str) -> CommandHint {
             let syntax = match rest.map(str::trim) {
                 Some("off") => "dis off".to_owned(),
                 Some(arg) if !arg.is_empty() => format!("{name} {arg}"),
-                _ => "dis [x86|x86_64|arm|aarch64|riscv64|off]".to_owned(),
+                _ => "dis [x86|x86_64|arm64|riscv64|off]".to_owned(),
             };
             CommandHint {
                 syntax,
@@ -209,7 +209,7 @@ pub fn hint_for(input: &str) -> CommandHint {
         }
         #[cfg(feature = "disasm")]
         name if is_alias(name, DISASSEMBLE_FORCE_ALIASES) => CommandHint {
-            syntax: format!("{name} <x86|x86_64|arm|aarch64|riscv64> <offset>"),
+            syntax: format!("{name} <x86|x86_64|arm64|riscv64> <offset>"),
             details: "force a raw disassembly view from the given display offset even when the file is not recognized as ELF/PE/Mach-O; assumes little-endian decoding for the chosen arch".to_owned(),
         },
         #[cfg(feature = "symbols")]

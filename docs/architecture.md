@@ -29,7 +29,7 @@
   - Symbol panel：可执行文件 symbol / import 列表与跳转；`sagitta-analysis` ready 后使用 Sagitta recovered functions 覆盖 native entries
   - Data panel：cursor-relative primitive decode
 - Disassembly：
-  - `default`：Capstone 驱动的只读反汇编浏览
+  - `default`：纯 Rust backend 驱动的只读反汇编浏览（x86/x86_64 用 iced-x86，aarch64 用 yaxpeax-arm；capstone 为可选 fallback，覆盖 arm/riscv64 等）
   - `full`：在 `default` 基础上开放 Keystone inline assemble patch
   - `sagitta-analysis`：可选后台分析层，只读消费 current logical bytes，ready snapshot 覆盖 symbol panel，并为反汇编行补充函数入口 label、direct branch target 名称与函数体 rail
 - 保存：当前统一走 rewrite-save；同路径保存保留权限位；save-as 允许从 readonly 文档写到新路径
@@ -144,7 +144,8 @@
 - 可执行文件反汇编设计见 `disassemble-design.md`
 - `:dis` 应是主视图切换，不应把 `Mode` 直接扩成 instruction 语义状态机
 - 反汇编结果始终只是当前 bytes 的投影，不应改写 `Document` 的 real delete / tombstone / replacement 语义
-- 当前已经实现 backend 抽象、`CapstoneBackend`、symbol panel、data panel 与 `full` 档位下的 Keystone inline patch；后续继续扩展时仍不要把 App / render / cache 逻辑绑死到单一 backend API
+- 当前已经实现 backend 抽象、symbol panel、data panel 与 `full` 档位下的 Keystone inline patch；后续继续扩展时仍不要把 App / render / cache 逻辑绑死到单一 backend API
+- 反汇编后端按架构路由（`src/disasm/backend/registry.rs`）：默认构建用纯 Rust 的 `IcedX86Backend`（x86 / x86_64）与 `YaxpeaxArmBackend`（aarch64），`CapstoneBackend` 降级为可选 fallback（`disasm-capstone*` feature，覆盖 arm / riscv64 等其余架构，或显式 `resolve_backend(.., Some(BackendKind::Capstone))`）。`yaxpeax-arm` 输出会把 PC-relative `$±0x..` 归一化成绝对 VA，保持与既有 symbolize / 显示管线一致
 - `sagitta-analysis` 走 `src/app/analysis_state.rs` 的后台线程 + mpsc result channel，worker 只持有物化后的 logical bytes / job id / revision / sender；主线程安装 owned snapshot。编辑 invalidation 只标记 `Current` / `OutdatedBytes` / `InvalidLayout`，不把 Sagitta 写入 `Document`
 
 ### 2.9 Assembler backend 维护风险仍需持续关注

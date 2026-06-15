@@ -550,11 +550,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_backend_kind_uses_capstone_for_supported_arch() {
+    fn resolve_backend_kind_uses_capstone_when_requested() {
         let mut doc = doc_with_bytes(&x86_64_elf(&[0x90, 0xc3]));
         let info = detect_executable_info(&mut doc).unwrap();
         assert_eq!(
-            resolve_backend_kind(&info, None).unwrap(),
+            resolve_backend_kind(&info, Some(BackendKind::Capstone)).unwrap(),
             BackendKind::Capstone
         );
     }
@@ -563,7 +563,7 @@ mod tests {
     fn decode_region_rows_produces_x86_64_instructions() {
         let mut doc = doc_with_bytes(&x86_64_elf(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, None).unwrap();
+        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 4).unwrap();
 
         assert_eq!(rows.len(), 4);
@@ -580,7 +580,7 @@ mod tests {
             0x20, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6,
         ]));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, None).unwrap();
+        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert_eq!(rows.len(), 2);
@@ -592,7 +592,7 @@ mod tests {
     fn decode_region_rows_falls_back_to_db_for_invalid_bytes() {
         let mut doc = doc_with_bytes(&x86_64_elf(&[0x0f, 0xc3]));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, None).unwrap();
+        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert_eq!(rows[0].text, ".db 0x0f");
@@ -603,7 +603,7 @@ mod tests {
     fn decode_region_rows_emits_data_rows_for_non_executable_spans() {
         let mut doc = doc_with_bytes(&pe64_with_text_and_rdata(&[0x90, 0xc3], b"ABC"));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, None).unwrap();
+        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x300, 1).unwrap();
 
         assert_eq!(rows.len(), 1);
@@ -623,7 +623,7 @@ mod tests {
             name: Some(".text".to_owned()),
             executable: true,
         }]);
-        let backend = resolve_backend(&info, None).unwrap();
+        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0, 3).unwrap();
 
         assert_eq!(rows[0].kind, DisasmRowKind::Data);
@@ -652,7 +652,7 @@ mod tests {
                 symbol_type: SymbolType::Function,
             },
         );
-        let backend = resolve_backend(&info, None).unwrap();
+        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 3).unwrap();
 
         assert_eq!(rows[1].text, "call entry");
@@ -679,7 +679,7 @@ mod tests {
                 symbol_type: SymbolType::Function,
             },
         );
-        let backend = resolve_backend(&info, None).unwrap();
+        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert_eq!(rows[0].text, "bl entry");
@@ -706,7 +706,7 @@ mod tests {
                 symbol_type: SymbolType::Function,
             },
         );
-        let backend = resolve_backend(&info, None).unwrap();
+        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert_eq!(rows[0].text, "tbnz w0, #0, target");
@@ -722,7 +722,7 @@ mod tests {
     fn decode_region_rows_resolves_elf_plt_import_targets() {
         let mut doc = doc_with_bytes(&x86_64_elf_with_plt_import_call("puts"));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, None).unwrap();
+        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert!(info.symbol_at_virtual(0x401030).is_none());
@@ -733,5 +733,108 @@ mod tests {
         assert_eq!(target.kind, DirectBranchKind::Call);
         assert_eq!(target.virtual_address, 0x401030);
         assert_eq!(target.display_name.as_deref(), Some("puts"));
+    }
+}
+
+
+// End-to-end coverage that runs against whichever backend the build resolves by
+// default (iced-x86 / yaxpeax-arm), independent of capstone. Assertions avoid
+// backend-specific operand formatting and check structural facts only.
+#[cfg(all(test, any(feature = "disasm-iced-x86", feature = "disasm-yaxpeax-arm")))]
+mod default_backend_tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::decode_region_rows;
+    use crate::core::document::Document;
+    use crate::disasm::backend::resolve_backend;
+    use crate::disasm::{DirectBranchKind, DisasmRowKind};
+    use crate::executable::detect_executable_info;
+
+    fn config() -> crate::config::Config {
+        crate::config::Config {
+            page_size: 4096,
+            cache_pages: 8,
+            ..crate::config::Config::default()
+        }
+    }
+
+    fn doc_with_bytes(bytes: &[u8]) -> (tempfile::TempDir, Document) {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("sample.bin");
+        fs::write(&file, bytes).unwrap();
+        let doc = Document::open(&file, &config()).unwrap();
+        (dir, doc)
+    }
+
+    fn elf64(machine: u16, virtual_addr: u64, code: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0u8; (0x100 + code.len()).max(0x200)];
+        bytes[0..4].copy_from_slice(b"\x7fELF");
+        bytes[4] = 2;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+        bytes[18..20].copy_from_slice(&machine.to_le_bytes());
+        bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+        bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
+        bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+        bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
+        bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
+        let ph = 64usize;
+        bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
+        bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
+        bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[ph + 16..ph + 24].copy_from_slice(&virtual_addr.to_le_bytes());
+        bytes[ph + 32..ph + 40].copy_from_slice(&(code.len() as u64).to_le_bytes());
+        bytes[0x100..0x100 + code.len()].copy_from_slice(code);
+        bytes
+    }
+
+    #[cfg(feature = "disasm-iced-x86")]
+    #[test]
+    fn x86_64_pipeline_decodes_and_tracks_call() {
+        // push rbp; mov rbp, rsp; call rel32(-5); ret
+        let code = [0x55, 0x48, 0x89, 0xe5, 0xe8, 0xfb, 0xff, 0xff, 0xff, 0xc3];
+        let (_dir, mut doc) = doc_with_bytes(&elf64(0x3e, 0x401000, &code));
+        let info = detect_executable_info(&mut doc).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
+        let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 4).unwrap();
+
+        assert_eq!(rows[0].offset, 0x100);
+        assert!(rows[0].text.contains("push"));
+        assert!(rows[1].text.contains("mov"));
+        let call = &rows[2];
+        assert!(call.text.contains("call"));
+        let target = call.direct_target.as_ref().expect("call target");
+        assert_eq!(target.kind, DirectBranchKind::Call);
+        // call at VA 0x401004, len 5, rel -5 => 0x401004.
+        assert_eq!(target.virtual_address, 0x401004);
+        assert!(rows.iter().all(|r| r.kind == DisasmRowKind::Instruction));
+    }
+
+    #[cfg(feature = "disasm-yaxpeax-arm")]
+    #[test]
+    fn aarch64_pipeline_decodes_and_tracks_branch() {
+        // mov x0,#1 ; bl #0 ; ret  (each 4 bytes, little-endian)
+        let code = [
+            0x20, 0x00, 0x80, 0xd2, // mov x0, #1
+            0x00, 0x00, 0x00, 0x94, // bl #0 (-> self)
+            0xc0, 0x03, 0x5f, 0xd6, // ret
+        ];
+        let (_dir, mut doc) = doc_with_bytes(&elf64(183, 0x401000, &code));
+        let info = detect_executable_info(&mut doc).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
+        let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 3).unwrap();
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].bytes.len(), 4);
+        assert!(rows[1].text.contains("bl"));
+        let target = rows[1].direct_target.as_ref().expect("bl target");
+        assert_eq!(target.kind, DirectBranchKind::Call);
+        // bl at VA 0x401004, offset 0 => 0x401004.
+        assert_eq!(target.virtual_address, 0x401004);
+        assert!(rows[2].text.contains("ret"));
     }
 }

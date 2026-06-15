@@ -107,7 +107,7 @@ fn unified_search_command_executes_and_warns_for_deprecated_alias() {
     assert!(app3.status_message.contains(":s x/.../"));
 }
 
-#[cfg(all(feature = "disasm-capstone", feature = "symbols"))]
+#[cfg(all(feature = "disasm", feature = "symbols"))]
 #[test]
 fn search_repeat_works_while_side_panel_has_focus() {
     let bytes = build_disassembly_elf64_with_symbol(

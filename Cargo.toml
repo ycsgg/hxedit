@@ -25,9 +25,8 @@ include = [
 [features]
 default = ["default-bundle"]
 default-bundle = [
-    "disasm-capstone-full",
-    "disasm-capstone-x86",
-    "disasm-capstone-arm64",
+    "disasm-iced-x86",
+    "disasm-yaxpeax-arm",
     "memory",
     "symbols",
 ]
@@ -41,7 +40,8 @@ disasm-capstone = ["disasm", "dep:capstone"]
 disasm-capstone-full = ["disasm-capstone", "capstone/full"]
 disasm-capstone-x86 = ["disasm-capstone", "capstone/arch_x86"]
 disasm-capstone-arm64 = ["disasm-capstone", "capstone/arch_arm64"]
-disasm-iced-x86 = ["disasm"]
+disasm-iced-x86 = ["disasm", "dep:iced-x86"]
+disasm-yaxpeax-arm = ["disasm", "dep:yaxpeax-arch", "dep:yaxpeax-arm"]
 
 [dependencies]
 anyhow = "1.0"
@@ -65,6 +65,9 @@ symbolic-common = { version = "12.18", optional = true }
 symbolic-demangle = { version = "12.18", optional = true }
 keystone-engine = { package = "hexpatch-keystone", version = "0.9.4", optional = true, features = ["build_keystone_cmake"] }
 sagitta-rs = { version = "0.0.2", optional = true }
+iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "fast_fmt"], optional = true }
+yaxpeax-arch = { version = "0.3", default-features = false, features = ["std"], optional = true }
+yaxpeax-arm = { version = "0.4", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
 libc = "0.2"
