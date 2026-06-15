@@ -36,7 +36,7 @@ impl DisasmCache {
         Self::with_max_rows_inner(info, doc_len, DEFAULT_MAX_ROWS)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "disasm-capstone"))]
     fn with_max_rows(info: &ExecutableInfo, doc_len: u64, max_rows: usize) -> Self {
         Self::with_max_rows_inner(info, doc_len, max_rows)
     }
@@ -60,12 +60,12 @@ impl DisasmCache {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "disasm-capstone"))]
     pub(crate) fn cached_row_count(&self) -> usize {
         self.rows.len()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "disasm-capstone"))]
     pub(crate) fn checkpoint_count(&self) -> usize {
         self.checkpoints.len()
     }

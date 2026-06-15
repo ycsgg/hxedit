@@ -595,5 +595,6 @@ mod diff;
 mod disasm;
 mod edit_commands;
 mod hash;
+#[cfg(feature = "memory")]
 mod memory;
 mod search_nav;
