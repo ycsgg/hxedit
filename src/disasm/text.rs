@@ -13,6 +13,14 @@ pub struct InstructionTextToken<'a> {
 
 pub fn tokenize_instruction_text(text: &str) -> Vec<InstructionTextToken<'_>> {
     let mut tokens = Vec::new();
+    for_each_instruction_text_token(text, |token| tokens.push(token));
+    tokens
+}
+
+pub fn for_each_instruction_text_token<'a>(
+    text: &'a str,
+    mut visit: impl FnMut(InstructionTextToken<'a>),
+) {
     let mut chars = text.char_indices().peekable();
 
     while let Some((start, ch)) = chars.next() {
@@ -38,13 +46,11 @@ pub fn tokenize_instruction_text(text: &str) -> Vec<InstructionTextToken<'_>> {
             end = idx + next.len_utf8();
         }
 
-        tokens.push(InstructionTextToken {
+        visit(InstructionTextToken {
             kind,
             text: &text[start..end],
         });
     }
-
-    tokens
 }
 
 pub fn looks_like_register(token: &str) -> bool {

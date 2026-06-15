@@ -3,6 +3,8 @@
 //! Run with: `cargo bench --bench perf_bench`
 
 use std::fs;
+#[cfg(feature = "disasm-iced-x86")]
+use std::hint::black_box;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::process::Command;
 use std::sync::Arc;
@@ -16,6 +18,12 @@ use hxedit::core::file_view::FileView;
 use hxedit::diff::{find_mismatch_forward, find_mismatch_forward_step};
 use hxedit::format;
 use hxedit::mode::NibblePhase;
+#[cfg(feature = "disasm-iced-x86")]
+use ratatui::buffer::Buffer;
+#[cfg(feature = "disasm-iced-x86")]
+use ratatui::layout::Rect;
+#[cfg(feature = "disasm-iced-x86")]
+use ratatui::widgets::{Paragraph, Widget};
 use tempfile::tempdir;
 
 type BenchResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -488,6 +496,240 @@ fn bench_parse_elf_format() -> BenchResult {
         }
     }
     print("detect+parse ELF fixture", t.elapsed(), iters);
+    Ok(())
+}
+
+#[cfg(feature = "disasm-iced-x86")]
+fn x86_64_elf_bytes(code: &[u8]) -> Vec<u8> {
+    let text_virtual = 0x401000u64;
+    let mut bytes = vec![0_u8; (0x100 + code.len()).max(0x200)];
+    bytes[0..4].copy_from_slice(b"\x7fELF");
+    bytes[4] = 2;
+    bytes[5] = 1;
+    bytes[6] = 1;
+    bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+    bytes[18..20].copy_from_slice(&0x3eu16.to_le_bytes());
+    bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
+    bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
+    bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+    bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
+    bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
+    let ph = 64usize;
+    bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
+    bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
+    bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
+    bytes[ph + 16..ph + 24].copy_from_slice(&text_virtual.to_le_bytes());
+    bytes[ph + 32..ph + 40].copy_from_slice(&(code.len() as u64).to_le_bytes());
+    bytes[0x100..0x100 + code.len()].copy_from_slice(code);
+    bytes
+}
+
+#[cfg(feature = "disasm-iced-x86")]
+fn bench_disasm_decode_x86_64_nop_rows() -> BenchResult {
+    let dir = tempdir()?;
+    let path = dir.path().join("disasm-decode-x86_64-nop.bin");
+    let code = vec![0x90_u8; 128 * 1024];
+    fs::write(&path, x86_64_elf_bytes(&code))?;
+
+    let mut doc = Document::open(&path, &bench_config())?;
+    let info = hxedit::executable::detect_executable_info(&mut doc)
+        .ok_or_else(|| std::io::Error::other("synthetic ELF was not detected"))?;
+    let backend = hxedit::disasm::backend::resolve_backend(&info, None)?;
+
+    let t = Instant::now();
+    let rows =
+        hxedit::disasm::decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, code.len())?;
+    let elapsed = t.elapsed();
+    assert_eq!(rows.len(), code.len());
+    assert!(rows.iter().all(|row| row.text == "nop"));
+    print("disasm decode x86_64 nop rows", elapsed, rows.len());
+    Ok(())
+}
+
+#[cfg(not(feature = "disasm-iced-x86"))]
+fn bench_disasm_decode_x86_64_nop_rows() -> BenchResult {
+    eprintln!("[bench] disasm decode x86_64 skipped: disasm-iced-x86 feature disabled");
+    Ok(())
+}
+
+#[cfg(feature = "disasm-iced-x86")]
+fn bench_disasm_render_x86_64_nop_frames() -> BenchResult {
+    bench_disasm_render_x86_64_frames("nop", &[0x90], false)
+}
+
+#[cfg(not(feature = "disasm-iced-x86"))]
+fn bench_disasm_render_x86_64_nop_frames() -> BenchResult {
+    eprintln!("[bench] disasm render x86_64 nop skipped: disasm-iced-x86 feature disabled");
+    Ok(())
+}
+
+#[cfg(feature = "disasm-iced-x86")]
+fn bench_disasm_render_x86_64_nop_rail_frames() -> BenchResult {
+    bench_disasm_render_x86_64_frames("nop-rail", &[0x90], true)
+}
+
+#[cfg(not(feature = "disasm-iced-x86"))]
+fn bench_disasm_render_x86_64_nop_rail_frames() -> BenchResult {
+    eprintln!("[bench] disasm render x86_64 nop rail skipped: disasm-iced-x86 feature disabled");
+    Ok(())
+}
+
+#[cfg(feature = "disasm-iced-x86")]
+fn bench_disasm_render_x86_64_jmp_frames() -> BenchResult {
+    bench_disasm_render_x86_64_frames("jmp", &[0xeb, 0x00], true)
+}
+
+#[cfg(not(feature = "disasm-iced-x86"))]
+fn bench_disasm_render_x86_64_jmp_frames() -> BenchResult {
+    eprintln!("[bench] disasm render x86_64 jmp skipped: disasm-iced-x86 feature disabled");
+    Ok(())
+}
+
+#[cfg(feature = "disasm-iced-x86")]
+fn bench_disasm_render_x86_64_frames(
+    name: &str,
+    instruction: &[u8],
+    jump_rail: bool,
+) -> BenchResult {
+    let dir = tempdir()?;
+    let path = dir.path().join(format!("disasm-render-x86_64-{name}.bin"));
+    let row_count = 80usize;
+    let frames = 5_000usize;
+    let mut code = Vec::with_capacity(256 * 1024);
+    while code.len() < 256 * 1024 {
+        code.extend_from_slice(instruction);
+    }
+    fs::write(&path, x86_64_elf_bytes(&code))?;
+
+    let mut doc = Document::open(&path, &bench_config())?;
+    let info = hxedit::executable::detect_executable_info(&mut doc)
+        .ok_or_else(|| std::io::Error::other("synthetic ELF was not detected"))?;
+    let backend = hxedit::disasm::backend::resolve_backend(&info, None)?;
+    let mut cache = hxedit::disasm::DisasmCache::new(&info, doc.len());
+    let palette = hxedit::view::palette::Palette::new(hxedit::view::palette::ColorLevel::Basic);
+    let area = Rect::new(0, 0, 160, row_count as u16);
+    let gutter_area = Rect::new(0, 0, 18, row_count as u16);
+    let bytes_area = Rect::new(19, 0, 24, row_count as u16);
+    let text_area = Rect::new(44, 0, 110, row_count as u16);
+
+    let t = Instant::now();
+    let mut collect_elapsed = Duration::default();
+    let mut line_elapsed = Duration::default();
+    let mut rail_elapsed = Duration::default();
+    let mut draw_elapsed = Duration::default();
+    let mut rendered_lines = 0usize;
+    for _ in 0..frames {
+        let section = Instant::now();
+        let rows = cache.collect_rows(&mut doc, &info, backend.as_ref(), 0x100, row_count)?;
+        collect_elapsed += section.elapsed();
+
+        let section = Instant::now();
+        let display =
+            hxedit::view::disasm_grid::build_display(&rows, 18, 0x100, None, 80, &palette);
+        line_elapsed += section.elapsed();
+
+        let text = if jump_rail {
+            let section = Instant::now();
+            let rail = hxedit::view::disasm_grid::build_jump_rail(
+                &rows,
+                &display.row_sources,
+                &display.text,
+                110,
+                &palette,
+            );
+            let text = hxedit::view::disasm_grid::merge_jump_rail(display.text, &rail, &palette);
+            rail_elapsed += section.elapsed();
+            text
+        } else {
+            display.text
+        };
+        rendered_lines += text.len();
+
+        let section = Instant::now();
+        let mut buffer = Buffer::empty(area);
+        Paragraph::new(display.gutter).render(gutter_area, &mut buffer);
+        Paragraph::new(display.bytes).render(bytes_area, &mut buffer);
+        Paragraph::new(text).render(text_area, &mut buffer);
+        black_box(&buffer);
+        draw_elapsed += section.elapsed();
+    }
+    let elapsed = t.elapsed();
+    assert!(rendered_lines >= frames * row_count);
+    eprintln!(
+        "[bench] disasm render x86_64 {name} breakdown          collect {:>10.3} us/frame  lines {:>10.3} us/frame  rail {:>10.3} us/frame  draw {:>10.3} us/frame",
+        collect_elapsed.as_secs_f64() * 1_000_000.0 / frames as f64,
+        line_elapsed.as_secs_f64() * 1_000_000.0 / frames as f64,
+        rail_elapsed.as_secs_f64() * 1_000_000.0 / frames as f64,
+        draw_elapsed.as_secs_f64() * 1_000_000.0 / frames as f64,
+    );
+    print(
+        &format!("disasm render x86_64 {name} frames"),
+        elapsed,
+        frames,
+    );
+    Ok(())
+}
+
+#[cfg(feature = "disasm-yaxpeax-arm")]
+fn aarch64_elf_bytes(code: &[u8]) -> Vec<u8> {
+    let text_virtual = 0x401000u64;
+    let mut bytes = vec![0_u8; (0x100 + code.len()).max(0x200)];
+    bytes[0..4].copy_from_slice(b"\x7fELF");
+    bytes[4] = 2;
+    bytes[5] = 1;
+    bytes[6] = 1;
+    bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+    bytes[18..20].copy_from_slice(&183u16.to_le_bytes());
+    bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&0x100u64.to_le_bytes());
+    bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
+    bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+    bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
+    bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
+    let ph = 64usize;
+    bytes[ph..ph + 4].copy_from_slice(&1u32.to_le_bytes());
+    bytes[ph + 4..ph + 8].copy_from_slice(&0x5u32.to_le_bytes());
+    bytes[ph + 8..ph + 16].copy_from_slice(&0x100u64.to_le_bytes());
+    bytes[ph + 16..ph + 24].copy_from_slice(&text_virtual.to_le_bytes());
+    bytes[ph + 32..ph + 40].copy_from_slice(&(code.len() as u64).to_le_bytes());
+    bytes[0x100..0x100 + code.len()].copy_from_slice(code);
+    bytes
+}
+
+#[cfg(feature = "disasm-yaxpeax-arm")]
+fn bench_disasm_decode_aarch64_ret_rows() -> BenchResult {
+    let dir = tempdir()?;
+    let path = dir.path().join("disasm-decode-aarch64-ret.bin");
+    let mut code = Vec::with_capacity(64 * 1024 * 4);
+    for _ in 0..64 * 1024 {
+        code.extend_from_slice(&[0xc0, 0x03, 0x5f, 0xd6]);
+    }
+    fs::write(&path, aarch64_elf_bytes(&code))?;
+
+    let mut doc = Document::open(&path, &bench_config())?;
+    let info = hxedit::executable::detect_executable_info(&mut doc)
+        .ok_or_else(|| std::io::Error::other("synthetic ELF was not detected"))?;
+    let backend = hxedit::disasm::backend::resolve_backend(&info, None)?;
+
+    let t = Instant::now();
+    let rows = hxedit::disasm::decode_region_rows(
+        &mut doc,
+        &info,
+        backend.as_ref(),
+        0x100,
+        code.len() / 4,
+    )?;
+    let elapsed = t.elapsed();
+    assert_eq!(rows.len(), code.len() / 4);
+    assert!(rows.iter().all(|row| row.text == "ret"));
+    print("disasm decode aarch64 ret rows", elapsed, rows.len());
+    Ok(())
+}
+
+#[cfg(not(feature = "disasm-yaxpeax-arm"))]
+fn bench_disasm_decode_aarch64_ret_rows() -> BenchResult {
+    eprintln!("[bench] disasm decode aarch64 skipped: disasm-yaxpeax-arm feature disabled");
     Ok(())
 }
 
@@ -1867,6 +2109,26 @@ fn default_benches() -> &'static [BenchEntry] {
             bench_save_64mb_overwrite_replacements,
         ),
         ("parse_elf_format", bench_parse_elf_format),
+        (
+            "disasm_decode_x86_64_nop_rows",
+            bench_disasm_decode_x86_64_nop_rows,
+        ),
+        (
+            "disasm_decode_aarch64_ret_rows",
+            bench_disasm_decode_aarch64_ret_rows,
+        ),
+        (
+            "disasm_render_x86_64_nop_frames",
+            bench_disasm_render_x86_64_nop_frames,
+        ),
+        (
+            "disasm_render_x86_64_nop_rail_frames",
+            bench_disasm_render_x86_64_nop_rail_frames,
+        ),
+        (
+            "disasm_render_x86_64_jmp_frames",
+            bench_disasm_render_x86_64_jmp_frames,
+        ),
         ("edit_mode_replace_nibbles", bench_edit_mode_replace_nibbles),
         ("edit_mode_insert_nibbles", bench_edit_mode_insert_nibbles),
         (

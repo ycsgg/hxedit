@@ -23,7 +23,7 @@ impl BackendKind {
 
 #[cfg(feature = "disasm-iced-x86")]
 pub use iced::IcedX86Backend;
-#[cfg(feature = "disasm-yaxpeax-arm")]
-pub use yaxpeax::YaxpeaxArmBackend;
 pub use registry::{resolve_backend, resolve_backend_kind};
 pub use traits::DisassemblerBackend;
+#[cfg(feature = "disasm-yaxpeax-arm")]
+pub use yaxpeax::YaxpeaxArmBackend;

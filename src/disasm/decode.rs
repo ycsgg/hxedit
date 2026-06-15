@@ -1,7 +1,7 @@
 use crate::core::document::Document;
 use crate::disasm::backend::DisassemblerBackend;
 use crate::disasm::text::{
-    parse_immediate_token, tokenize_instruction_text, InstructionTextTokenKind,
+    for_each_instruction_text_token, parse_immediate_token, InstructionTextTokenKind,
 };
 use crate::disasm::types::{DirectBranchTarget, DisasmRow, DisasmRowKind};
 use crate::error::HxResult;
@@ -27,6 +27,8 @@ pub fn decode_region_rows(
 
     let mut rows = Vec::with_capacity(max_rows);
     let mut offset = start.min(doc.len().saturating_sub(1));
+    let has_display_names = has_display_names(info);
+    let mut block = Vec::new();
 
     while rows.len() < max_rows && offset < doc.len() {
         let Some(span) = current_span(info, doc, offset) else {
@@ -34,7 +36,7 @@ pub fn decode_region_rows(
         };
 
         if !span.executable {
-            let row = decode_data_row(doc, info, offset, &span)?;
+            let row = decode_data_row(doc, info, offset, &span, has_display_names)?;
             offset = offset.saturating_add(row.len() as u64);
             rows.push(row);
             continue;
@@ -51,23 +53,24 @@ pub fn decode_region_rows(
         let window = doc.read_logical_range(offset, want)?;
         let decode_address = span.virtual_address_for_offset(offset).unwrap_or(offset);
 
-        let mut block = Vec::new();
+        block.clear();
+        block.reserve((max_rows - rows.len()).min(window.len()));
         backend.decode_block(decode_address, &window, max_rows - rows.len(), &mut block)?;
 
         if block.is_empty() {
             // Could not stream even one instruction (invalid/empty); the
             // single-row path produces the correct `.db` fallback row.
-            let row = decode_instruction_row(doc, info, backend, offset, &span)?;
+            let row = decode_instruction_row(doc, info, backend, offset, &span, has_display_names)?;
             offset = offset.saturating_add(row.len() as u64);
             rows.push(row);
             continue;
         }
 
-        for decoded in block {
+        for decoded in block.drain(..) {
             if rows.len() >= max_rows {
                 break;
             }
-            let row = instruction_row_from_decoded(info, offset, &span, decoded);
+            let row = instruction_row_from_decoded(info, offset, &span, decoded, has_display_names);
             offset = offset.saturating_add(row.len() as u64);
             rows.push(row);
         }
@@ -127,14 +130,13 @@ fn decode_instruction_row(
     backend: &dyn DisassemblerBackend,
     offset: u64,
     span: &CodeSpan,
+    has_display_names: bool,
 ) -> HxResult<DisasmRow> {
     let remaining = (span.end_inclusive - offset + 1) as usize;
     let read_len = backend.max_instruction_bytes().min(remaining);
     let bytes = doc.read_logical_range(offset, read_len)?;
     let virtual_address = span.virtual_address_for_offset(offset);
-    let symbol_label = virtual_address
-        .and_then(|address| info.display_name_at_virtual(address))
-        .map(str::to_owned);
+    let symbol_label = symbol_label_for(info, virtual_address, has_display_names);
     let decode_address = virtual_address.unwrap_or(offset);
     if bytes.is_empty() {
         return Ok(DisasmRow::data(
@@ -148,7 +150,7 @@ fn decode_instruction_row(
 
     let row = match backend.decode_one(decode_address, &bytes)? {
         Some(decoded) if !decoded.bytes.is_empty() => {
-            instruction_row_from_decoded(info, offset, span, decoded)
+            instruction_row_from_decoded(info, offset, span, decoded, has_display_names)
         }
         _ => DisasmRow::invalid(
             offset,
@@ -170,13 +172,16 @@ fn instruction_row_from_decoded(
     offset: u64,
     span: &CodeSpan,
     decoded: crate::disasm::types::DecodedInstruction,
+    has_display_names: bool,
 ) -> DisasmRow {
     let virtual_address = span.virtual_address_for_offset(offset);
-    let symbol_label = virtual_address
-        .and_then(|address| info.display_name_at_virtual(address))
-        .map(str::to_owned);
-    let (text, symbolized_names) = symbolize_instruction_text(&decoded.text, info);
-    let direct_target = resolve_direct_target(decoded.direct_target, info);
+    let symbol_label = symbol_label_for(info, virtual_address, has_display_names);
+    let (text, symbolized_names) = if has_display_names {
+        symbolize_instruction_text(&decoded.text, info)
+    } else {
+        (decoded.text.clone(), Vec::new())
+    };
+    let direct_target = resolve_direct_target(decoded.direct_target, info, has_display_names);
     DisasmRow {
         offset,
         virtual_address,
@@ -195,7 +200,12 @@ fn instruction_row_from_decoded(
 fn resolve_direct_target(
     direct_target: Option<DirectBranchTarget>,
     info: &ExecutableInfo,
+    has_display_names: bool,
 ) -> Option<DirectBranchTarget> {
+    if !has_display_names {
+        return direct_target;
+    }
+
     direct_target.map(|mut target| {
         target.display_name = info
             .display_name_at_virtual(target.virtual_address)
@@ -209,14 +219,13 @@ fn decode_data_row(
     info: &ExecutableInfo,
     offset: u64,
     span: &CodeSpan,
+    has_display_names: bool,
 ) -> HxResult<DisasmRow> {
     let remaining = (span.end_inclusive - offset + 1) as usize;
     let read_len = DATA_ROW_BYTES.min(remaining);
     let bytes = doc.read_logical_range(offset, read_len)?;
     let virtual_address = span.virtual_address_for_offset(offset);
-    let symbol_label = virtual_address
-        .and_then(|address| info.display_name_at_virtual(address))
-        .map(str::to_owned);
+    let symbol_label = symbol_label_for(info, virtual_address, has_display_names);
     Ok(DisasmRow::data(
         offset,
         virtual_address,
@@ -226,13 +235,31 @@ fn decode_data_row(
     ))
 }
 
+fn has_display_names(info: &ExecutableInfo) -> bool {
+    !info.symbols_by_va.is_empty() || !info.target_names_by_va.is_empty()
+}
+
+fn symbol_label_for(
+    info: &ExecutableInfo,
+    virtual_address: Option<u64>,
+    has_display_names: bool,
+) -> Option<String> {
+    if !has_display_names {
+        return None;
+    }
+
+    virtual_address
+        .and_then(|address| info.display_name_at_virtual(address))
+        .map(str::to_owned)
+}
+
 fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> (String, Vec<String>) {
     let mut out = String::with_capacity(text.len());
     let mut symbolized_names = Vec::new();
-    for token in tokenize_instruction_text(text) {
+    for_each_instruction_text_token(text, |token| {
         if token.kind != InstructionTextTokenKind::Atom {
             out.push_str(token.text);
-            continue;
+            return;
         }
 
         if let Some(address) = parse_immediate_token(token.text) {
@@ -247,7 +274,7 @@ fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> (String, Vec
         } else {
             out.push_str(token.text);
         }
-    }
+    });
     (out, symbolized_names)
 }
 
@@ -627,17 +654,27 @@ mod tests {
         let backend = resolve_backend(&info, None).unwrap();
 
         let want = 90usize;
-        let streamed =
-            decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, want).unwrap();
+        let streamed = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, want).unwrap();
         assert_eq!(streamed.len(), want);
 
         let span = info.span_containing(0x100).cloned().unwrap();
+        let has_display_names = super::has_display_names(&info);
         for row in &streamed {
-            let single =
-                super::decode_instruction_row(&mut doc, &info, backend.as_ref(), row.offset, &span)
-                    .unwrap();
+            let single = super::decode_instruction_row(
+                &mut doc,
+                &info,
+                backend.as_ref(),
+                row.offset,
+                &span,
+                has_display_names,
+            )
+            .unwrap();
             assert_eq!(single.offset, row.offset);
-            assert_eq!(single.bytes, row.bytes, "bytes differ at 0x{:x}", row.offset);
+            assert_eq!(
+                single.bytes, row.bytes,
+                "bytes differ at 0x{:x}",
+                row.offset
+            );
             assert_eq!(single.text, row.text, "text differs at 0x{:x}", row.offset);
             assert_eq!(
                 single.direct_target, row.direct_target,
@@ -811,7 +848,6 @@ mod tests {
         assert_eq!(target.display_name.as_deref(), Some("puts"));
     }
 }
-
 
 // End-to-end coverage that runs against whichever backend the build resolves by
 // default (iced-x86 / yaxpeax-arm). Assertions avoid

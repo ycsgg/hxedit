@@ -386,6 +386,23 @@ fn disassembly_main_view_renders_decoded_instruction_lines() {
 
 #[cfg(feature = "disasm")]
 #[test]
+fn disassembly_jump_rail_skips_rows_without_direct_targets() {
+    let mut app = app_with_bytes(&elf64_with_executable_code(&[0x90, 0x90, 0xc3]));
+    app.execute_command(Command::Disassemble { arch: None })
+        .unwrap();
+    app.last_columns = Some(disassembly_test_columns(96));
+
+    let lines = app.build_disassembly_lines(3);
+    match lines.pane {
+        super::MainPaneLines::Disassembly { jump_rail, .. } => {
+            assert!(jump_rail.is_none());
+        }
+        _ => panic!("expected disassembly pane"),
+    }
+}
+
+#[cfg(feature = "disasm")]
+#[test]
 fn disassembly_jump_rail_hides_when_symbol_panel_is_open() {
     let mut app = app_with_bytes(&elf64_with_executable_code(&[0xeb, 0x02, 0x90, 0x90, 0xc3]));
     app.execute_command(Command::Disassemble { arch: None })

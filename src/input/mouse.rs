@@ -257,7 +257,9 @@ fn disasm_hex_col_from_x(x: u16, byte_count: usize) -> Option<(usize, Option<Nib
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::disasm::{DisasmFunctionBoundary, DisasmFunctionScope, DisasmRow, DisasmRowKind};
+    use crate::disasm::{
+        DisasmFunctionBoundary, DisasmFunctionScope, DisasmRow, DisasmRowKind, RowBytes,
+    };
 
     fn columns() -> MainColumns {
         MainColumns {
@@ -290,7 +292,7 @@ mod tests {
             DisasmRow {
                 offset: 0x100,
                 virtual_address: Some(0x401000),
-                bytes: vec![0x55],
+                bytes: RowBytes::from_slice(&[0x55]),
                 text: "push rbp".to_owned(),
                 assembly_text: "push rbp".to_owned(),
                 symbolized_names: Vec::new(),
@@ -303,7 +305,7 @@ mod tests {
             DisasmRow {
                 offset: 0x101,
                 virtual_address: Some(0x401001),
-                bytes: vec![0x48, 0x89, 0xe5],
+                bytes: RowBytes::from_slice(&[0x48, 0x89, 0xe5]),
                 text: "mov rbp, rsp".to_owned(),
                 assembly_text: "mov rbp, rsp".to_owned(),
                 symbolized_names: Vec::new(),
@@ -316,7 +318,7 @@ mod tests {
             DisasmRow {
                 offset: 0x200,
                 virtual_address: None,
-                bytes: vec![0x41, 0x42, 0x43],
+                bytes: RowBytes::from_slice(&[0x41, 0x42, 0x43]),
                 text: ".db 0x41, 0x42, 0x43".to_owned(),
                 assembly_text: ".db 0x41, 0x42, 0x43".to_owned(),
                 symbolized_names: Vec::new(),

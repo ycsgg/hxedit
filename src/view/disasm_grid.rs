@@ -2,7 +2,8 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::disasm::text::{
-    looks_like_immediate, looks_like_register, tokenize_instruction_text, InstructionTextTokenKind,
+    for_each_instruction_text_token, looks_like_immediate, looks_like_register,
+    InstructionTextTokenKind,
 };
 use crate::disasm::{DisasmFunctionBoundary, DisasmRow, DisasmRowKind};
 use crate::view::palette::Palette;
@@ -819,40 +820,38 @@ fn tokenize_operands(
     palette: &Palette,
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
-    for token in tokenize_instruction_text(text) {
-        match token.kind {
-            InstructionTextTokenKind::Whitespace => spans.push(styled_operand(
+    for_each_instruction_text_token(text, |token| match token.kind {
+        InstructionTextTokenKind::Whitespace => spans.push(styled_operand(
+            token.text.to_owned(),
+            palette.disasm_operand,
+            active_row,
+            palette,
+        )),
+        InstructionTextTokenKind::Punctuation => {
+            spans.push(styled_punctuation(token.text, active_row, palette));
+        }
+        InstructionTextTokenKind::Atom => {
+            let base = if row
+                .symbolized_names
+                .iter()
+                .any(|symbol| symbol == token.text)
+            {
+                palette.disasm_symbol
+            } else if looks_like_register(token.text) {
+                palette.disasm_register
+            } else if looks_like_immediate(token.text) {
+                palette.disasm_immediate
+            } else {
+                palette.disasm_operand
+            };
+            spans.push(styled_operand(
                 token.text.to_owned(),
-                palette.disasm_operand,
+                base,
                 active_row,
                 palette,
-            )),
-            InstructionTextTokenKind::Punctuation => {
-                spans.push(styled_punctuation(token.text, active_row, palette));
-            }
-            InstructionTextTokenKind::Atom => {
-                let base = if row
-                    .symbolized_names
-                    .iter()
-                    .any(|symbol| symbol == token.text)
-                {
-                    palette.disasm_symbol
-                } else if looks_like_register(token.text) {
-                    palette.disasm_register
-                } else if looks_like_immediate(token.text) {
-                    palette.disasm_immediate
-                } else {
-                    palette.disasm_operand
-                };
-                spans.push(styled_operand(
-                    token.text.to_owned(),
-                    base,
-                    active_row,
-                    palette,
-                ));
-            }
+            ));
         }
-    }
+    });
     spans
 }
 
@@ -911,7 +910,7 @@ mod tests {
     };
     use crate::disasm::{
         DirectBranchKind, DirectBranchTarget, DisasmFunctionBoundary, DisasmFunctionScope,
-        DisasmRow, DisasmRowKind,
+        DisasmRow, DisasmRowKind, RowBytes,
     };
     use crate::view::palette::{ColorLevel, Palette};
 
@@ -919,7 +918,7 @@ mod tests {
         vec![DisasmRow {
             offset: 0x100,
             virtual_address: Some(0x401000),
-            bytes: vec![0x48, 0x8b, 0x45, 0xf8],
+            bytes: RowBytes::from_slice(&[0x48, 0x8b, 0x45, 0xf8]),
             text: "mov rax, [rbp - 0x8]".to_owned(),
             assembly_text: "mov rax, [rbp - 0x8]".to_owned(),
             symbolized_names: Vec::new(),
@@ -954,7 +953,7 @@ mod tests {
         DisasmRow {
             offset,
             virtual_address: Some(virtual_address),
-            bytes: vec![0x90, 0x90],
+            bytes: RowBytes::from_slice(&[0x90, 0x90]),
             text: text.to_owned(),
             assembly_text: text.to_owned(),
             symbolized_names: Vec::new(),
@@ -1026,7 +1025,7 @@ mod tests {
         let rows = vec![DisasmRow {
             offset: 0x100,
             virtual_address: Some(0x401000),
-            bytes: vec![0xe8, 0xfb, 0x0f, 0x00, 0x00],
+            bytes: RowBytes::from_slice(&[0xe8, 0xfb, 0x0f, 0x00, 0x00]),
             text: "call entry".to_owned(),
             assembly_text: "call 0x402000".to_owned(),
             symbolized_names: vec!["entry".to_owned()],
@@ -1060,7 +1059,7 @@ mod tests {
         let rows = vec![DisasmRow {
             offset: 0x100,
             virtual_address: Some(0x401000),
-            bytes: vec![0xe8, 0xfb, 0x0f, 0x00, 0x00],
+            bytes: RowBytes::from_slice(&[0xe8, 0xfb, 0x0f, 0x00, 0x00]),
             text: "call entry".to_owned(),
             assembly_text: "call 0x402000".to_owned(),
             symbolized_names: vec!["entry".to_owned()],

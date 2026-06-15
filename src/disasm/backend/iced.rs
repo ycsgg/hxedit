@@ -1,7 +1,7 @@
 use iced_x86::{Decoder, DecoderOptions, FastFormatter, Instruction, Mnemonic, OpKind};
 
 use crate::disasm::backend::{BackendKind, DisassemblerBackend};
-use crate::disasm::types::{DecodedInstruction, DirectBranchKind, DirectBranchTarget};
+use crate::disasm::types::{DecodedInstruction, DirectBranchKind, DirectBranchTarget, RowBytes};
 use crate::error::{HxError, HxResult};
 use crate::executable::{ExecutableArch, ExecutableInfo};
 
@@ -105,7 +105,7 @@ fn decoded_from(
     let mut text = String::new();
     formatter.format(instruction, &mut text);
     Some(DecodedInstruction {
-        bytes: remaining[..len].to_vec(),
+        bytes: RowBytes::from_slice(&remaining[..len]),
         text,
         direct_target: direct_branch_target(instruction),
     })
@@ -157,9 +157,7 @@ fn direct_branch_target(instruction: &Instruction) -> Option<DirectBranchTarget>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::executable::{
-        Bitness, Endian, ExecutableArch, ExecutableInfo, ExecutableKind,
-    };
+    use crate::executable::{Bitness, Endian, ExecutableArch, ExecutableInfo, ExecutableKind};
     use std::collections::{BTreeMap, HashMap};
 
     fn info(arch: ExecutableArch) -> ExecutableInfo {

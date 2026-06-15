@@ -390,7 +390,8 @@ impl App {
             .map(|edit| (edit.row_offset, edit.buffer.as_str()));
         let rail_width = self
             .last_columns
-            .and_then(|columns| self.disassembly_jump_rail_width(columns));
+            .and_then(|columns| self.disassembly_jump_rail_width(columns))
+            .filter(|_| rows.iter().any(|row| row.direct_target.is_some()));
         let ascii_width = self
             .last_columns
             .map(|columns| columns.ascii.width as usize)

@@ -16,5 +16,5 @@ pub use patch::{plan_assembly_patch, AssemblyPatchPlan};
 pub use state::DisassemblyState;
 pub use types::{
     DecodedInstruction, DirectBranchKind, DirectBranchTarget, DisasmFunctionBoundary,
-    DisasmFunctionScope, DisasmRow, DisasmRowKind,
+    DisasmFunctionScope, DisasmRow, DisasmRowKind, RowBytes,
 };

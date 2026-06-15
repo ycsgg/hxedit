@@ -100,14 +100,14 @@ fn nop_bytes(arch: ExecutableArch, len: usize) -> HxResult<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::{plan_assembly_patch, AssemblyPatchPlan};
-    use crate::disasm::{DisasmRow, DisasmRowKind};
+    use crate::disasm::{DisasmRow, DisasmRowKind, RowBytes};
     use crate::executable::ExecutableArch;
 
     fn row(offset: u64, bytes: &[u8]) -> DisasmRow {
         DisasmRow {
             offset,
             virtual_address: Some(0x401000 + offset),
-            bytes: bytes.to_vec(),
+            bytes: RowBytes::from_slice(bytes),
             text: "nop".to_owned(),
             assembly_text: "nop".to_owned(),
             symbolized_names: Vec::new(),

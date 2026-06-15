@@ -2,7 +2,7 @@ use yaxpeax_arch::{Decoder, U8Reader};
 use yaxpeax_arm::armv8::a64::{InstDecoder, Opcode, Operand};
 
 use crate::disasm::backend::{BackendKind, DisassemblerBackend};
-use crate::disasm::types::{DecodedInstruction, DirectBranchKind, DirectBranchTarget};
+use crate::disasm::types::{DecodedInstruction, DirectBranchKind, DirectBranchTarget, RowBytes};
 use crate::error::{HxError, HxResult};
 use crate::executable::{ExecutableArch, ExecutableInfo};
 
@@ -47,10 +47,42 @@ impl DisassemblerBackend for YaxpeaxArmBackend {
         if bytes.len() < INSTRUCTION_BYTES {
             return Ok(None);
         }
-        let word = &bytes[..INSTRUCTION_BYTES];
+        Ok(self.decode_word(address, &bytes[..INSTRUCTION_BYTES]))
+    }
+
+    fn decode_block(
+        &self,
+        address: u64,
+        bytes: &[u8],
+        max_instructions: usize,
+        out: &mut Vec<DecodedInstruction>,
+    ) -> HxResult<()> {
+        if bytes.len() < INSTRUCTION_BYTES || max_instructions == 0 {
+            return Ok(());
+        }
+
+        let available = bytes.len() / INSTRUCTION_BYTES;
+        let limit = available.min(max_instructions);
+        out.reserve(limit);
+        for idx in 0..limit {
+            let pos = idx * INSTRUCTION_BYTES;
+            match self.decode_word(
+                address.wrapping_add(pos as u64),
+                &bytes[pos..pos + INSTRUCTION_BYTES],
+            ) {
+                Some(decoded) => out.push(decoded),
+                None => break,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl YaxpeaxArmBackend {
+    fn decode_word(&self, address: u64, word: &[u8]) -> Option<DecodedInstruction> {
         let mut reader = U8Reader::new(word);
         let Ok(instruction) = self.decoder.decode(&mut reader) else {
-            return Ok(None);
+            return None;
         };
 
         // yaxpeax renders PC-relative operands as `$±0xN`; rewrite them to the
@@ -60,11 +92,11 @@ impl DisassemblerBackend for YaxpeaxArmBackend {
         let text = rewrite_pc_relative(&raw_text, address);
         let direct_target = direct_branch_target(&instruction, address);
 
-        Ok(Some(DecodedInstruction {
-            bytes: word.to_vec(),
+        Some(DecodedInstruction {
+            bytes: RowBytes::from_slice(word),
             text,
             direct_target,
-        }))
+        })
     }
 }
 
@@ -118,15 +150,17 @@ fn rewrite_pc_relative(text: &str, address: u64) -> String {
     };
     let consumed = 1 + sign_len + prefix_len + digits.len();
     let absolute = (address as i64).wrapping_add(sign * magnitude) as u64;
-    format!("{}0x{absolute:x}{}", &text[..start], &text[start + consumed..])
+    format!(
+        "{}0x{absolute:x}{}",
+        &text[..start],
+        &text[start + consumed..]
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::executable::{
-        Bitness, Endian, ExecutableArch, ExecutableInfo, ExecutableKind,
-    };
+    use crate::executable::{Bitness, Endian, ExecutableArch, ExecutableInfo, ExecutableKind};
     use std::collections::{BTreeMap, HashMap};
 
     fn info(arch: ExecutableArch) -> ExecutableInfo {
