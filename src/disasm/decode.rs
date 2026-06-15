@@ -9,6 +9,11 @@ use crate::executable::{CodeSpan, ExecutableInfo};
 
 const DATA_ROW_BYTES: usize = 8;
 
+/// Bytes read per streaming window inside an executable span. Large enough to
+/// amortize the per-window piece-table read and decoder setup across many
+/// instructions, small enough to keep memory bounded.
+const DECODE_WINDOW_BYTES: usize = 64 * 1024;
+
 pub fn decode_region_rows(
     doc: &mut Document,
     info: &ExecutableInfo,
@@ -28,14 +33,44 @@ pub fn decode_region_rows(
             break;
         };
 
-        let row = if span.executable {
-            decode_instruction_row(doc, info, backend, offset, &span)?
-        } else {
-            decode_data_row(doc, info, offset, &span)?
-        };
+        if !span.executable {
+            let row = decode_data_row(doc, info, offset, &span)?;
+            offset = offset.saturating_add(row.len() as u64);
+            rows.push(row);
+            continue;
+        }
 
-        offset = offset.saturating_add(row.len() as u64);
-        rows.push(row);
+        // Executable span: stream a window of contiguous instructions through
+        // the backend's `decode_block`, which reuses decoder state. The block
+        // stops at the first byte that does not decode cleanly (an instruction
+        // truncated at the window/span tail, or invalid bytes), at which point
+        // we fall back to the single-instruction path for exact parity with the
+        // per-row decoder.
+        let span_remaining = (span.end_inclusive - offset + 1) as usize;
+        let want = DECODE_WINDOW_BYTES.min(span_remaining);
+        let window = doc.read_logical_range(offset, want)?;
+        let decode_address = span.virtual_address_for_offset(offset).unwrap_or(offset);
+
+        let mut block = Vec::new();
+        backend.decode_block(decode_address, &window, max_rows - rows.len(), &mut block)?;
+
+        if block.is_empty() {
+            // Could not stream even one instruction (invalid/empty); the
+            // single-row path produces the correct `.db` fallback row.
+            let row = decode_instruction_row(doc, info, backend, offset, &span)?;
+            offset = offset.saturating_add(row.len() as u64);
+            rows.push(row);
+            continue;
+        }
+
+        for decoded in block {
+            if rows.len() >= max_rows {
+                break;
+            }
+            let row = instruction_row_from_decoded(info, offset, &span, decoded);
+            offset = offset.saturating_add(row.len() as u64);
+            rows.push(row);
+        }
     }
 
     Ok(rows)
@@ -111,42 +146,50 @@ fn decode_instruction_row(
         ));
     }
 
-    let row = if let Some(decoded) = backend.decode_one(decode_address, &bytes)? {
-        if decoded.bytes.is_empty() {
-            DisasmRow::invalid(
-                offset,
-                virtual_address,
-                bytes[0],
-                symbol_label,
-                span.name.clone(),
-            )
-        } else {
-            let (text, symbolized_names) = symbolize_instruction_text(&decoded.text, info);
-            let direct_target = resolve_direct_target(decoded.direct_target, info);
-            DisasmRow {
-                offset,
-                virtual_address,
-                bytes: decoded.bytes,
-                assembly_text: decoded.text,
-                text,
-                symbolized_names,
-                symbol_label,
-                direct_target,
-                function_scope: None,
-                span_name: span.name.clone(),
-                kind: DisasmRowKind::Instruction,
-            }
+    let row = match backend.decode_one(decode_address, &bytes)? {
+        Some(decoded) if !decoded.bytes.is_empty() => {
+            instruction_row_from_decoded(info, offset, span, decoded)
         }
-    } else {
-        DisasmRow::invalid(
+        _ => DisasmRow::invalid(
             offset,
             virtual_address,
             bytes[0],
             symbol_label,
             span.name.clone(),
-        )
+        ),
     };
     Ok(row)
+}
+
+/// Build an instruction `DisasmRow` from a backend-decoded instruction,
+/// applying symbolization and direct-target name resolution. Shared by the
+/// streaming window path and the single-instruction fallback so both produce
+/// byte-identical rows.
+fn instruction_row_from_decoded(
+    info: &ExecutableInfo,
+    offset: u64,
+    span: &CodeSpan,
+    decoded: crate::disasm::types::DecodedInstruction,
+) -> DisasmRow {
+    let virtual_address = span.virtual_address_for_offset(offset);
+    let symbol_label = virtual_address
+        .and_then(|address| info.display_name_at_virtual(address))
+        .map(str::to_owned);
+    let (text, symbolized_names) = symbolize_instruction_text(&decoded.text, info);
+    let direct_target = resolve_direct_target(decoded.direct_target, info);
+    DisasmRow {
+        offset,
+        virtual_address,
+        bytes: decoded.bytes,
+        assembly_text: decoded.text,
+        text,
+        symbolized_names,
+        symbol_label,
+        direct_target,
+        function_scope: None,
+        span_name: span.name.clone(),
+        kind: DisasmRowKind::Instruction,
+    }
 }
 
 fn resolve_direct_target(
@@ -208,7 +251,7 @@ fn symbolize_instruction_text(text: &str, info: &ExecutableInfo) -> (String, Vec
     (out, symbolized_names)
 }
 
-#[cfg(all(test, feature = "disasm-capstone"))]
+#[cfg(all(test, feature = "disasm"))]
 mod tests {
     use std::collections::{BTreeMap, HashMap};
     use std::fs;
@@ -218,7 +261,7 @@ mod tests {
     use super::decode_region_rows;
     use crate::cli::Cli;
     use crate::core::document::Document;
-    use crate::disasm::backend::{resolve_backend, resolve_backend_kind, BackendKind};
+    use crate::disasm::backend::resolve_backend;
     use crate::disasm::{DirectBranchKind, DisasmRowKind};
     use crate::executable::detect_executable_info;
     use crate::executable::types::{
@@ -550,20 +593,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_backend_kind_uses_capstone_when_requested() {
-        let mut doc = doc_with_bytes(&x86_64_elf(&[0x90, 0xc3]));
-        let info = detect_executable_info(&mut doc).unwrap();
-        assert_eq!(
-            resolve_backend_kind(&info, Some(BackendKind::Capstone)).unwrap(),
-            BackendKind::Capstone
-        );
-    }
-
-    #[test]
     fn decode_region_rows_produces_x86_64_instructions() {
         let mut doc = doc_with_bytes(&x86_64_elf(&[0x55, 0x48, 0x89, 0xe5, 0x90, 0xc3]));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 4).unwrap();
 
         assert_eq!(rows.len(), 4);
@@ -575,12 +608,55 @@ mod tests {
     }
 
     #[test]
+    fn decode_region_rows_streaming_matches_single_row_path() {
+        // A long run of mixed-length x86 instructions exercises the streaming
+        // window path; decoding the whole region must yield rows byte-identical
+        // to decoding one instruction at a time via decode_instruction_row.
+        let block: &[u8] = &[
+            0x55, 0x48, 0x89, 0xe5, 0x48, 0x83, 0xec, 0x10, 0xe8, 0x00, 0x00, 0x00, 0x00, 0x90,
+            0xc9, 0xc3,
+        ];
+        let mut code = Vec::new();
+        // Fits the 0x100-byte .text window of the test ELF helper.
+        while code.len() < 0x100 {
+            code.extend_from_slice(block);
+        }
+        code.truncate(0x100);
+        let mut doc = doc_with_bytes(&x86_64_elf(&code));
+        let info = detect_executable_info(&mut doc).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
+
+        let want = 90usize;
+        let streamed =
+            decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, want).unwrap();
+        assert_eq!(streamed.len(), want);
+
+        let span = info.span_containing(0x100).cloned().unwrap();
+        for row in &streamed {
+            let single =
+                super::decode_instruction_row(&mut doc, &info, backend.as_ref(), row.offset, &span)
+                    .unwrap();
+            assert_eq!(single.offset, row.offset);
+            assert_eq!(single.bytes, row.bytes, "bytes differ at 0x{:x}", row.offset);
+            assert_eq!(single.text, row.text, "text differs at 0x{:x}", row.offset);
+            assert_eq!(
+                single.direct_target, row.direct_target,
+                "target differs at 0x{:x}",
+                row.offset
+            );
+        }
+        for pair in streamed.windows(2) {
+            assert_eq!(pair[0].offset + pair[0].len() as u64, pair[1].offset);
+        }
+    }
+
+    #[test]
     fn decode_region_rows_produces_aarch64_instructions() {
         let mut doc = doc_with_bytes(&aarch64_elf(&[
             0x20, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6,
         ]));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert_eq!(rows.len(), 2);
@@ -592,7 +668,7 @@ mod tests {
     fn decode_region_rows_falls_back_to_db_for_invalid_bytes() {
         let mut doc = doc_with_bytes(&x86_64_elf(&[0x0f, 0xc3]));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert_eq!(rows[0].text, ".db 0x0f");
@@ -603,7 +679,7 @@ mod tests {
     fn decode_region_rows_emits_data_rows_for_non_executable_spans() {
         let mut doc = doc_with_bytes(&pe64_with_text_and_rdata(&[0x90, 0xc3], b"ABC"));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x300, 1).unwrap();
 
         assert_eq!(rows.len(), 1);
@@ -623,7 +699,7 @@ mod tests {
             name: Some(".text".to_owned()),
             executable: true,
         }]);
-        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0, 3).unwrap();
 
         assert_eq!(rows[0].kind, DisasmRowKind::Data);
@@ -652,7 +728,7 @@ mod tests {
                 symbol_type: SymbolType::Function,
             },
         );
-        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 3).unwrap();
 
         assert_eq!(rows[1].text, "call entry");
@@ -679,7 +755,7 @@ mod tests {
                 symbol_type: SymbolType::Function,
             },
         );
-        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert_eq!(rows[0].text, "bl entry");
@@ -706,10 +782,10 @@ mod tests {
                 symbol_type: SymbolType::Function,
             },
         );
-        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
-        assert_eq!(rows[0].text, "tbnz w0, #0, target");
+        assert_eq!(rows[0].text, "tbnz w0, #0x0, target");
         assert_eq!(rows[0].symbolized_names, vec!["target".to_owned()]);
         let target = rows[0].direct_target.as_ref().expect("direct target");
         assert_eq!(target.kind, DirectBranchKind::Jump);
@@ -722,7 +798,7 @@ mod tests {
     fn decode_region_rows_resolves_elf_plt_import_targets() {
         let mut doc = doc_with_bytes(&x86_64_elf_with_plt_import_call("puts"));
         let info = detect_executable_info(&mut doc).unwrap();
-        let backend = resolve_backend(&info, Some(crate::disasm::backend::BackendKind::Capstone)).unwrap();
+        let backend = resolve_backend(&info, None).unwrap();
         let rows = decode_region_rows(&mut doc, &info, backend.as_ref(), 0x100, 2).unwrap();
 
         assert!(info.symbol_at_virtual(0x401030).is_none());
@@ -738,7 +814,7 @@ mod tests {
 
 
 // End-to-end coverage that runs against whichever backend the build resolves by
-// default (iced-x86 / yaxpeax-arm), independent of capstone. Assertions avoid
+// default (iced-x86 / yaxpeax-arm). Assertions avoid
 // backend-specific operand formatting and check structural facts only.
 #[cfg(all(test, any(feature = "disasm-iced-x86", feature = "disasm-yaxpeax-arm")))]
 mod default_backend_tests {

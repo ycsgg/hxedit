@@ -52,27 +52,63 @@ impl DisassemblerBackend for IcedX86Backend {
         }
         let mut instruction = Instruction::default();
         decoder.decode_out(&mut instruction);
-        if instruction.is_invalid() {
-            return Ok(None);
-        }
-        let len = instruction.len();
-        if len == 0 || len > bytes.len() {
-            return Ok(None);
-        }
-
-        let mut text = String::new();
         let mut formatter = FastFormatter::new();
         formatter.options_mut().set_use_hex_prefix(true);
-        formatter.format(&instruction, &mut text);
-
-        let direct_target = direct_branch_target(&instruction);
-
-        Ok(Some(DecodedInstruction {
-            bytes: bytes[..len].to_vec(),
-            text,
-            direct_target,
-        }))
+        Ok(decoded_from(&instruction, bytes, &mut formatter))
     }
+
+    fn decode_block(
+        &self,
+        address: u64,
+        bytes: &[u8],
+        max_instructions: usize,
+        out: &mut Vec<DecodedInstruction>,
+    ) -> HxResult<()> {
+        if bytes.is_empty() || max_instructions == 0 {
+            return Ok(());
+        }
+        // A single streaming decoder reuses internal state across the whole
+        // buffer, which is dramatically faster than constructing one per
+        // instruction. Stop at the first byte that does not decode cleanly so
+        // the caller can fall back to its per-row / seam handling.
+        let mut decoder = Decoder::with_ip(self.bitness, bytes, address, DecoderOptions::NONE);
+        let mut formatter = FastFormatter::new();
+        formatter.options_mut().set_use_hex_prefix(true);
+        let mut instruction = Instruction::default();
+        while out.len() < max_instructions && decoder.can_decode() {
+            let pos = decoder.position();
+            decoder.decode_out(&mut instruction);
+            match decoded_from(&instruction, &bytes[pos..], &mut formatter) {
+                Some(decoded) => out.push(decoded),
+                None => break,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Build a `DecodedInstruction` from an already-decoded iced instruction,
+/// validating length against the remaining buffer. Returns `None` for invalid
+/// or truncated instructions so callers can fall back to `.db` handling.
+fn decoded_from(
+    instruction: &Instruction,
+    remaining: &[u8],
+    formatter: &mut FastFormatter,
+) -> Option<DecodedInstruction> {
+    if instruction.is_invalid() {
+        return None;
+    }
+    let len = instruction.len();
+    if len == 0 || len > remaining.len() {
+        return None;
+    }
+    let mut text = String::new();
+    formatter.format(instruction, &mut text);
+    Some(DecodedInstruction {
+        bytes: remaining[..len].to_vec(),
+        text,
+        direct_target: direct_branch_target(instruction),
+    })
 }
 
 fn direct_branch_target(instruction: &Instruction) -> Option<DirectBranchTarget> {

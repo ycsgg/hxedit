@@ -54,8 +54,8 @@ impl DisassemblerBackend for YaxpeaxArmBackend {
         };
 
         // yaxpeax renders PC-relative operands as `$±0xN`; rewrite them to the
-        // absolute virtual address so the shared symbolization pipeline (and the
-        // capstone-style display) can resolve them.
+        // absolute virtual address so the shared symbolization and display
+        // pipeline can resolve them.
         let raw_text = format!("{instruction}");
         let text = rewrite_pc_relative(&raw_text, address);
         let direct_target = direct_branch_target(&instruction, address);
