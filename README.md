@@ -24,6 +24,13 @@ A terminal hex editor for large files, written in Rust.
 - Large-file support through paged I/O and cache
 - Optional disassembly browsing, symbol search, Sagitta-backed analysis, and inline assemble patching
 
+## Performance
+
+Large-file benchmark results and scenario descriptions are tracked in
+[`docs/performance-report.md`](docs/performance-report.md). The report includes
+the public benchmark subset, 1 GiB save/search/diff scenarios, viewport reads,
+peak RSS, and the commands used to reproduce the measurements.
+
 ## Quick Start
 
 Run from source:

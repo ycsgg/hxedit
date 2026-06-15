@@ -24,6 +24,12 @@
 - 分页 I/O 和缓存，适合大文件
 - 可选的反汇编浏览、symbol 搜索、Sagitta 后台分析、内联汇编 patch
 
+## 性能表现
+
+大文件 benchmark 结果和场景说明见
+[`docs/performance-report.md`](docs/performance-report.md)。报告包含对外展示子集、
+1 GiB save / search / diff 场景、viewport 读取、峰值 RSS，以及复现测量的命令。
+
 ## 快速开始
 
 从源码运行：

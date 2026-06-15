@@ -6,13 +6,31 @@ Date: 2026-06-15
 
 | Item | Value |
 |---|---|
-| Source | commit containing this report |
-| Commands | `HXEDIT_BENCH_LARGE=1 cargo bench --bench perf_bench`; `cargo test --all-targets` |
+| Source | working tree based on commit `240b53b` |
+| Commands | `HXEDIT_BENCH_LARGE=1 cargo bench --bench perf_bench`; `HXEDIT_BENCH_SUITE=public cargo bench --bench perf_bench`; `HXEDIT_BENCH_SUITE=public HXEDIT_BENCH_REPEAT=3 cargo bench --bench perf_bench`; `cargo test --all-targets` |
 | Rust | `rustc 1.94.1 (e408947bf 2026-03-25)`, `cargo 1.94.1` |
 | OS | macOS Darwin 25.4.0 arm64 |
 | CPU | Apple M5 Pro, 18 logical CPUs |
 | Memory | 48 GiB |
 | Bench config | 16 KiB page size, 128 cache pages |
+
+## Public Summary
+
+| Scenario | Bench | Min ms | Median ms | Max ms | Peak RSS |
+|---|---|---:|---:|---:|---:|
+| Open 1GiB file | `open_1gib_sparse` | 0.137 | 0.157 | 0.168 | 1.9 MiB |
+| Open 1GiB file and read first view | `open_1gib_then_first_view` | 0.153 | 0.159 | 0.163 | 2.0 MiB |
+| Random 1GiB viewport reads | `viewport_1gib_random_10k_rows` | 25.121 | 27.435 | 32.540 | 4.2 MiB |
+| Save 256MiB patterned file | `save_256mb_patterned_clean_rewrite` | 73.135 | 74.581 | 75.138 | 4.3 MiB |
+| Export 256MiB patterned file | `export_stream_256mb_patterned` | 69.092 | 74.155 | 96.528 | 4.2 MiB |
+| Save 1GiB file after middle insert | `save_1gib_with_middle_insert` | 315.468 | 319.412 | 340.510 | 4.4 MiB |
+| Save 1GiB file after tombstones and insert | `save_1gib_with_tombstone_and_insert` | 1203.816 | 1219.822 | 1234.788 | 6.7 MiB |
+| Save 1GiB file with sparse replacement islands | `save_1gib_with_sparse_replacement_islands` | 336.417 | 340.914 | 343.036 | 7.0 MiB |
+| Search 1GiB clean file | `search_1gib_clean_memmem` | 181.286 | 186.089 | 187.693 | 4.4 MiB |
+| Search 1GiB dirty file | `search_1gib_dirty_many_islands` | 176.688 | 179.505 | 180.480 | 5.1 MiB |
+| Diff next on 1GiB files | `diff_next_tail_mismatch_1gib_stepper` | 309.014 | 309.269 | 315.340 | 6.3 MiB |
+| Diff next on dirty 1GiB files | `diff_next_tail_mismatch_1gib_dirty_stepper` | 305.778 | 310.013 | 314.484 | 7.1 MiB |
+| Mixed 256MiB editing session | `session_256mb_mixed_10k_ops` | 13.614 | 13.792 | 13.997 | 5.1 MiB |
 
 ## Save, Piece Lookup, Format Parse
 
@@ -22,6 +40,7 @@ Date: 2026-06-15
 | `save_16mb_with_insert` | 16 MiB save, one insert | 5.199 | 4.3 MiB |
 | `save_16mb_with_tombstones` | 16 MiB save, 4096 tombstones | 6.108 | 4.4 MiB |
 | `save_64mb_clean_rewrite` | 64 MiB clean rewrite | 18.677 | 4.2 MiB |
+| `save_256mb_patterned_clean_rewrite` | 256MiB patterned file clean rewrite, opt-in large bench | 100.823 | 4.3 MiB |
 | `save_64mb_with_middle_insert` | 64 MiB save, middle insert | 18.448 | 4.3 MiB |
 | `save_64mb_with_tombstone_and_insert` | 64 MiB save, tombstones + insert | 21.363 | 4.6 MiB |
 | `save_64mb_overwrite_replacements` | 64 MiB save, sparse replacements | 24.210 | 4.5 MiB |
@@ -78,8 +97,12 @@ Date: 2026-06-15
 
 | Bench | Workload | Time ms | Peak RSS |
 |---|---:|---:|---:|
+| `open_1gib_sparse` | open 1GiB sparse file, opt-in large bench | 0.220 | 1.8 MiB |
+| `open_1gib_then_first_view` | open 1GiB sparse file and read first 64 rows, opt-in large bench | 0.224 | 1.9 MiB |
+| `viewport_1gib_random_10k_rows` | 1GiB sparse file random 10k viewport row reads, opt-in large bench | 38.682 | 4.1 MiB |
 | `logical_bytes_large_copy` | materialize 8 MiB logical bytes | 1.860 | 12.2 MiB |
 | `export_stream_64mb` | stream 64 MiB to file | 19.886 | 4.3 MiB |
+| `export_stream_256mb_patterned` | stream 256MiB patterned file to output, opt-in large bench | 84.793 | 4.3 MiB |
 | `hash_sha256_16mb` | SHA256 16 MiB | 29.113 | 4.2 MiB |
 | `hash_crc32_16mb` | CRC32 16 MiB | 3.395 | 4.2 MiB |
 | `hash_16mb_with_tombstones` | SHA256 16 MiB with 2 tombstones | 29.275 | 4.3 MiB |
@@ -105,12 +128,20 @@ Date: 2026-06-15
 
 ## Benchmark Behavior
 
+| Variable | Value |
+|---|---|
+| `HXEDIT_BENCH_SUITE=public` | Runs the public-report subset. |
+| `HXEDIT_BENCH_REPEAT=<N>` | Runs each selected bench in isolated child processes N times and prints min, median, and max process-total timings. |
+| `HXEDIT_BENCH_LARGE=1` | Includes opt-in large-file benches in the default suite. |
+| `HXEDIT_BENCH_LEGACY=1` | Includes legacy comparison benches. Not used for this report. |
+
 | Bench | Behavior |
 |---|---|
 | `resolve_piece_heavy` | 4 MiB patterned file; insert about 5000 small pieces; perform 200k random `cell_id_at` lookups. |
 | `save_16mb_with_insert` | 16 MiB patterned file; insert 2 bytes in the middle; save in place. |
 | `save_16mb_with_tombstones` | 16 MiB patterned file; create 4096 tombstones; save in place. |
 | `save_64mb_clean_rewrite` | 64 MiB patterned file; save in place without edits. |
+| `save_256mb_patterned_clean_rewrite` | 256 MiB patterned file; save in place without edits. |
 | `save_64mb_with_middle_insert` | 64 MiB patterned file; insert 4 bytes in the middle; save in place. |
 | `save_64mb_with_tombstone_and_insert` | 64 MiB patterned file; create 8192 tombstones and a middle 4-byte insert; save in place. |
 | `save_64mb_overwrite_replacements` | 64 MiB patterned file; add one sparse replacement every 4096 bytes; save in place. |
@@ -145,8 +176,12 @@ Date: 2026-06-15
 | `undo_redo_64mb_compact_paste` | 256 MiB sparse zero file; apply 64 MiB compact paste overlay, clear replacements for undo, then reapply overlay for redo. |
 | `dirty_islands_paste_64mb` | 256 MiB sparse zero file; create 4096 sparse replacement islands, then overwrite 64 MiB with bytes overlay. |
 | `dirty_islands_xor_64mb` | 256 MiB sparse zero file; create mixed tombstone/replacement islands, then xor a 64 MiB range. |
+| `open_1gib_sparse` | Create a 1 GiB sparse zero file; measure `Document::open`. |
+| `open_1gib_then_first_view` | Create a 1 GiB sparse zero file; measure `Document::open` plus reading the first 64 16-byte rows. |
+| `viewport_1gib_random_10k_rows` | Create a 1 GiB sparse zero file; read 10k random 16-byte viewport rows. |
 | `logical_bytes_large_copy` | 8 MiB patterned file; create one tombstone; materialize all logical bytes. |
 | `export_stream_64mb` | 64 MiB patterned file; stream all logical bytes to an output file. |
+| `export_stream_256mb_patterned` | 256 MiB patterned file; stream all logical bytes to an output file. |
 | `hash_sha256_16mb` | 16 MiB patterned file; hash full logical range with SHA256. |
 | `hash_crc32_16mb` | 16 MiB patterned file; hash full logical range with CRC32. |
 | `hash_16mb_with_tombstones` | 16 MiB patterned file; create 2 tombstones; hash logical bytes with SHA256. |

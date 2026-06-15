@@ -23,6 +23,8 @@ type BenchFn = fn() -> BenchResult;
 type BenchEntry = (&'static str, BenchFn);
 
 const BENCH_CHILD_ENV: &str = "HXEDIT_BENCH_CHILD";
+const BENCH_REPEAT_ENV: &str = "HXEDIT_BENCH_REPEAT";
+const BENCH_SUITE_ENV: &str = "HXEDIT_BENCH_SUITE";
 const EDIT_FILE_SIZE: usize = 8 * 1024 * 1024;
 const EDIT_SINGLE_OPS: usize = 200_000;
 const EDIT_BULK_BYTES: usize = 1024 * 1024;
@@ -35,6 +37,7 @@ const EDIT_256_BULK_BYTES: usize = 64 * 1024 * 1024;
 const EDIT_256_INSERT_BYTES: usize = 16 * 1024 * 1024;
 const EDIT_256_PER_BYTE_BYTES: usize = 8 * 1024 * 1024;
 const LARGE_FILE_SIZE_1GIB: usize = 1024 * 1024 * 1024;
+const PATTERNED_FILE_SIZE_256MB: usize = 256 * 1024 * 1024;
 
 fn bench_config() -> Config {
     Config {
@@ -199,6 +202,12 @@ fn print_peak_rss(label: &str) {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BenchMeasurement {
+    elapsed_ms: f64,
+    peak_rss: Option<u64>,
+}
+
 fn display_range_has_tombstone(doc: &Document, offset: u64, len: u64) -> bool {
     if len == 0 || offset >= doc.len() || !doc.has_tombstones() {
         return false;
@@ -345,6 +354,17 @@ fn bench_save_64mb_clean_rewrite() -> BenchResult {
     let t = Instant::now();
     doc.save(None)?;
     print("save 64MB clean rewrite", t.elapsed(), 1);
+    Ok(())
+}
+
+fn bench_save_256mb_patterned_clean_rewrite() -> BenchResult {
+    let (_dir, path) =
+        write_patterned_file("save-256-patterned-clean.bin", PATTERNED_FILE_SIZE_256MB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    doc.save(None)?;
+    print("save 256MB patterned clean rewrite", t.elapsed(), 1);
     Ok(())
 }
 
@@ -1250,6 +1270,52 @@ fn bench_logical_bytes_large_copy() -> BenchResult {
     Ok(())
 }
 
+fn bench_open_1gib_sparse() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("open-1gib-sparse.bin", LARGE_FILE_SIZE_1GIB)?;
+    let config = bench_config();
+
+    let t = Instant::now();
+    let doc = Document::open(&path, &config)?;
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), LARGE_FILE_SIZE_1GIB as u64);
+    print("open 1GiB sparse file", elapsed, 1);
+    Ok(())
+}
+
+fn bench_open_1gib_then_first_view() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("open-1gib-first-view.bin", LARGE_FILE_SIZE_1GIB)?;
+    let config = bench_config();
+
+    let t = Instant::now();
+    let mut doc = Document::open(&path, &config)?;
+    let rows = 64usize;
+    for row in 0..rows {
+        let bytes = doc.row_bytes((row * 16) as u64, 16)?;
+        assert_eq!(bytes.len(), 16);
+    }
+    let elapsed = t.elapsed();
+    print("open 1GiB sparse file + first view", elapsed, rows);
+    Ok(())
+}
+
+fn bench_viewport_1gib_random_10k_rows() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("viewport-1gib-random.bin", LARGE_FILE_SIZE_1GIB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let mut rng = Lcg::new(0x9f3a_76bc_5812_de40);
+    let rows = 10_000usize;
+    let max_row = (doc.len() / 16) as usize;
+
+    let t = Instant::now();
+    for _ in 0..rows {
+        let row = rng.next_usize(max_row);
+        let bytes = doc.row_bytes((row * 16) as u64, 16)?;
+        assert_eq!(bytes.len(), 16);
+    }
+    let elapsed = t.elapsed();
+    print("viewport 1GiB random 10k rows", elapsed, rows);
+    Ok(())
+}
+
 fn bench_export_stream_64mb() -> BenchResult {
     let (_dir, path) = write_patterned_file("export-stream.bin", 64 * 1024 * 1024)?;
     let mut doc = Document::open(&path, &bench_config())?;
@@ -1268,6 +1334,27 @@ fn bench_export_stream_64mb() -> BenchResult {
     let elapsed = t.elapsed();
     assert_eq!(written, 64 * 1024 * 1024);
     print("export stream 64MB to file", elapsed, 1);
+    Ok(())
+}
+
+fn bench_export_stream_256mb_patterned() -> BenchResult {
+    let (_dir, path) = write_patterned_file("export-256-patterned.bin", PATTERNED_FILE_SIZE_256MB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let out_dir = tempdir()?;
+    let out_path = out_dir.path().join("export-256-out.bin");
+
+    let t = Instant::now();
+    let file = fs::File::create(&out_path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    let written = doc.for_each_logical_chunk(0, doc.len() - 1, |chunk| {
+        writer
+            .write_all(chunk)
+            .map_err(hxedit::error::HxError::from)
+    })?;
+    writer.flush()?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, PATTERNED_FILE_SIZE_256MB as u64);
+    print("export stream 256MB patterned file", elapsed, 1);
     Ok(())
 }
 
@@ -1677,6 +1764,7 @@ fn bench_diff_next_tail_mismatch(name: &str, size: usize) -> BenchResult {
 
 fn run_in_process(label: &str, bench: fn() -> BenchResult) -> bool {
     eprintln!("[bench] running {label}");
+    let t = Instant::now();
     let success = match bench() {
         Ok(()) => true,
         Err(err) => {
@@ -1684,30 +1772,80 @@ fn run_in_process(label: &str, bench: fn() -> BenchResult) -> bool {
             false
         }
     };
+    eprintln!(
+        "[bench] {label:<48} process-total {:>12.6} ms",
+        t.elapsed().as_secs_f64() * 1000.0
+    );
     print_peak_rss(label);
     success
 }
 
-fn run_isolated(label: &str) -> bool {
+fn run_isolated(label: &str) -> Option<BenchMeasurement> {
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(err) => {
             eprintln!("[bench] {label} failed: unable to resolve current executable: {err}");
-            return false;
+            return None;
         }
     };
 
-    match Command::new(exe)
+    let output = match Command::new(exe)
         .env(BENCH_CHILD_ENV, label)
         .env("HXEDIT_RUN_BENCH", "1")
-        .status()
+        .output()
     {
-        Ok(status) => status.success(),
         Err(err) => {
             eprintln!("[bench] {label} failed: unable to spawn isolated child: {err}");
-            false
+            return None;
+        }
+        Ok(output) => output,
+    };
+
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+
+    if !output.status.success() {
+        return None;
+    }
+
+    parse_child_measurement(&output.stderr)
+}
+
+fn parse_child_measurement(stderr: &[u8]) -> Option<BenchMeasurement> {
+    let stderr = String::from_utf8_lossy(stderr);
+    let mut elapsed_ms = None;
+    let mut peak_rss = None;
+
+    for line in stderr.lines() {
+        if let Some((_, rest)) = line.split_once(" total ") {
+            if let Some((value, _)) = rest.trim_start().split_once(" ms") {
+                elapsed_ms = value.trim().parse::<f64>().ok();
+            }
+        }
+        if let Some((_, value)) = line.split_once(" peak-rss ") {
+            peak_rss = parse_bytes(value.trim());
         }
     }
+
+    elapsed_ms.map(|elapsed_ms| BenchMeasurement {
+        elapsed_ms,
+        peak_rss,
+    })
+}
+
+fn parse_bytes(value: &str) -> Option<u64> {
+    let mut parts = value.split_whitespace();
+    let number = parts.next()?.parse::<f64>().ok()?;
+    let unit = parts.next()?;
+    let multiplier = match unit {
+        "B" => 1.0,
+        "KiB" => 1024.0,
+        "MiB" => 1024.0 * 1024.0,
+        "GiB" => 1024.0 * 1024.0 * 1024.0,
+        "TiB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    Some((number * multiplier).round() as u64)
 }
 
 fn default_benches() -> &'static [BenchEntry] {
@@ -1880,6 +2018,20 @@ fn legacy_benches() -> &'static [BenchEntry] {
 
 fn large_benches() -> &'static [BenchEntry] {
     &[
+        ("open_1gib_sparse", bench_open_1gib_sparse),
+        ("open_1gib_then_first_view", bench_open_1gib_then_first_view),
+        (
+            "viewport_1gib_random_10k_rows",
+            bench_viewport_1gib_random_10k_rows,
+        ),
+        (
+            "save_256mb_patterned_clean_rewrite",
+            bench_save_256mb_patterned_clean_rewrite,
+        ),
+        (
+            "export_stream_256mb_patterned",
+            bench_export_stream_256mb_patterned,
+        ),
         (
             "save_1gib_with_middle_insert",
             bench_save_1gib_with_middle_insert,
@@ -1913,13 +2065,124 @@ fn large_benches() -> &'static [BenchEntry] {
     ]
 }
 
+fn public_benches() -> &'static [BenchEntry] {
+    &[
+        ("open_1gib_sparse", bench_open_1gib_sparse),
+        ("open_1gib_then_first_view", bench_open_1gib_then_first_view),
+        (
+            "viewport_1gib_random_10k_rows",
+            bench_viewport_1gib_random_10k_rows,
+        ),
+        (
+            "save_256mb_patterned_clean_rewrite",
+            bench_save_256mb_patterned_clean_rewrite,
+        ),
+        (
+            "export_stream_256mb_patterned",
+            bench_export_stream_256mb_patterned,
+        ),
+        (
+            "save_1gib_with_middle_insert",
+            bench_save_1gib_with_middle_insert,
+        ),
+        (
+            "save_1gib_with_tombstone_and_insert",
+            bench_save_1gib_with_tombstone_and_insert,
+        ),
+        (
+            "save_1gib_with_sparse_replacement_islands",
+            bench_save_1gib_with_sparse_replacement_islands,
+        ),
+        ("search_1gib_clean_memmem", bench_search_1gib_clean_memmem),
+        (
+            "search_1gib_dirty_many_islands",
+            bench_search_1gib_dirty_many_islands,
+        ),
+        (
+            "diff_next_tail_mismatch_1gib_stepper",
+            bench_diff_next_tail_mismatch_1gib_stepper,
+        ),
+        (
+            "diff_next_tail_mismatch_1gib_dirty_stepper",
+            bench_diff_next_tail_mismatch_1gib_dirty_stepper,
+        ),
+        (
+            "session_256mb_mixed_10k_ops",
+            bench_session_256mb_mixed_10k_ops,
+        ),
+    ]
+}
+
 fn bench_by_label(label: &str) -> Option<BenchEntry> {
     default_benches()
         .iter()
         .chain(legacy_benches().iter())
         .chain(large_benches().iter())
+        .chain(public_benches().iter())
         .copied()
         .find(|(entry_label, _)| *entry_label == label)
+}
+
+fn repeat_count() -> usize {
+    std::env::var(BENCH_REPEAT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1)
+}
+
+fn print_repeat_summary(label: &str, measurements: &[BenchMeasurement]) {
+    if measurements.len() <= 1 {
+        return;
+    }
+    let mut elapsed = measurements
+        .iter()
+        .map(|measurement| measurement.elapsed_ms)
+        .collect::<Vec<_>>();
+    elapsed.sort_by(f64::total_cmp);
+    let min = elapsed[0];
+    let median = elapsed[elapsed.len() / 2];
+    let max = elapsed[elapsed.len() - 1];
+    let peak_rss = measurements.iter().filter_map(|m| m.peak_rss).max();
+    let peak = peak_rss
+        .map(format_bytes)
+        .unwrap_or_else(|| "child-reported".to_owned());
+    eprintln!(
+        "[bench] {label:<48} repeat-summary min {min:>12.6} ms  median {median:>12.6} ms  max {max:>12.6} ms  peak-rss {peak}"
+    );
+}
+
+fn run_repeated(label: &str, repeat: usize) -> bool {
+    let mut measurements = Vec::with_capacity(repeat);
+    for run in 0..repeat {
+        if repeat > 1 {
+            eprintln!("[bench] repeat {}/{} {label}", run + 1, repeat);
+        }
+        let Some(measurement) = run_isolated(label) else {
+            return false;
+        };
+        measurements.push(measurement);
+    }
+    print_repeat_summary(label, &measurements);
+    true
+}
+
+fn active_benches() -> Vec<BenchEntry> {
+    match std::env::var(BENCH_SUITE_ENV).as_deref() {
+        Ok("public") => public_benches().to_vec(),
+        _ => {
+            let include_legacy = std::env::var_os("HXEDIT_BENCH_LEGACY").is_some();
+            let include_large = std::env::var_os("HXEDIT_BENCH_LARGE").is_some();
+            let mut active = default_benches().to_vec();
+            if include_legacy {
+                active.extend_from_slice(legacy_benches());
+            }
+            if include_large {
+                active.extend_from_slice(large_benches());
+            }
+            active
+        }
+    }
 }
 
 fn main() {
@@ -1943,15 +2206,8 @@ fn main() {
     }
 
     let filter = std::env::var("HXEDIT_BENCH_FILTER").ok();
-    let include_legacy = std::env::var_os("HXEDIT_BENCH_LEGACY").is_some();
-    let include_large = std::env::var_os("HXEDIT_BENCH_LARGE").is_some();
-    let mut active_benches = default_benches().to_vec();
-    if include_legacy {
-        active_benches.extend_from_slice(legacy_benches());
-    }
-    if include_large {
-        active_benches.extend_from_slice(large_benches());
-    }
+    let repeat = repeat_count();
+    let active_benches = active_benches();
     let failed = active_benches
         .iter()
         .filter(|(label, _)| {
@@ -1959,7 +2215,7 @@ fn main() {
                 .as_deref()
                 .is_none_or(|needle| label.contains(needle))
         })
-        .filter(|(label, _)| !run_isolated(label))
+        .filter(|(label, _)| !run_repeated(label, repeat))
         .count();
     if failed > 0 {
         std::process::exit(1);
