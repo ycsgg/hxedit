@@ -6,7 +6,7 @@ Date: 2026-06-15
 
 | Item | Value |
 |---|---|
-| Source | working tree based on commit `240b53b` |
+| Source | commit containing this report |
 | Commands | `HXEDIT_BENCH_LARGE=1 cargo bench --bench perf_bench`; `HXEDIT_BENCH_SUITE=public cargo bench --bench perf_bench`; `HXEDIT_BENCH_SUITE=public HXEDIT_BENCH_REPEAT=3 cargo bench --bench perf_bench`; `cargo test --all-targets` |
 | Rust | `rustc 1.94.1 (e408947bf 2026-03-25)`, `cargo 1.94.1` |
 | OS | macOS Darwin 25.4.0 arm64 |
