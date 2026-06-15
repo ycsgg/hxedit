@@ -5,6 +5,7 @@
 use std::fs;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use digest::Digest;
@@ -22,12 +23,21 @@ type BenchFn = fn() -> BenchResult;
 type BenchEntry = (&'static str, BenchFn);
 
 const BENCH_CHILD_ENV: &str = "HXEDIT_BENCH_CHILD";
+const BENCH_REPEAT_ENV: &str = "HXEDIT_BENCH_REPEAT";
+const BENCH_SUITE_ENV: &str = "HXEDIT_BENCH_SUITE";
 const EDIT_FILE_SIZE: usize = 8 * 1024 * 1024;
 const EDIT_SINGLE_OPS: usize = 200_000;
 const EDIT_BULK_BYTES: usize = 1024 * 1024;
 const EDIT_LARGE_FILE_SIZE: usize = 32 * 1024 * 1024;
 const EDIT_LARGE_BULK_BYTES: usize = 16 * 1024 * 1024;
 const EDIT_PER_BYTE_LARGE_BYTES: usize = 4 * 1024 * 1024;
+const EDIT_256_FILE_SIZE: usize = 256 * 1024 * 1024;
+const EDIT_256_SINGLE_OPS: usize = 1_000_000;
+const EDIT_256_BULK_BYTES: usize = 64 * 1024 * 1024;
+const EDIT_256_INSERT_BYTES: usize = 16 * 1024 * 1024;
+const EDIT_256_PER_BYTE_BYTES: usize = 8 * 1024 * 1024;
+const LARGE_FILE_SIZE_1GIB: usize = 1024 * 1024 * 1024;
+const PATTERNED_FILE_SIZE_256MB: usize = 256 * 1024 * 1024;
 
 fn bench_config() -> Config {
     Config {
@@ -47,6 +57,35 @@ fn shifted_patterned_data(size: usize) -> Vec<u8> {
         .collect()
 }
 
+struct Lcg {
+    state: u64,
+}
+
+impl Lcg {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.state
+    }
+
+    fn next_usize(&mut self, upper_exclusive: usize) -> usize {
+        if upper_exclusive == 0 {
+            return 0;
+        }
+        (self.next_u64() as usize) % upper_exclusive
+    }
+
+    fn next_byte(&mut self) -> u8 {
+        (self.next_u64() >> 32) as u8
+    }
+}
+
 fn write_patterned_file(
     name: &str,
     size: usize,
@@ -63,6 +102,17 @@ fn write_patterned_file(
         written += take;
     }
     writer.flush()?;
+    Ok((dir, path))
+}
+
+fn write_sparse_zero_file(
+    name: &str,
+    size: usize,
+) -> BenchResult<(tempfile::TempDir, std::path::PathBuf)> {
+    let dir = tempdir()?;
+    let path = dir.path().join(name);
+    let file = fs::File::create(&path)?;
+    file.set_len(size as u64)?;
     Ok((dir, path))
 }
 
@@ -86,10 +136,24 @@ fn write_sparse_diff_pair(
     Ok((dir, current, other))
 }
 
+fn write_sparse_file_with_tail_needle(
+    name: &str,
+    size: usize,
+    needle: &[u8],
+) -> BenchResult<(tempfile::TempDir, std::path::PathBuf, usize)> {
+    let (dir, path) = write_sparse_zero_file(name, size)?;
+    let offset = size - needle.len();
+    let mut file = fs::OpenOptions::new().write(true).open(&path)?;
+    file.seek(SeekFrom::Start(offset as u64))?;
+    file.write_all(needle)?;
+    file.flush()?;
+    Ok((dir, path, offset))
+}
+
 fn print(label: &str, elapsed: Duration, unit_count: usize) {
-    let ns = elapsed.as_nanos();
-    let per = ns as f64 / unit_count.max(1) as f64;
-    eprintln!("[bench] {label:<48} total {ns:>12} ns  per-op {per:>10.1} ns  (N={unit_count})");
+    let ms = elapsed.as_secs_f64() * 1000.0;
+    let per = elapsed.as_nanos() as f64 / unit_count.max(1) as f64;
+    eprintln!("[bench] {label:<48} total {ms:>12.6} ms  per-op {per:>10.1} ns  (N={unit_count})");
 }
 
 #[cfg(unix)]
@@ -136,6 +200,32 @@ fn print_peak_rss(label: &str) {
         Some(bytes) => eprintln!("[bench] {label:<48} peak-rss {}", format_bytes(bytes)),
         None => eprintln!("[bench] {label:<48} peak-rss unavailable"),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BenchMeasurement {
+    elapsed_ms: f64,
+    peak_rss: Option<u64>,
+}
+
+fn display_range_has_tombstone(doc: &Document, offset: u64, len: u64) -> bool {
+    if len == 0 || offset >= doc.len() || !doc.has_tombstones() {
+        return false;
+    }
+    let mut cursor = offset;
+    let end = offset.saturating_add(len).min(doc.len());
+    while cursor < end {
+        let batch = (end - cursor).min(64 * 1024);
+        if doc
+            .cell_ids_range(cursor, batch)
+            .into_iter()
+            .any(|id| doc.is_tombstone(id))
+        {
+            return true;
+        }
+        cursor += batch;
+    }
+    false
 }
 
 fn make_hasher(algorithm: HashAlgorithm) -> Box<dyn digest::DynDigest> {
@@ -267,6 +357,17 @@ fn bench_save_64mb_clean_rewrite() -> BenchResult {
     Ok(())
 }
 
+fn bench_save_256mb_patterned_clean_rewrite() -> BenchResult {
+    let (_dir, path) =
+        write_patterned_file("save-256-patterned-clean.bin", PATTERNED_FILE_SIZE_256MB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    doc.save(None)?;
+    print("save 256MB patterned clean rewrite", t.elapsed(), 1);
+    Ok(())
+}
+
 fn bench_save_64mb_with_middle_insert() -> BenchResult {
     let (_dir, path) = write_patterned_file("save-64-insert.bin", 64 * 1024 * 1024)?;
     let mut doc = Document::open(&path, &bench_config())?;
@@ -302,6 +403,70 @@ fn bench_save_64mb_overwrite_replacements() -> BenchResult {
     let t = Instant::now();
     doc.save(None)?;
     print("save 64MB with sparse replacements", t.elapsed(), 1);
+    Ok(())
+}
+
+fn bench_save_1gib_with_middle_insert() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("save-1gib-insert.bin", LARGE_FILE_SIZE_1GIB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    doc.insert_bytes(doc.len() / 2, &[0xAA, 0xBB, 0xCC, 0xDD])?;
+
+    let t = Instant::now();
+    doc.save(None)?;
+    print("save 1GiB with middle insert", t.elapsed(), 1);
+    Ok(())
+}
+
+fn bench_save_1gib_with_tombstone_and_insert() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("save-1gib-tombstone-insert.bin", LARGE_FILE_SIZE_1GIB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    for i in 0..65_536u64 {
+        doc.delete_byte(16 * 1024 * 1024 + i * 1024)?;
+    }
+    doc.insert_bytes(doc.len() / 2, &[0x11, 0x22, 0x33, 0x44])?;
+
+    let t = Instant::now();
+    doc.save(None)?;
+    print("save 1GiB with 65536 tombstones+insert", t.elapsed(), 1);
+    Ok(())
+}
+
+fn bench_save_1gib_with_64mb_range_overlay() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("save-1gib-range-overlay.bin", LARGE_FILE_SIZE_1GIB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let stats = doc.overwrite_run_pattern_overlay(
+        512 * 1024 * 1024,
+        EDIT_256_BULK_BYTES as u64,
+        &[0x11, 0x22, 0x33, 0x44],
+    )?;
+    assert_eq!(stats.visited, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+
+    let t = Instant::now();
+    doc.save(None)?;
+    print("save 1GiB with 64MB range overlay", t.elapsed(), 1);
+    Ok(())
+}
+
+fn bench_save_1gib_with_sparse_replacement_islands() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("save-1gib-sparse-islands.bin", LARGE_FILE_SIZE_1GIB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let islands = 65_536u64;
+    for i in 0..islands {
+        let value = ((i % 255) + 1) as u8;
+        doc.replace_display_byte(i * 16 * 1024, value)?;
+    }
+    assert_eq!(doc.replacement_dirty_bytes(), islands as usize);
+
+    let t = Instant::now();
+    doc.save(None)?;
+    print(
+        "save 1GiB with 65536 sparse replacement islands",
+        t.elapsed(),
+        1,
+    );
     Ok(())
 }
 
@@ -596,6 +761,502 @@ fn bench_edit_mode_fill_overlay_1mb() -> BenchResult {
     Ok(())
 }
 
+fn bench_edit_256mb_replace_nibbles() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-replace-nibbles.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    for i in 0..EDIT_256_SINGLE_OPS {
+        let offset = (i * 257) as u64;
+        doc.replace_nibble(offset, NibblePhase::High, (i as u8) & 0x0f)?;
+        doc.replace_nibble(offset, NibblePhase::Low, (i as u8).wrapping_add(1) & 0x0f)?;
+    }
+    let elapsed = t.elapsed();
+    assert!(doc.has_replacements());
+    print(
+        "edit 256MB replacement nibbles",
+        elapsed,
+        EDIT_256_SINGLE_OPS * 2,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_insert_nibbles() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-insert-nibbles.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let mut cursor = (EDIT_256_FILE_SIZE / 2) as u64;
+
+    let t = Instant::now();
+    for i in 0..EDIT_256_SINGLE_OPS {
+        let high = (i as u8) & 0x0f;
+        let low = (i as u8).wrapping_add(1) & 0x0f;
+        doc.insert_byte(cursor, high << 4)?;
+        doc.replace_display_byte(cursor, (high << 4) | low)?;
+        cursor += 1;
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), (EDIT_256_FILE_SIZE + EDIT_256_SINGLE_OPS) as u64);
+    print(
+        "edit 256MB insert nibble compose",
+        elapsed,
+        EDIT_256_SINGLE_OPS * 2,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_pending_insert_backspace() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("edit-256-pending-backspace.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let cursor = (EDIT_256_FILE_SIZE / 2) as u64;
+
+    let t = Instant::now();
+    for i in 0..EDIT_256_SINGLE_OPS {
+        doc.insert_byte(cursor, ((i as u8) & 0x0f) << 4)?;
+        let removed = doc.delete_range_real(cursor, 1)?;
+        assert_eq!(removed.len(), 1);
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), EDIT_256_FILE_SIZE as u64);
+    print(
+        "edit 256MB pending byte backspace",
+        elapsed,
+        EDIT_256_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_backspace_real_delete() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-real-delete.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let offset = (EDIT_256_FILE_SIZE / 2) as u64;
+    let inserted = vec![0x5a; EDIT_256_SINGLE_OPS];
+    doc.insert_bytes(offset, &inserted)?;
+
+    let t = Instant::now();
+    for remaining in (1..=EDIT_256_SINGLE_OPS).rev() {
+        let removed = doc.delete_range_real(offset + remaining as u64 - 1, 1)?;
+        assert_eq!(removed.len(), 1);
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), EDIT_256_FILE_SIZE as u64);
+    print(
+        "edit 256MB real-delete backspace",
+        elapsed,
+        EDIT_256_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_normal_tombstone_delete() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-normal-tombstone.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    for i in 0..EDIT_256_SINGLE_OPS {
+        let offset = (i * 257) as u64;
+        let id = doc.delete_byte(offset)?;
+        assert!(id.is_some());
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(
+        doc.visible_len(),
+        (EDIT_256_FILE_SIZE - EDIT_256_SINGLE_OPS) as u64
+    );
+    print(
+        "edit 256MB normal tombstone delete",
+        elapsed,
+        EDIT_256_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_visual_tombstone_range() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-visual-tombstone.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let start = 64 * 1024 * 1024_u64;
+    let span = EDIT_256_SINGLE_OPS as u64;
+
+    let t = Instant::now();
+    let candidates = doc.cell_ids_range(start, span);
+    let mut deleted = 0usize;
+    for id in candidates {
+        if doc.is_tombstone(id) {
+            continue;
+        }
+        doc.mark_tombstones(&[id])?;
+        deleted += 1;
+    }
+    let elapsed = t.elapsed();
+    assert_eq!(deleted, EDIT_256_SINGLE_OPS);
+    print(
+        "edit 256MB visual tombstone range",
+        elapsed,
+        EDIT_256_SINGLE_OPS,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_paste_overwrite_overlay_64mb() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("edit-256-paste-overwrite-overlay.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = vec![1_u8; EDIT_256_BULK_BYTES];
+
+    let t = Instant::now();
+    let (written, runs) = doc.overwrite_run_bytes_overlay_changed(0, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(runs.len(), 1);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "edit 256MB paste overwrite 64MB overlay",
+        elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_paste_overwrite_per_byte_8mb() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("edit-256-paste-overwrite-per-byte.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = vec![1_u8; EDIT_256_PER_BYTE_BYTES];
+
+    let t = Instant::now();
+    let (written, changes) =
+        doc.overwrite_run_positional(0, bytes.len() as u64, |idx| bytes[idx as usize])?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_256_PER_BYTE_BYTES as u64);
+    assert_eq!(changes.len(), EDIT_256_PER_BYTE_BYTES);
+    print(
+        "edit 256MB paste overwrite 8MB per-byte",
+        elapsed,
+        EDIT_256_PER_BYTE_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_paste_insert_16mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-paste-insert.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = vec![0x5a; EDIT_256_INSERT_BYTES];
+    let offset = (EDIT_256_FILE_SIZE / 2) as u64;
+
+    let t = Instant::now();
+    let inserted = doc.insert_bytes(offset, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(inserted.len(), EDIT_256_INSERT_BYTES);
+    assert_eq!(
+        doc.len(),
+        (EDIT_256_FILE_SIZE + EDIT_256_INSERT_BYTES) as u64
+    );
+    print(
+        "edit 256MB paste insert 16MB",
+        elapsed,
+        EDIT_256_INSERT_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_fill_overlay_64mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-fill-overlay.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let pattern = [0x7f_u8];
+
+    let t = Instant::now();
+    let stats = doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &pattern)?;
+    let elapsed = t.elapsed();
+    assert_eq!(stats.visited, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(stats.changed, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print("edit 256MB fill 64MB overlay", elapsed, EDIT_256_BULK_BYTES);
+    Ok(())
+}
+
+fn bench_edit_256mb_mixed_paste_overwrite_64mb() -> BenchResult {
+    let (_dir, path) =
+        write_sparse_zero_file("edit-256-mixed-paste-overwrite.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &[0x7f])?;
+    assert!(!doc.replacement_range_is_pristine(0, EDIT_256_BULK_BYTES as u64));
+    let bytes = vec![1_u8; EDIT_256_BULK_BYTES];
+
+    let t = Instant::now();
+    let (written, runs) = doc.overwrite_run_bytes_overlay_changed(0, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(runs.len(), 1);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "edit 256MB mixed paste overwrite 64MB",
+        elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_mixed_fill_overlay_64mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-mixed-fill.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &[0x11])?;
+    assert!(!doc.replacement_range_is_pristine(0, EDIT_256_BULK_BYTES as u64));
+
+    let t = Instant::now();
+    let stats = doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &[0x22, 0x33])?;
+    let elapsed = t.elapsed();
+    assert_eq!(stats.visited, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(stats.changed, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "edit 256MB mixed fill 64MB overlay",
+        elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_edit_256mb_mixed_xor_overlay_64mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("edit-256-mixed-xor.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    doc.overwrite_run_pattern_overlay(0, EDIT_256_BULK_BYTES as u64, &[0x11, 0x22])?;
+    assert!(!doc.replacement_range_is_pristine(0, EDIT_256_BULK_BYTES as u64));
+
+    let t = Instant::now();
+    let stats = doc.xor_visible_range_mixed_overlay(0, EDIT_256_BULK_BYTES as u64 - 1, 0x5a)?;
+    let elapsed = t.elapsed();
+    assert_eq!(stats.visited, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(stats.changed, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "edit 256MB mixed xor 64MB overlay",
+        elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_session_256mb_mixed_10k_ops() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("session-256-mixed.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let mut rng = Lcg::new(0x7b8d_6a5c_4e3f_2910);
+    let ops = 10_000usize;
+
+    let t = Instant::now();
+    for _ in 0..ops {
+        let len = doc.len();
+        if len == 0 {
+            doc.insert_bytes(0, &[rng.next_byte()])?;
+            continue;
+        }
+
+        match rng.next_usize(8) {
+            0 => {
+                let offset = rng.next_usize(len as usize) as u64;
+                if !matches!(
+                    doc.byte_at(offset)?,
+                    hxedit::core::document::ByteSlot::Deleted
+                ) {
+                    doc.replace_display_byte(offset, rng.next_byte())?;
+                }
+            }
+            1 => {
+                if doc.len() < (EDIT_256_FILE_SIZE + 64 * 1024) as u64 {
+                    let offset = rng.next_usize(len as usize + 1) as u64;
+                    let count = 1 + rng.next_usize(4);
+                    let bytes = (0..count).map(|_| rng.next_byte()).collect::<Vec<_>>();
+                    doc.insert_bytes(offset, &bytes)?;
+                }
+            }
+            2 => {
+                let offset = rng.next_usize(len as usize) as u64;
+                let _ = doc.delete_byte(offset)?;
+            }
+            3 => {
+                let offset = rng.next_usize(len as usize) as u64;
+                let run_len = (1 + rng.next_usize(4)) as u64;
+                let _ = doc.delete_range_real(offset, run_len)?;
+            }
+            4 => {
+                let offset = rng.next_usize(len as usize) as u64;
+                let run_len = (1 + rng.next_usize(128)) as u64;
+                let pattern = [rng.next_byte(), rng.next_byte().wrapping_add(1)];
+                doc.overwrite_run_pattern_overlay(offset, run_len, &pattern)?;
+            }
+            5 => {
+                let offset = rng.next_usize(len as usize) as u64;
+                let run_len = (1 + rng.next_usize(128)) as u64;
+                let end = offset
+                    .saturating_add(run_len)
+                    .min(doc.len())
+                    .saturating_sub(1);
+                doc.xor_visible_range_mixed_overlay(offset, end, rng.next_byte() | 1)?;
+            }
+            6 => {
+                let offset = rng.next_usize(len as usize) as u64;
+                let applied = (1 + rng.next_usize(64)).min((doc.len() - offset) as usize);
+                if !display_range_has_tombstone(&doc, offset, applied as u64) {
+                    let bytes = (0..applied).map(|_| rng.next_byte()).collect::<Vec<_>>();
+                    let _ = doc.overwrite_run_bytes_overlay_changed(offset, &bytes)?;
+                }
+            }
+            _ => {
+                let offset = rng.next_usize(len as usize) as u64;
+                let run_len = (1 + rng.next_usize(256)) as u64;
+                let end = offset
+                    .saturating_add(run_len)
+                    .min(doc.len())
+                    .saturating_sub(1);
+                let _ = doc.logical_byte_count(offset, end)?;
+            }
+        }
+    }
+    let elapsed = t.elapsed();
+
+    assert!(!doc.is_empty());
+    assert!(doc.visible_len() <= doc.len());
+    print("session 256MB mixed 10k core ops", elapsed, ops);
+    Ok(())
+}
+
+fn bench_undo_redo_64mb_compact_paste() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("undo-redo-64mb-compact.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = vec![1_u8; EDIT_256_BULK_BYTES];
+
+    let t = Instant::now();
+    let (written, runs) = doc.overwrite_run_bytes_overlay_changed(0, &bytes)?;
+    let apply_elapsed = t.elapsed();
+    assert_eq!(written, EDIT_256_BULK_BYTES as u64);
+    assert_eq!(runs.len(), 1);
+    print(
+        "undo/redo 64MB compact paste apply",
+        apply_elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+
+    let t = Instant::now();
+    doc.clear_replacements_in_display_range(0, written)?;
+    let undo_elapsed = t.elapsed();
+    assert_eq!(doc.replacement_dirty_bytes(), 0);
+    print(
+        "undo/redo 64MB compact paste undo",
+        undo_elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+
+    let t = Instant::now();
+    for (offset, bytes) in &runs {
+        doc.overwrite_run_bytes_overlay(*offset, Arc::clone(bytes))?;
+    }
+    let redo_elapsed = t.elapsed();
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "undo/redo 64MB compact paste redo",
+        redo_elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_undo_redo_4mb_per_byte_fallback() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("undo-redo-4mb-per-byte.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let bytes = vec![1_u8; EDIT_PER_BYTE_LARGE_BYTES];
+
+    let t = Instant::now();
+    let (written, changes) =
+        doc.overwrite_run_positional(0, bytes.len() as u64, |idx| bytes[idx as usize])?;
+    let apply_elapsed = t.elapsed();
+    assert_eq!(written, EDIT_PER_BYTE_LARGE_BYTES as u64);
+    assert_eq!(changes.len(), EDIT_PER_BYTE_LARGE_BYTES);
+    print(
+        "undo/redo 4MB per-byte fallback apply",
+        apply_elapsed,
+        EDIT_PER_BYTE_LARGE_BYTES,
+    );
+
+    let t = Instant::now();
+    for (id, before, _) in &changes {
+        doc.restore_replacement(*id, *before)?;
+    }
+    let undo_elapsed = t.elapsed();
+    assert_eq!(doc.replacement_dirty_bytes(), 0);
+    print(
+        "undo/redo 4MB per-byte fallback undo",
+        undo_elapsed,
+        EDIT_PER_BYTE_LARGE_BYTES,
+    );
+
+    let t = Instant::now();
+    for (id, _, after) in &changes {
+        doc.restore_replacement(*id, *after)?;
+    }
+    let redo_elapsed = t.elapsed();
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_PER_BYTE_LARGE_BYTES);
+    print(
+        "undo/redo 4MB per-byte fallback redo",
+        redo_elapsed,
+        EDIT_PER_BYTE_LARGE_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_dirty_islands_paste_64mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("dirty-islands-paste.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let islands = 4096usize;
+    for i in 0..islands {
+        let offset = ((i * 16_381) % EDIT_256_BULK_BYTES) as u64;
+        doc.replace_display_byte(offset, (i as u8).wrapping_add(1))?;
+    }
+    assert!(!doc.replacement_range_is_pristine(0, EDIT_256_BULK_BYTES as u64));
+
+    let bytes = vec![0x5a; EDIT_256_BULK_BYTES];
+    let t = Instant::now();
+    let (written, runs) = doc.overwrite_run_bytes_overlay_changed(0, &bytes)?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, EDIT_256_BULK_BYTES as u64);
+    assert!(!runs.is_empty());
+    assert_eq!(doc.replacement_dirty_bytes(), EDIT_256_BULK_BYTES);
+    print(
+        "dirty islands paste overwrite 64MB",
+        elapsed,
+        EDIT_256_BULK_BYTES,
+    );
+    Ok(())
+}
+
+fn bench_dirty_islands_xor_64mb() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("dirty-islands-xor.bin", EDIT_256_FILE_SIZE)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let islands = 4096usize;
+    for i in 0..islands {
+        let offset = (i * (EDIT_256_BULK_BYTES / islands)) as u64;
+        if i % 4 == 0 {
+            let _ = doc.delete_byte(offset)?;
+        } else {
+            doc.replace_display_byte(offset, 0x11)?;
+        }
+    }
+    assert!(display_range_has_tombstone(
+        &doc,
+        0,
+        EDIT_256_BULK_BYTES as u64
+    ));
+
+    let t = Instant::now();
+    let stats = doc.xor_visible_range_mixed_overlay(0, EDIT_256_BULK_BYTES as u64 - 1, 0x5a)?;
+    let elapsed = t.elapsed();
+    assert_eq!(
+        stats.visited,
+        EDIT_256_BULK_BYTES as u64 - (islands / 4) as u64
+    );
+    assert_eq!(stats.changed, stats.visited);
+    print("dirty islands xor 64MB", elapsed, EDIT_256_BULK_BYTES);
+    Ok(())
+}
+
 fn bench_logical_bytes_large_copy() -> BenchResult {
     let (_dir, path) = write_patterned_file("logical-bytes.bin", 8 * 1024 * 1024)?;
     let mut doc = Document::open(&path, &bench_config())?;
@@ -606,6 +1267,52 @@ fn bench_logical_bytes_large_copy() -> BenchResult {
     let elapsed = t.elapsed();
     assert!(!bytes.is_empty());
     print("logical_bytes 8MB copy", elapsed, 1);
+    Ok(())
+}
+
+fn bench_open_1gib_sparse() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("open-1gib-sparse.bin", LARGE_FILE_SIZE_1GIB)?;
+    let config = bench_config();
+
+    let t = Instant::now();
+    let doc = Document::open(&path, &config)?;
+    let elapsed = t.elapsed();
+    assert_eq!(doc.len(), LARGE_FILE_SIZE_1GIB as u64);
+    print("open 1GiB sparse file", elapsed, 1);
+    Ok(())
+}
+
+fn bench_open_1gib_then_first_view() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("open-1gib-first-view.bin", LARGE_FILE_SIZE_1GIB)?;
+    let config = bench_config();
+
+    let t = Instant::now();
+    let mut doc = Document::open(&path, &config)?;
+    let rows = 64usize;
+    for row in 0..rows {
+        let bytes = doc.row_bytes((row * 16) as u64, 16)?;
+        assert_eq!(bytes.len(), 16);
+    }
+    let elapsed = t.elapsed();
+    print("open 1GiB sparse file + first view", elapsed, rows);
+    Ok(())
+}
+
+fn bench_viewport_1gib_random_10k_rows() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("viewport-1gib-random.bin", LARGE_FILE_SIZE_1GIB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let mut rng = Lcg::new(0x9f3a_76bc_5812_de40);
+    let rows = 10_000usize;
+    let max_row = (doc.len() / 16) as usize;
+
+    let t = Instant::now();
+    for _ in 0..rows {
+        let row = rng.next_usize(max_row);
+        let bytes = doc.row_bytes((row * 16) as u64, 16)?;
+        assert_eq!(bytes.len(), 16);
+    }
+    let elapsed = t.elapsed();
+    print("viewport 1GiB random 10k rows", elapsed, rows);
     Ok(())
 }
 
@@ -627,6 +1334,27 @@ fn bench_export_stream_64mb() -> BenchResult {
     let elapsed = t.elapsed();
     assert_eq!(written, 64 * 1024 * 1024);
     print("export stream 64MB to file", elapsed, 1);
+    Ok(())
+}
+
+fn bench_export_stream_256mb_patterned() -> BenchResult {
+    let (_dir, path) = write_patterned_file("export-256-patterned.bin", PATTERNED_FILE_SIZE_256MB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let out_dir = tempdir()?;
+    let out_path = out_dir.path().join("export-256-out.bin");
+
+    let t = Instant::now();
+    let file = fs::File::create(&out_path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    let written = doc.for_each_logical_chunk(0, doc.len() - 1, |chunk| {
+        writer
+            .write_all(chunk)
+            .map_err(hxedit::error::HxError::from)
+    })?;
+    writer.flush()?;
+    let elapsed = t.elapsed();
+    assert_eq!(written, PATTERNED_FILE_SIZE_256MB as u64);
+    print("export stream 256MB patterned file", elapsed, 1);
     Ok(())
 }
 
@@ -754,16 +1482,12 @@ fn bench_search_16mb_file() -> BenchResult {
 
 fn bench_search_256mb_clean_memmem() -> BenchResult {
     // Clean document => SIMD memmem path. Worst case: needle at the very tail,
-    // forcing a full scan. This is the headline win over the old byte-at-a-time
-    // KMP loop (~24x on the matching cost at this size).
-    let dir = tempdir()?;
-    let path = dir.path().join("search-256-clean.bin");
+    // forcing a full scan. Use a sparse fixture so peak RSS measures the search
+    // path instead of a benchmark-side 256 MiB initialization buffer.
     let size: usize = 256 * 1024 * 1024;
-    let mut data = vec![0u8; size];
     let needle = [0xde, 0xad, 0xbe, 0xef];
-    let offset = size - needle.len();
-    data[offset..].copy_from_slice(&needle);
-    fs::write(&path, &data)?;
+    let (_dir, path, offset) =
+        write_sparse_file_with_tail_needle("search-256-clean.bin", size, &needle)?;
 
     let mut doc = Document::open(&path, &bench_config())?;
     let t = Instant::now();
@@ -780,14 +1504,10 @@ fn bench_search_256mb_dirty_one_tombstone() -> BenchResult {
     // (only the chunk holding the tombstone falls back to byte-at-a-time), so
     // this should stay close to the clean 256MB number (~50ms) rather than the
     // old whole-document KMP (~330ms).
-    let dir = tempdir()?;
-    let path = dir.path().join("search-256-dirty.bin");
     let size: usize = 256 * 1024 * 1024;
-    let mut data = vec![0u8; size];
     let needle = [0xde, 0xad, 0xbe, 0xef];
-    let offset = size - needle.len();
-    data[offset..].copy_from_slice(&needle);
-    fs::write(&path, &data)?;
+    let (_dir, path, offset) =
+        write_sparse_file_with_tail_needle("search-256-dirty.bin", size, &needle)?;
 
     let mut doc = Document::open(&path, &bench_config())?;
     doc.delete_byte(5)?; // tombstone near the start -> dirty path
@@ -797,6 +1517,97 @@ fn bench_search_256mb_dirty_one_tombstone() -> BenchResult {
     let elapsed = t.elapsed();
     assert_eq!(found, Some(offset as u64)); // tombstones keep their display slot
     print("search 256MB dirty(1 tombstone) forward", elapsed, 1);
+    Ok(())
+}
+
+fn bench_search_256mb_clean_sparse_fixture() -> BenchResult {
+    let size: usize = 256 * 1024 * 1024;
+    let needle = [0xde, 0xad, 0xbe, 0xef];
+    let (_dir, path, offset) =
+        write_sparse_file_with_tail_needle("search-256-clean-sparse.bin", size, &needle)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    let found = doc.search_forward(0, &needle)?;
+    let elapsed = t.elapsed();
+    assert_eq!(found, Some(offset as u64));
+    print("search 256MB clean sparse fixture", elapsed, 1);
+    Ok(())
+}
+
+fn bench_search_256mb_dirty_many_islands() -> BenchResult {
+    let size: usize = 256 * 1024 * 1024;
+    let needle = [0xde, 0xad, 0xbe, 0xef];
+    let (_dir, path, offset) =
+        write_sparse_file_with_tail_needle("search-256-dirty-islands.bin", size, &needle)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    for i in 0..4096usize {
+        let dirty_offset = (i * 16_384) as u64;
+        if i % 8 == 0 {
+            let _ = doc.delete_byte(dirty_offset)?;
+        } else {
+            doc.replace_display_byte(dirty_offset, 0x5a)?;
+        }
+    }
+
+    let t = Instant::now();
+    let found = doc.search_forward(0, &needle)?;
+    let elapsed = t.elapsed();
+    assert_eq!(found, Some(offset as u64));
+    print("search 256MB dirty many islands", elapsed, 1);
+    Ok(())
+}
+
+fn bench_search_1gib_clean_memmem() -> BenchResult {
+    let needle = [0xde, 0xad, 0xbe, 0xef];
+    let (_dir, path, offset) =
+        write_sparse_file_with_tail_needle("search-1gib-clean.bin", LARGE_FILE_SIZE_1GIB, &needle)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    let found = doc.search_forward(0, &needle)?;
+    let elapsed = t.elapsed();
+    assert_eq!(found, Some(offset as u64));
+    print("search 1GiB clean forward (memmem)", elapsed, 1);
+    Ok(())
+}
+
+fn bench_search_1gib_dirty_many_islands() -> BenchResult {
+    let needle = [0xde, 0xad, 0xbe, 0xef];
+    let (_dir, path, offset) = write_sparse_file_with_tail_needle(
+        "search-1gib-dirty-islands.bin",
+        LARGE_FILE_SIZE_1GIB,
+        &needle,
+    )?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    for i in 0..16_384usize {
+        let dirty_offset = (i * 16_384) as u64;
+        if i % 8 == 0 {
+            let _ = doc.delete_byte(dirty_offset)?;
+        } else {
+            doc.replace_display_byte(dirty_offset, 0x5a)?;
+        }
+    }
+
+    let t = Instant::now();
+    let found = doc.search_forward(0, &needle)?;
+    let elapsed = t.elapsed();
+    assert_eq!(found, Some(offset as u64));
+    print("search 1GiB dirty many islands", elapsed, 1);
+    Ok(())
+}
+
+fn bench_hash_crc32_1gib_clean() -> BenchResult {
+    let (_dir, path) = write_sparse_zero_file("hash-crc32-1gib.bin", LARGE_FILE_SIZE_1GIB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    let (bytes_hashed, hash_bytes) =
+        doc.hash_logical_bytes(0, doc.len() - 1, make_hasher(HashAlgorithm::Crc32))?;
+    let elapsed = t.elapsed();
+    assert_eq!(bytes_hashed, LARGE_FILE_SIZE_1GIB as u64);
+    assert_eq!(hash_bytes.len(), 4);
+    print("hash 1GiB crc32 clean sparse file", elapsed, 1);
     Ok(())
 }
 
@@ -845,6 +1656,92 @@ fn bench_diff_next_tail_mismatch_256mb_stepper() -> BenchResult {
     Ok(())
 }
 
+fn bench_diff_next_tail_mismatch_1gib_stepper() -> BenchResult {
+    let size = LARGE_FILE_SIZE_1GIB;
+    let (_dir, current, other) = write_sparse_diff_pair("diff-next-1gib-stepper", size)?;
+    let config = bench_config();
+    let mut document = Document::open(&current, &config)?;
+    let mut other_view = FileView::open(&other, true, config.page_size, config.cache_pages)?;
+    let other_len = other_view.len();
+
+    let mut cursor = 1_u64;
+    let end = size as u64 - 1;
+    let mut steps = 0_usize;
+    let t = Instant::now();
+    let found = loop {
+        let step = find_mismatch_forward_step(
+            &mut document,
+            &mut other_view,
+            other_len,
+            cursor,
+            end,
+            128 * 1024 * 1024,
+        )?;
+        steps += 1;
+        if let Some(found) = step.found {
+            break Some(found);
+        }
+        let Some(next) = step.next else {
+            break None;
+        };
+        cursor = next;
+    };
+    let elapsed = t.elapsed();
+
+    assert_eq!(found, Some(end));
+    print("diff next tail mismatch 1GiB stepper", elapsed, steps);
+    Ok(())
+}
+
+fn bench_diff_next_tail_mismatch_1gib_dirty_stepper() -> BenchResult {
+    let size = LARGE_FILE_SIZE_1GIB;
+    let (_dir, current, other) = write_sparse_diff_pair("diff-next-1gib-dirty-stepper", size)?;
+    let config = bench_config();
+    let mut document = Document::open(&current, &config)?;
+    let mut other_file = fs::OpenOptions::new().write(true).open(&other)?;
+
+    for i in 0..16_384usize {
+        let dirty_offset = (i * 16_384) as u64;
+        document.replace_display_byte(dirty_offset, 0x5a)?;
+        other_file.seek(SeekFrom::Start(dirty_offset))?;
+        other_file.write_all(&[0x5a])?;
+    }
+    other_file.flush()?;
+    assert!(document.has_replacements());
+    assert!(!document.has_tombstones());
+
+    let mut other_view = FileView::open(&other, true, config.page_size, config.cache_pages)?;
+    let other_len = other_view.len();
+
+    let mut cursor = 1_u64;
+    let end = size as u64 - 1;
+    let mut steps = 0_usize;
+    let t = Instant::now();
+    let found = loop {
+        let step = find_mismatch_forward_step(
+            &mut document,
+            &mut other_view,
+            other_len,
+            cursor,
+            end,
+            128 * 1024 * 1024,
+        )?;
+        steps += 1;
+        if let Some(found) = step.found {
+            break Some(found);
+        }
+        let Some(next) = step.next else {
+            break None;
+        };
+        cursor = next;
+    };
+    let elapsed = t.elapsed();
+
+    assert_eq!(found, Some(size as u64 - 1));
+    print("diff next tail mismatch 1GiB dirty stepper", elapsed, steps);
+    Ok(())
+}
+
 fn bench_diff_next_tail_mismatch(name: &str, size: usize) -> BenchResult {
     let (_dir, current, other) = write_sparse_diff_pair(name, size)?;
     let config = bench_config();
@@ -867,6 +1764,7 @@ fn bench_diff_next_tail_mismatch(name: &str, size: usize) -> BenchResult {
 
 fn run_in_process(label: &str, bench: fn() -> BenchResult) -> bool {
     eprintln!("[bench] running {label}");
+    let t = Instant::now();
     let success = match bench() {
         Ok(()) => true,
         Err(err) => {
@@ -874,33 +1772,83 @@ fn run_in_process(label: &str, bench: fn() -> BenchResult) -> bool {
             false
         }
     };
+    eprintln!(
+        "[bench] {label:<48} process-total {:>12.6} ms",
+        t.elapsed().as_secs_f64() * 1000.0
+    );
     print_peak_rss(label);
     success
 }
 
-fn run_isolated(label: &str) -> bool {
+fn run_isolated(label: &str) -> Option<BenchMeasurement> {
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(err) => {
             eprintln!("[bench] {label} failed: unable to resolve current executable: {err}");
-            return false;
+            return None;
         }
     };
 
-    match Command::new(exe)
+    let output = match Command::new(exe)
         .env(BENCH_CHILD_ENV, label)
         .env("HXEDIT_RUN_BENCH", "1")
-        .status()
+        .output()
     {
-        Ok(status) => status.success(),
         Err(err) => {
             eprintln!("[bench] {label} failed: unable to spawn isolated child: {err}");
-            false
+            return None;
         }
+        Ok(output) => output,
+    };
+
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+
+    if !output.status.success() {
+        return None;
     }
+
+    parse_child_measurement(&output.stderr)
 }
 
-fn benches() -> &'static [BenchEntry] {
+fn parse_child_measurement(stderr: &[u8]) -> Option<BenchMeasurement> {
+    let stderr = String::from_utf8_lossy(stderr);
+    let mut elapsed_ms = None;
+    let mut peak_rss = None;
+
+    for line in stderr.lines() {
+        if let Some((_, rest)) = line.split_once(" total ") {
+            if let Some((value, _)) = rest.trim_start().split_once(" ms") {
+                elapsed_ms = value.trim().parse::<f64>().ok();
+            }
+        }
+        if let Some((_, value)) = line.split_once(" peak-rss ") {
+            peak_rss = parse_bytes(value.trim());
+        }
+    }
+
+    elapsed_ms.map(|elapsed_ms| BenchMeasurement {
+        elapsed_ms,
+        peak_rss,
+    })
+}
+
+fn parse_bytes(value: &str) -> Option<u64> {
+    let mut parts = value.split_whitespace();
+    let number = parts.next()?.parse::<f64>().ok()?;
+    let unit = parts.next()?;
+    let multiplier = match unit {
+        "B" => 1.0,
+        "KiB" => 1024.0,
+        "MiB" => 1024.0 * 1024.0,
+        "GiB" => 1024.0 * 1024.0 * 1024.0,
+        "TiB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    Some((number * multiplier).round() as u64)
+}
+
+fn default_benches() -> &'static [BenchEntry] {
     &[
         ("resolve_piece_heavy", bench_resolve_piece_heavy),
         ("save_16mb_with_insert", bench_save_16mb_with_insert),
@@ -919,8 +1867,6 @@ fn benches() -> &'static [BenchEntry] {
             bench_save_64mb_overwrite_replacements,
         ),
         ("parse_elf_format", bench_parse_elf_format),
-        ("paste_overwrite_large", bench_paste_overwrite_large),
-        ("paste_overwrite_bulk_path", bench_paste_overwrite_bulk_path),
         ("edit_mode_replace_nibbles", bench_edit_mode_replace_nibbles),
         ("edit_mode_insert_nibbles", bench_edit_mode_insert_nibbles),
         (
@@ -944,16 +1890,8 @@ fn benches() -> &'static [BenchEntry] {
             bench_edit_mode_paste_overwrite_1mb,
         ),
         (
-            "edit_mode_paste_overwrite_per_byte_1mb",
-            bench_edit_mode_paste_overwrite_per_byte_1mb,
-        ),
-        (
             "edit_mode_paste_overwrite_16mb",
             bench_edit_mode_paste_overwrite_16mb,
-        ),
-        (
-            "edit_mode_paste_overwrite_per_byte_4mb",
-            bench_edit_mode_paste_overwrite_per_byte_4mb,
         ),
         (
             "edit_mode_paste_insert_1mb",
@@ -963,10 +1901,63 @@ fn benches() -> &'static [BenchEntry] {
             "edit_mode_fill_overlay_1mb",
             bench_edit_mode_fill_overlay_1mb,
         ),
+        (
+            "edit_256mb_replace_nibbles",
+            bench_edit_256mb_replace_nibbles,
+        ),
+        ("edit_256mb_insert_nibbles", bench_edit_256mb_insert_nibbles),
+        (
+            "edit_256mb_pending_insert_backspace",
+            bench_edit_256mb_pending_insert_backspace,
+        ),
+        (
+            "edit_256mb_backspace_real_delete",
+            bench_edit_256mb_backspace_real_delete,
+        ),
+        (
+            "edit_256mb_normal_tombstone_delete",
+            bench_edit_256mb_normal_tombstone_delete,
+        ),
+        (
+            "edit_256mb_visual_tombstone_range",
+            bench_edit_256mb_visual_tombstone_range,
+        ),
+        (
+            "edit_256mb_paste_overwrite_overlay_64mb",
+            bench_edit_256mb_paste_overwrite_overlay_64mb,
+        ),
+        (
+            "edit_256mb_paste_insert_16mb",
+            bench_edit_256mb_paste_insert_16mb,
+        ),
+        (
+            "edit_256mb_fill_overlay_64mb",
+            bench_edit_256mb_fill_overlay_64mb,
+        ),
+        (
+            "edit_256mb_mixed_paste_overwrite_64mb",
+            bench_edit_256mb_mixed_paste_overwrite_64mb,
+        ),
+        (
+            "edit_256mb_mixed_fill_overlay_64mb",
+            bench_edit_256mb_mixed_fill_overlay_64mb,
+        ),
+        (
+            "edit_256mb_mixed_xor_overlay_64mb",
+            bench_edit_256mb_mixed_xor_overlay_64mb,
+        ),
+        (
+            "session_256mb_mixed_10k_ops",
+            bench_session_256mb_mixed_10k_ops,
+        ),
+        (
+            "undo_redo_64mb_compact_paste",
+            bench_undo_redo_64mb_compact_paste,
+        ),
+        ("dirty_islands_paste_64mb", bench_dirty_islands_paste_64mb),
+        ("dirty_islands_xor_64mb", bench_dirty_islands_xor_64mb),
         ("logical_bytes_large_copy", bench_logical_bytes_large_copy),
         ("export_stream_64mb", bench_export_stream_64mb),
-        ("fill_stream_4mb", bench_fill_stream_4mb),
-        ("xor_stream_4mb", bench_xor_stream_4mb),
         ("hash_sha256_16mb", bench_hash_sha256_16mb),
         ("hash_crc32_16mb", bench_hash_crc32_16mb),
         ("hash_16mb_with_tombstones", bench_hash_16mb_with_tombstones),
@@ -976,6 +1967,10 @@ fn benches() -> &'static [BenchEntry] {
         (
             "search_256mb_dirty_one_tombstone",
             bench_search_256mb_dirty_one_tombstone,
+        ),
+        (
+            "search_256mb_dirty_many_islands",
+            bench_search_256mb_dirty_many_islands,
         ),
         (
             "diff_next_tail_mismatch_64mb",
@@ -992,18 +1987,212 @@ fn benches() -> &'static [BenchEntry] {
     ]
 }
 
+fn legacy_benches() -> &'static [BenchEntry] {
+    &[
+        ("paste_overwrite_large", bench_paste_overwrite_large),
+        ("paste_overwrite_bulk_path", bench_paste_overwrite_bulk_path),
+        (
+            "edit_mode_paste_overwrite_per_byte_1mb",
+            bench_edit_mode_paste_overwrite_per_byte_1mb,
+        ),
+        (
+            "edit_mode_paste_overwrite_per_byte_4mb",
+            bench_edit_mode_paste_overwrite_per_byte_4mb,
+        ),
+        (
+            "edit_256mb_paste_overwrite_per_byte_8mb",
+            bench_edit_256mb_paste_overwrite_per_byte_8mb,
+        ),
+        (
+            "undo_redo_4mb_per_byte_fallback",
+            bench_undo_redo_4mb_per_byte_fallback,
+        ),
+        (
+            "search_256mb_clean_sparse_fixture",
+            bench_search_256mb_clean_sparse_fixture,
+        ),
+        ("fill_stream_4mb", bench_fill_stream_4mb),
+        ("xor_stream_4mb", bench_xor_stream_4mb),
+    ]
+}
+
+fn large_benches() -> &'static [BenchEntry] {
+    &[
+        ("open_1gib_sparse", bench_open_1gib_sparse),
+        ("open_1gib_then_first_view", bench_open_1gib_then_first_view),
+        (
+            "viewport_1gib_random_10k_rows",
+            bench_viewport_1gib_random_10k_rows,
+        ),
+        (
+            "save_256mb_patterned_clean_rewrite",
+            bench_save_256mb_patterned_clean_rewrite,
+        ),
+        (
+            "export_stream_256mb_patterned",
+            bench_export_stream_256mb_patterned,
+        ),
+        (
+            "save_1gib_with_middle_insert",
+            bench_save_1gib_with_middle_insert,
+        ),
+        (
+            "save_1gib_with_tombstone_and_insert",
+            bench_save_1gib_with_tombstone_and_insert,
+        ),
+        (
+            "save_1gib_with_64mb_range_overlay",
+            bench_save_1gib_with_64mb_range_overlay,
+        ),
+        (
+            "save_1gib_with_sparse_replacement_islands",
+            bench_save_1gib_with_sparse_replacement_islands,
+        ),
+        ("search_1gib_clean_memmem", bench_search_1gib_clean_memmem),
+        (
+            "search_1gib_dirty_many_islands",
+            bench_search_1gib_dirty_many_islands,
+        ),
+        ("hash_crc32_1gib_clean", bench_hash_crc32_1gib_clean),
+        (
+            "diff_next_tail_mismatch_1gib_stepper",
+            bench_diff_next_tail_mismatch_1gib_stepper,
+        ),
+        (
+            "diff_next_tail_mismatch_1gib_dirty_stepper",
+            bench_diff_next_tail_mismatch_1gib_dirty_stepper,
+        ),
+    ]
+}
+
+fn public_benches() -> &'static [BenchEntry] {
+    &[
+        ("open_1gib_sparse", bench_open_1gib_sparse),
+        ("open_1gib_then_first_view", bench_open_1gib_then_first_view),
+        (
+            "viewport_1gib_random_10k_rows",
+            bench_viewport_1gib_random_10k_rows,
+        ),
+        (
+            "save_256mb_patterned_clean_rewrite",
+            bench_save_256mb_patterned_clean_rewrite,
+        ),
+        (
+            "export_stream_256mb_patterned",
+            bench_export_stream_256mb_patterned,
+        ),
+        (
+            "save_1gib_with_middle_insert",
+            bench_save_1gib_with_middle_insert,
+        ),
+        (
+            "save_1gib_with_tombstone_and_insert",
+            bench_save_1gib_with_tombstone_and_insert,
+        ),
+        (
+            "save_1gib_with_sparse_replacement_islands",
+            bench_save_1gib_with_sparse_replacement_islands,
+        ),
+        ("search_1gib_clean_memmem", bench_search_1gib_clean_memmem),
+        (
+            "search_1gib_dirty_many_islands",
+            bench_search_1gib_dirty_many_islands,
+        ),
+        (
+            "diff_next_tail_mismatch_1gib_stepper",
+            bench_diff_next_tail_mismatch_1gib_stepper,
+        ),
+        (
+            "diff_next_tail_mismatch_1gib_dirty_stepper",
+            bench_diff_next_tail_mismatch_1gib_dirty_stepper,
+        ),
+        (
+            "session_256mb_mixed_10k_ops",
+            bench_session_256mb_mixed_10k_ops,
+        ),
+    ]
+}
+
+fn bench_by_label(label: &str) -> Option<BenchEntry> {
+    default_benches()
+        .iter()
+        .chain(legacy_benches().iter())
+        .chain(large_benches().iter())
+        .chain(public_benches().iter())
+        .copied()
+        .find(|(entry_label, _)| *entry_label == label)
+}
+
+fn repeat_count() -> usize {
+    std::env::var(BENCH_REPEAT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1)
+}
+
+fn print_repeat_summary(label: &str, measurements: &[BenchMeasurement]) {
+    if measurements.len() <= 1 {
+        return;
+    }
+    let mut elapsed = measurements
+        .iter()
+        .map(|measurement| measurement.elapsed_ms)
+        .collect::<Vec<_>>();
+    elapsed.sort_by(f64::total_cmp);
+    let min = elapsed[0];
+    let median = elapsed[elapsed.len() / 2];
+    let max = elapsed[elapsed.len() - 1];
+    let peak_rss = measurements.iter().filter_map(|m| m.peak_rss).max();
+    let peak = peak_rss
+        .map(format_bytes)
+        .unwrap_or_else(|| "child-reported".to_owned());
+    eprintln!(
+        "[bench] {label:<48} repeat-summary min {min:>12.6} ms  median {median:>12.6} ms  max {max:>12.6} ms  peak-rss {peak}"
+    );
+}
+
+fn run_repeated(label: &str, repeat: usize) -> bool {
+    let mut measurements = Vec::with_capacity(repeat);
+    for run in 0..repeat {
+        if repeat > 1 {
+            eprintln!("[bench] repeat {}/{} {label}", run + 1, repeat);
+        }
+        let Some(measurement) = run_isolated(label) else {
+            return false;
+        };
+        measurements.push(measurement);
+    }
+    print_repeat_summary(label, &measurements);
+    true
+}
+
+fn active_benches() -> Vec<BenchEntry> {
+    match std::env::var(BENCH_SUITE_ENV).as_deref() {
+        Ok("public") => public_benches().to_vec(),
+        _ => {
+            let include_legacy = std::env::var_os("HXEDIT_BENCH_LEGACY").is_some();
+            let include_large = std::env::var_os("HXEDIT_BENCH_LARGE").is_some();
+            let mut active = default_benches().to_vec();
+            if include_legacy {
+                active.extend_from_slice(legacy_benches());
+            }
+            if include_large {
+                active.extend_from_slice(large_benches());
+            }
+            active
+        }
+    }
+}
+
 fn main() {
-    let benches = benches();
     if let Some(child_label) = std::env::var_os(BENCH_CHILD_ENV) {
         let child_label = child_label.to_string_lossy();
-        let Some((label, bench)) = benches
-            .iter()
-            .find(|(label, _)| *label == child_label.as_ref())
-        else {
+        let Some((label, bench)) = bench_by_label(child_label.as_ref()) else {
             eprintln!("[bench] unknown child bench {child_label}");
             std::process::exit(1);
         };
-        if !run_in_process(label, *bench) {
+        if !run_in_process(label, bench) {
             std::process::exit(1);
         }
         return;
@@ -1017,14 +2206,16 @@ fn main() {
     }
 
     let filter = std::env::var("HXEDIT_BENCH_FILTER").ok();
-    let failed = benches
+    let repeat = repeat_count();
+    let active_benches = active_benches();
+    let failed = active_benches
         .iter()
         .filter(|(label, _)| {
             filter
                 .as_deref()
                 .is_none_or(|needle| label.contains(needle))
         })
-        .filter(|(label, _)| !run_isolated(label))
+        .filter(|(label, _)| !run_repeated(label, repeat))
         .count();
     if failed > 0 {
         std::process::exit(1);

@@ -24,6 +24,40 @@ struct ReplacementRange {
     value: RangeReplacement,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ReplacementPatch {
+    ranges: Vec<ReplacementPatchRange>,
+    sparse: Vec<ReplacementPatchCell>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReplacementPatchRange {
+    source: PieceSource,
+    start: u64,
+    len: u64,
+    value: ReplacementPatchValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReplacementPatchValue {
+    Pattern { pattern: Arc<[u8]>, phase: u64 },
+    Xor { key: u8 },
+    Bytes { bytes: Arc<[u8]>, phase: u64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReplacementPatchCell {
+    id: CellId,
+    value: Option<u8>,
+}
+
+impl ReplacementPatch {
+    pub(crate) fn extend(&mut self, other: ReplacementPatch) {
+        self.ranges.extend(other.ranges);
+        self.sparse.extend(other.sparse);
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct ReplacementStore {
     sparse: BTreeMap<CellId, SparseReplacement>,
@@ -126,6 +160,142 @@ impl ReplacementStore {
         );
     }
 
+    pub(crate) fn xor_source_range_composed(
+        &mut self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+        key: u8,
+    ) {
+        if len == 0 || key == 0 {
+            return;
+        }
+        let end = start.saturating_add(len);
+        let mut segments = Vec::new();
+        let mut cursor = start;
+
+        for range_key in self.overlapping_range_keys(source, start, end) {
+            let Some(range) = self.ranges.get(&range_key).cloned() else {
+                continue;
+            };
+            let clipped_start = range.source_offset().max(start);
+            let clipped_end = range.end().min(end);
+            if cursor < clipped_start {
+                segments.push((
+                    cursor,
+                    clipped_start - cursor,
+                    RangeReplacement::Xor { key },
+                ));
+            }
+            if clipped_start < clipped_end {
+                let delta = clipped_start - range.source_offset();
+                if let Some(value) =
+                    range
+                        .value
+                        .xor_composed(delta, clipped_end - clipped_start, key)
+                {
+                    segments.push((clipped_start, clipped_end - clipped_start, value));
+                }
+            }
+            cursor = clipped_end;
+        }
+
+        if cursor < end {
+            segments.push((cursor, end - cursor, RangeReplacement::Xor { key }));
+        }
+
+        self.clear_source_range(source, start, len);
+        for (segment_start, segment_len, value) in segments {
+            self.insert_range_replacement(source, segment_start, segment_len, value);
+        }
+    }
+
+    pub(crate) fn patch_for_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> ReplacementPatch {
+        if len == 0 {
+            return ReplacementPatch::default();
+        }
+        let end = start.saturating_add(len);
+        let mut patch = ReplacementPatch::default();
+
+        for key in self.overlapping_range_keys(source, start, end) {
+            let Some(range) = self.ranges.get(&key) else {
+                continue;
+            };
+            let clipped_start = range.source_offset().max(start);
+            let clipped_end = range.end().min(end);
+            if clipped_start >= clipped_end {
+                continue;
+            }
+            let delta = clipped_start - range.source_offset();
+            patch.ranges.push(ReplacementPatchRange {
+                source,
+                start: clipped_start,
+                len: clipped_end - clipped_start,
+                value: range.value.patch_value_shifted(delta),
+            });
+        }
+
+        let start_id = CellId::from_source(source, start);
+        let source_end = CellId::from_source(source, u64::MAX);
+        for (id, value) in self
+            .sparse
+            .range((Bound::Included(start_id), Bound::Included(source_end)))
+        {
+            if source_of(*id) != source {
+                continue;
+            }
+            let offset = offset_of(*id);
+            if offset >= end {
+                break;
+            }
+            patch.sparse.push(ReplacementPatchCell {
+                id: *id,
+                value: match value {
+                    SparseReplacement::Value(value) => Some(*value),
+                    SparseReplacement::Clear => None,
+                },
+            });
+        }
+
+        patch
+    }
+
+    pub(crate) fn apply_patch(&mut self, patch: &ReplacementPatch) {
+        for range in &patch.ranges {
+            match &range.value {
+                ReplacementPatchValue::Pattern { pattern, phase } => self.set_pattern_range(
+                    range.source,
+                    range.start,
+                    range.len,
+                    Arc::clone(pattern),
+                    *phase,
+                ),
+                ReplacementPatchValue::Xor { key } => {
+                    self.set_xor_range(range.source, range.start, range.len, *key);
+                }
+                ReplacementPatchValue::Bytes { bytes, phase } => self.set_bytes_range(
+                    range.source,
+                    range.start,
+                    range.len,
+                    Arc::clone(bytes),
+                    *phase,
+                ),
+            }
+        }
+
+        for cell in &patch.sparse {
+            match cell.value {
+                Some(value) => self.set_cell(cell.id, value),
+                None => self.clear_cell(cell.id),
+            }
+        }
+    }
+
     pub(crate) fn clear_source_range(&mut self, source: PieceSource, start: u64, len: u64) {
         if len == 0 {
             return;
@@ -181,6 +351,55 @@ impl ReplacementStore {
                 );
         };
         self.has_in_range_same_source(source, start, end)
+    }
+
+    pub(crate) fn has_sparse_in_range(&self, lo: CellId, hi: CellId) -> bool {
+        if lo > hi {
+            return false;
+        }
+        self.sparse
+            .range((Bound::Included(lo), Bound::Included(hi)))
+            .next()
+            .is_some()
+    }
+
+    pub(crate) fn has_range_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> bool {
+        if len == 0 {
+            return false;
+        }
+        let end = start.saturating_add(len);
+        self.has_in_range_same_source(source, start, end)
+    }
+
+    pub(crate) fn sparse_values_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> Vec<(u64, u8)> {
+        if len == 0 {
+            return Vec::new();
+        }
+        let end = start.saturating_add(len);
+        let lo = CellId::from_source(source, start);
+        let hi = CellId::from_source(source, end.saturating_sub(1));
+        self.sparse
+            .range((Bound::Included(lo), Bound::Included(hi)))
+            .filter_map(|(id, value)| {
+                if source_of(*id) != source {
+                    return None;
+                }
+                match value {
+                    SparseReplacement::Value(value) => Some((offset_of(*id), *value)),
+                    SparseReplacement::Clear => None,
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn dirty_bytes(&self) -> usize {
@@ -268,6 +487,34 @@ impl ReplacementStore {
 
         keys
     }
+
+    fn insert_range_replacement(
+        &mut self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+        value: RangeReplacement,
+    ) {
+        if len == 0 {
+            return;
+        }
+        match &value {
+            RangeReplacement::Pattern { pattern, .. } if pattern.is_empty() => return,
+            RangeReplacement::Xor { key } if *key == 0 => return,
+            RangeReplacement::Bytes { bytes, .. } if bytes.is_empty() => return,
+            _ => {}
+        }
+
+        let id = CellId::from_source(source, start);
+        self.ranges.insert(
+            id,
+            ReplacementRange {
+                start: id,
+                len,
+                value,
+            },
+        );
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -338,6 +585,54 @@ impl ReplacementRange {
             start: CellId::from_source(self.source(), start),
             len,
             value,
+        }
+    }
+}
+
+impl RangeReplacement {
+    fn xor_composed(&self, delta: u64, len: u64, key: u8) -> Option<RangeReplacement> {
+        match self {
+            RangeReplacement::Pattern { pattern, phase } => {
+                let pattern_len = pattern.len() as u64;
+                let transformed = pattern.iter().map(|byte| byte ^ key).collect::<Vec<_>>();
+                Some(RangeReplacement::Pattern {
+                    pattern: Arc::from(transformed),
+                    phase: ((*phase % pattern_len) + (delta % pattern_len)) % pattern_len,
+                })
+            }
+            RangeReplacement::Xor { key: existing } => {
+                let key = existing ^ key;
+                (key != 0).then_some(RangeReplacement::Xor { key })
+            }
+            RangeReplacement::Bytes { bytes, phase } => {
+                let begin = phase.saturating_add(delta) as usize;
+                let end = begin.saturating_add(len as usize);
+                let transformed = bytes[begin..end]
+                    .iter()
+                    .map(|byte| byte ^ key)
+                    .collect::<Vec<_>>();
+                (!transformed.is_empty()).then_some(RangeReplacement::Bytes {
+                    bytes: Arc::from(transformed),
+                    phase: 0,
+                })
+            }
+        }
+    }
+
+    fn patch_value_shifted(&self, delta: u64) -> ReplacementPatchValue {
+        match self {
+            RangeReplacement::Pattern { pattern, phase } => {
+                let pattern_len = pattern.len() as u64;
+                ReplacementPatchValue::Pattern {
+                    pattern: Arc::clone(pattern),
+                    phase: ((*phase % pattern_len) + (delta % pattern_len)) % pattern_len,
+                }
+            }
+            RangeReplacement::Xor { key } => ReplacementPatchValue::Xor { key: *key },
+            RangeReplacement::Bytes { bytes, phase } => ReplacementPatchValue::Bytes {
+                bytes: Arc::clone(bytes),
+                phase: phase.saturating_add(delta),
+            },
         }
     }
 }

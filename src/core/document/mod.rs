@@ -15,6 +15,7 @@ use crate::core::piece_table::{CellId, Piece, PieceSource, PieceTable};
 use crate::core::save;
 use crate::error::{HxError, HxResult};
 
+pub(crate) use replacement_store::ReplacementPatch;
 use replacement_store::ReplacementStore;
 
 const SEARCH_CHUNK: usize = 64 * 1024;
@@ -134,7 +135,7 @@ impl Document {
     pub fn visible_len(&self) -> u64 {
         self.pieces
             .len()
-            .saturating_sub(self.tombstones.len() as u64)
+            .saturating_sub(self.reachable_tombstone_count())
     }
 
     /// True when any edits (inserts, deletions, replacements) have been made
@@ -241,6 +242,49 @@ impl Document {
     /// Check if any replacement falls within a CellId range (inclusive).
     pub fn has_replacement_in_range(&self, lo: CellId, hi: CellId) -> bool {
         self.replacements.has_in_range(lo, hi)
+    }
+
+    pub(crate) fn has_replacement_range_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> bool {
+        self.replacements
+            .has_range_in_source_range(source, start, len)
+    }
+
+    pub(crate) fn sparse_replacements_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> Vec<(u64, u8)> {
+        self.replacements
+            .sparse_values_in_source_range(source, start, len)
+    }
+
+    pub(crate) fn tombstones_in_source_range(
+        &self,
+        source: PieceSource,
+        start: u64,
+        len: u64,
+    ) -> Vec<u64> {
+        if len == 0 || !self.has_tombstones() {
+            return Vec::new();
+        }
+        let end = start.saturating_add(len);
+        let lo = CellId::from_source(source, start);
+        let hi = CellId::from_source(source, end.saturating_sub(1));
+        use std::ops::Bound;
+        self.tombstones
+            .range((Bound::Included(lo), Bound::Included(hi)))
+            .filter_map(|id| match (source, *id) {
+                (PieceSource::Original, CellId::Original(offset))
+                | (PieceSource::Add, CellId::Add(offset)) => Some(offset),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Map a display offset to the corresponding logical byte offset.
@@ -392,6 +436,17 @@ impl Document {
 
     fn tombstone_count_in_piece(&self, piece: Piece) -> u64 {
         self.tombstone_count_in_piece_prefix(piece, piece.len)
+    }
+
+    fn reachable_tombstone_count(&self) -> u64 {
+        if !self.has_tombstones() {
+            return 0;
+        }
+        self.pieces
+            .pieces()
+            .iter()
+            .map(|piece| self.tombstone_count_in_piece(*piece))
+            .sum()
     }
 
     fn tombstone_count_in_piece_prefix(&self, piece: Piece, len: u64) -> u64 {
@@ -711,6 +766,65 @@ mod tests {
         assert_eq!(
             doc.replacement_spans().unwrap(),
             vec![(0, vec![0xff, 0x00, 0x55, 0xaa])]
+        );
+    }
+
+    #[test]
+    fn mixed_xor_overlay_composes_existing_range_replacements() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1000-0x1004"),
+            vec![0x00, 0xff, 0xaa, 0x55],
+            &config,
+        );
+
+        doc.xor_visible_range_overlay(0, 3, 0xff).unwrap();
+        let stats = doc.xor_visible_range_mixed_overlay(0, 3, 0xff).unwrap();
+
+        assert_eq!(stats.visited, 4);
+        assert_eq!(stats.changed, 4);
+        assert_eq!(
+            doc.logical_bytes(0, 3).unwrap(),
+            vec![0x00, 0xff, 0xaa, 0x55]
+        );
+        assert_eq!(doc.replacement_dirty_bytes(), 0);
+
+        doc.overwrite_run_pattern_overlay(1, 2, &[0x10, 0x20])
+            .unwrap();
+        let stats = doc.xor_visible_range_mixed_overlay(1, 2, 0x0f).unwrap();
+        assert_eq!(stats.visited, 2);
+        assert_eq!(stats.changed, 2);
+        assert_eq!(
+            doc.logical_bytes(0, 3).unwrap(),
+            vec![0x00, 0x1f, 0x2f, 0x55]
+        );
+        assert_eq!(doc.replacement_dirty_bytes(), 2);
+    }
+
+    #[test]
+    fn mixed_xor_overlay_preserves_sparse_clear_semantics() {
+        let config = Config::default();
+        let mut doc = Document::from_memory_bytes(
+            PathBuf::from("memory://pid/0x1006-0x100c"),
+            vec![0, 1, 2, 3, 4, 5],
+            &config,
+        );
+
+        doc.overwrite_run_pattern_overlay(1, 4, &[0xaa, 0xbb])
+            .unwrap();
+        doc.replace_display_byte(2, 2).unwrap();
+        assert_eq!(
+            doc.logical_bytes(0, 5).unwrap(),
+            vec![0, 0xaa, 2, 0xaa, 0xbb, 5]
+        );
+
+        let stats = doc.xor_visible_range_mixed_overlay(1, 4, 0xff).unwrap();
+
+        assert_eq!(stats.visited, 4);
+        assert_eq!(stats.changed, 4);
+        assert_eq!(
+            doc.logical_bytes(0, 5).unwrap(),
+            vec![0, 0x55, 0xfd, 0x55, 0x44, 5]
         );
     }
 }

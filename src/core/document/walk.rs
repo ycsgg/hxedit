@@ -116,17 +116,48 @@ impl Document {
                     }
                 } else {
                     stats.slow_chunks += 1;
-                    scratch.clear();
-                    for (idx, &base) in raw.iter().enumerate() {
-                        let id = CellId::from_source(piece.source, source_offset + idx as u64);
-                        if need_tombstone_scan && self.is_tombstone(id) {
-                            continue;
+                    let has_range_replacement = need_replacement_scan
+                        && self.has_replacement_range_in_source_range(
+                            piece.source,
+                            source_offset,
+                            read_len,
+                        );
+
+                    if need_replacement_scan && !need_tombstone_scan && !has_range_replacement {
+                        scratch.clear();
+                        let replacements = self.sparse_replacements_in_source_range(
+                            piece.source,
+                            source_offset,
+                            read_len,
+                        );
+                        let mut cursor = 0usize;
+                        for (replacement_offset, value) in replacements {
+                            let idx = replacement_offset.saturating_sub(source_offset) as usize;
+                            if idx > raw.len() {
+                                break;
+                            }
+                            if cursor < idx {
+                                scratch.extend_from_slice(&raw[cursor..idx]);
+                            }
+                            scratch.push(value);
+                            cursor = idx.saturating_add(1);
                         }
-                        scratch.push(if need_replacement_scan {
-                            self.replacement_for(id, base).unwrap_or(base)
-                        } else {
-                            base
-                        });
+                        if cursor < raw.len() {
+                            scratch.extend_from_slice(&raw[cursor..]);
+                        }
+                    } else {
+                        scratch.clear();
+                        for (idx, &base) in raw.iter().enumerate() {
+                            let id = CellId::from_source(piece.source, source_offset + idx as u64);
+                            if need_tombstone_scan && self.is_tombstone(id) {
+                                continue;
+                            }
+                            scratch.push(if need_replacement_scan {
+                                self.replacement_for(id, base).unwrap_or(base)
+                            } else {
+                                base
+                            });
+                        }
                     }
                     let chunk = LogicalChunk { bytes: &scratch };
                     if matches!(visit(chunk)?, WalkControl::Stop) {
@@ -221,42 +252,140 @@ impl Document {
                     }
                 } else {
                     stats.slow_chunks += 1;
-                    scratch.clear();
-                    let mut segment_start = chunk_display_start;
-                    for (idx, &base) in raw.iter().enumerate() {
-                        let source_offset = source_offset + idx as u64;
-                        let id = CellId::from_source(piece.source, source_offset);
-                        if need_tombstone_scan && self.is_tombstone(id) {
-                            if !scratch.is_empty() {
+                    let has_range_replacement = need_replacement_scan
+                        && self.has_replacement_range_in_source_range(
+                            piece.source,
+                            source_offset,
+                            read_len,
+                        );
+
+                    if has_range_replacement {
+                        scratch.clear();
+                        let mut segment_start = chunk_display_start;
+                        for (idx, &base) in raw.iter().enumerate() {
+                            let source_offset = source_offset + idx as u64;
+                            let id = CellId::from_source(piece.source, source_offset);
+                            if need_tombstone_scan && self.is_tombstone(id) {
+                                if !scratch.is_empty() {
+                                    let segment = VisibleByteSegment {
+                                        display_start: segment_start,
+                                        bytes: &scratch,
+                                    };
+                                    if matches!(visit(segment)?, WalkControl::Stop) {
+                                        return Ok(stats);
+                                    }
+                                    scratch.clear();
+                                }
+                                continue;
+                            }
+
+                            if scratch.is_empty() {
+                                segment_start = chunk_display_start + idx as u64;
+                            }
+                            scratch.push(if need_replacement_scan {
+                                self.replacement_for(id, base).unwrap_or(base)
+                            } else {
+                                base
+                            });
+                        }
+
+                        if !scratch.is_empty() {
+                            let segment = VisibleByteSegment {
+                                display_start: segment_start,
+                                bytes: &scratch,
+                            };
+                            if matches!(visit(segment)?, WalkControl::Stop) {
+                                return Ok(stats);
+                            }
+                        }
+                    } else {
+                        let tombstones = if need_tombstone_scan {
+                            self.tombstones_in_source_range(piece.source, source_offset, read_len)
+                        } else {
+                            Vec::new()
+                        };
+                        let replacements = if need_replacement_scan {
+                            self.sparse_replacements_in_source_range(
+                                piece.source,
+                                source_offset,
+                                read_len,
+                            )
+                        } else {
+                            Vec::new()
+                        };
+
+                        let mut cursor = 0usize;
+                        let mut tombstone_idx = 0usize;
+                        let mut replacement_idx = 0usize;
+                        while tombstone_idx < tombstones.len()
+                            || replacement_idx < replacements.len()
+                        {
+                            let next_tombstone = tombstones
+                                .get(tombstone_idx)
+                                .map(|offset| offset.saturating_sub(source_offset) as usize);
+                            let next_replacement = replacements
+                                .get(replacement_idx)
+                                .map(|(offset, _)| offset.saturating_sub(source_offset) as usize);
+                            let Some(next_dirty) =
+                                Self::min_option(next_tombstone, next_replacement)
+                            else {
+                                break;
+                            };
+
+                            if next_dirty > cursor {
                                 let segment = VisibleByteSegment {
-                                    display_start: segment_start,
-                                    bytes: &scratch,
+                                    display_start: chunk_display_start + cursor as u64,
+                                    bytes: &raw[cursor..next_dirty],
                                 };
                                 if matches!(visit(segment)?, WalkControl::Stop) {
                                     return Ok(stats);
                                 }
-                                scratch.clear();
                             }
-                            continue;
+
+                            let mut is_tombstone = false;
+                            while tombstones.get(tombstone_idx).is_some_and(|offset| {
+                                offset.saturating_sub(source_offset) as usize == next_dirty
+                            }) {
+                                is_tombstone = true;
+                                tombstone_idx += 1;
+                            }
+
+                            let mut replacement = None;
+                            while replacements
+                                .get(replacement_idx)
+                                .is_some_and(|(offset, _)| {
+                                    offset.saturating_sub(source_offset) as usize == next_dirty
+                                })
+                            {
+                                replacement =
+                                    replacements.get(replacement_idx).map(|(_, value)| *value);
+                                replacement_idx += 1;
+                            }
+
+                            if !is_tombstone {
+                                if let Some(value) = replacement {
+                                    scratch.clear();
+                                    scratch.push(value);
+                                    let segment = VisibleByteSegment {
+                                        display_start: chunk_display_start + next_dirty as u64,
+                                        bytes: &scratch,
+                                    };
+                                    if matches!(visit(segment)?, WalkControl::Stop) {
+                                        return Ok(stats);
+                                    }
+                                }
+                            }
+                            cursor = next_dirty.saturating_add(1);
                         }
 
-                        if scratch.is_empty() {
-                            segment_start = chunk_display_start + idx as u64;
-                        }
-                        scratch.push(if need_replacement_scan {
-                            self.replacement_for(id, base).unwrap_or(base)
-                        } else {
-                            base
-                        });
-                    }
-
-                    if !scratch.is_empty() {
-                        let segment = VisibleByteSegment {
-                            display_start: segment_start,
-                            bytes: &scratch,
-                        };
-                        if matches!(visit(segment)?, WalkControl::Stop) {
-                            return Ok(stats);
+                        if cursor < raw.len() {
+                            let segment = VisibleByteSegment {
+                                display_start: chunk_display_start + cursor as u64,
+                                bytes: &raw[cursor..],
+                            };
+                            if matches!(visit(segment)?, WalkControl::Stop) {
+                                return Ok(stats);
+                            }
                         }
                     }
                 }
@@ -270,6 +399,15 @@ impl Document {
         }
 
         Ok(stats)
+    }
+
+    fn min_option(left: Option<usize>, right: Option<usize>) -> Option<usize> {
+        match (left, right) {
+            (Some(left), Some(right)) => Some(left.min(right)),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        }
     }
 
     /// Walk display cells in piece order and emit per-cell overlay state.

@@ -68,49 +68,67 @@ pub fn find_mismatch_forward_step(
         Some(start)
     };
 
-    document.walk_visible_cells(start, step_end, DIFF_MISMATCH_CHUNK, |document, chunk| {
-        if chunk.fast_path {
+    if !document.has_tombstones() {
+        document.walk_visible_byte_segments(start, step_end, DIFF_MISMATCH_CHUNK, |segment| {
+            if segment.bytes.is_empty() {
+                return Ok(WalkControl::Continue);
+            }
+
+            let logical_start = next_logical_offset.unwrap_or(segment.display_start);
+            let other =
+                read_other_range(other_view, other_len, logical_start, segment.bytes.len())?;
+            if let Some(index) = first_forward_diff_index(segment.bytes, &other) {
+                found = Some(segment.display_start + index as u64);
+                return Ok(WalkControl::Stop);
+            }
+            next_logical_offset = Some(logical_start + segment.bytes.len() as u64);
+            Ok(WalkControl::Continue)
+        })?;
+    } else {
+        document.walk_visible_cells(start, step_end, DIFF_MISMATCH_CHUNK, |document, chunk| {
+            if chunk.fast_path {
+                let Some(logical_start) = next_logical_offset
+                    .or_else(|| document.logical_offset_for_display_offset(chunk.display_start))
+                else {
+                    return Ok(WalkControl::Continue);
+                };
+                let other =
+                    read_other_range(other_view, other_len, logical_start, chunk.raw_bytes.len())?;
+                if let Some(index) = first_forward_diff_index(chunk.raw_bytes, &other) {
+                    found = Some(chunk.display_start + index as u64);
+                    return Ok(WalkControl::Stop);
+                }
+                next_logical_offset = Some(logical_start + chunk.raw_bytes.len() as u64);
+                return Ok(WalkControl::Continue);
+            }
+
+            let mut display_offsets = Vec::with_capacity(chunk.cells.len());
+            let mut current = Vec::with_capacity(chunk.cells.len());
+            for cell in chunk.cells {
+                if cell.deleted {
+                    continue;
+                }
+                display_offsets.push(cell.display_offset);
+                current.push(cell.byte);
+            }
+            if current.is_empty() {
+                return Ok(WalkControl::Continue);
+            }
+
             let Some(logical_start) = next_logical_offset
-                .or_else(|| document.logical_offset_for_display_offset(chunk.display_start))
+                .or_else(|| document.logical_offset_for_display_offset(display_offsets[0]))
             else {
                 return Ok(WalkControl::Continue);
             };
-            let other =
-                read_other_range(other_view, other_len, logical_start, chunk.raw_bytes.len())?;
-            if let Some(index) = first_forward_diff_index(chunk.raw_bytes, &other) {
-                found = Some(chunk.display_start + index as u64);
+            let other = read_other_range(other_view, other_len, logical_start, current.len())?;
+            if let Some(index) = first_forward_diff_index(&current, &other) {
+                found = Some(display_offsets[index]);
                 return Ok(WalkControl::Stop);
             }
-            next_logical_offset = Some(logical_start + chunk.raw_bytes.len() as u64);
-            return Ok(WalkControl::Continue);
-        }
-
-        let mut display_offsets = Vec::with_capacity(chunk.cells.len());
-        let mut current = Vec::with_capacity(chunk.cells.len());
-        for cell in chunk.cells {
-            if cell.deleted {
-                continue;
-            }
-            display_offsets.push(cell.display_offset);
-            current.push(cell.byte);
-        }
-        if current.is_empty() {
-            return Ok(WalkControl::Continue);
-        }
-
-        let Some(logical_start) = next_logical_offset
-            .or_else(|| document.logical_offset_for_display_offset(display_offsets[0]))
-        else {
-            return Ok(WalkControl::Continue);
-        };
-        let other = read_other_range(other_view, other_len, logical_start, current.len())?;
-        if let Some(index) = first_forward_diff_index(&current, &other) {
-            found = Some(display_offsets[index]);
-            return Ok(WalkControl::Stop);
-        }
-        next_logical_offset = Some(logical_start + current.len() as u64);
-        Ok(WalkControl::Continue)
-    })?;
+            next_logical_offset = Some(logical_start + current.len() as u64);
+            Ok(WalkControl::Continue)
+        })?;
+    }
 
     Ok(MismatchScanStep {
         found,
@@ -229,6 +247,9 @@ fn read_other_range(
 
 fn first_forward_diff_index(current: &[u8], other: &[u8]) -> Option<usize> {
     let shared = current.len().min(other.len());
+    if current[..shared] == other[..shared] {
+        return (current.len() > other.len()).then_some(other.len());
+    }
     for index in 0..shared {
         if current[index] != other[index] {
             return Some(index);
@@ -240,6 +261,10 @@ fn first_forward_diff_index(current: &[u8], other: &[u8]) -> Option<usize> {
 fn first_backward_diff_index(current: &[u8], other: &[u8]) -> Option<usize> {
     if current.len() > other.len() {
         return current.len().checked_sub(1);
+    }
+    let shared = current.len().min(other.len());
+    if current[..shared] == other[..shared] {
+        return None;
     }
     (0..current.len())
         .rev()

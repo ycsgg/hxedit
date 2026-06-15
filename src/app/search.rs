@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::app::{App, SearchDirection, SearchState};
 #[cfg(feature = "disasm")]
-use crate::disasm::{DisasmRow, DisasmRowKind};
+use crate::disasm::{DisasmCache, DisasmRow, DisasmRowKind, DisassemblyState};
 #[cfg(feature = "disasm")]
 use crate::error::HxError;
 use crate::error::HxResult;
@@ -252,7 +252,7 @@ impl App {
     #[cfg(feature = "disasm")]
     fn search_disassembly_forward_from(
         &mut self,
-        state: &crate::disasm::DisassemblyState,
+        state: &DisassemblyState,
         start: u64,
         mut matches_row: impl FnMut(&DisasmRow) -> bool,
     ) -> HxResult<Option<u64>> {
@@ -260,9 +260,11 @@ impl App {
             return Ok(None);
         }
 
+        let mut scan_cache = DisasmCache::new(&state.info, self.document.len());
         let mut cursor = start.min(self.document.len().saturating_sub(1));
         while cursor < self.document.len() {
-            let rows = self.collect_disassembly_rows(state, cursor, 256)?;
+            let rows =
+                self.collect_disassembly_rows_for_search(&mut scan_cache, state, cursor, 256)?;
             if rows.is_empty() {
                 break;
             }
@@ -288,7 +290,7 @@ impl App {
     #[cfg(feature = "disasm")]
     fn search_disassembly_backward_before(
         &mut self,
-        state: &crate::disasm::DisassemblyState,
+        state: &DisassemblyState,
         limit_exclusive: u64,
         mut matches_row: impl FnMut(&DisasmRow) -> bool,
     ) -> HxResult<Option<u64>> {
@@ -296,10 +298,12 @@ impl App {
             return Ok(None);
         }
 
+        let mut scan_cache = DisasmCache::new(&state.info, self.document.len());
         let mut cursor = 0_u64;
         let mut last_match = None;
         while cursor < self.document.len() {
-            let rows = self.collect_disassembly_rows(state, cursor, 256)?;
+            let rows =
+                self.collect_disassembly_rows_for_search(&mut scan_cache, state, cursor, 256)?;
             if rows.is_empty() {
                 break;
             }
@@ -320,6 +324,33 @@ impl App {
             cursor = next_cursor;
         }
         Ok(last_match)
+    }
+
+    #[cfg(feature = "disasm")]
+    fn collect_disassembly_rows_for_search(
+        &mut self,
+        cache: &mut DisasmCache,
+        state: &DisassemblyState,
+        start: u64,
+        row_count: usize,
+    ) -> HxResult<Vec<DisasmRow>> {
+        self.ensure_disassembly_backend(state)?;
+        let backend = self
+            .disasm_backend
+            .as_deref()
+            .expect("disassembly backend should be initialized");
+        let rows =
+            cache.collect_rows(&mut self.document, &state.info, backend, start, row_count)?;
+        #[cfg(feature = "sagitta-analysis")]
+        {
+            let mut rows = rows;
+            self.apply_sagitta_annotations(&mut rows);
+            Ok(rows)
+        }
+        #[cfg(not(feature = "sagitta-analysis"))]
+        {
+            Ok(rows)
+        }
     }
 }
 

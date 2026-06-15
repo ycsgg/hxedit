@@ -95,6 +95,24 @@
 - readonly / save-as
 - save 后 dirty / undo / inspector / cursor 是否一致
 
+### 3.5 为 document fuzz 添加新操作
+
+当前固定 seed fuzz 在 `tests/insert_mode.rs` 的
+`deterministic_mixed_document_edit_fuzz_matches_reference_model`。它用
+`ReferenceDoc { slots: Vec<Option<u8>> }` 做 byte 级模型：`Some(byte)` 是可见
+display slot，`None` 是 tombstone。新增 fuzz 操作时按这个顺序做：
+
+1. 先写清该操作属于 real delete / tombstone delete / replacement / insert 哪一种。
+2. 在真实 `Document` 上调用对应 API，同时在 `ReferenceDoc` 上做同构变更。
+3. 明确错误语义：例如 overwrite paste 命中 tombstone 应返回错误且不得部分写入；
+   这种路径也要在 fuzz 中断言。
+4. 每步后继续调用 `ReferenceDoc::assert_matches`，至少比较 `len()`、
+   `visible_len()`、`logical_bytes()`、display slot、display/logical offset 映射。
+5. 控制规模：固定 seed、小模型、固定步数；不要把 wall-clock 阈值塞进
+   `cargo test`。性能观察放到 `benches/perf_bench.rs`。
+6. 如果新操作涉及 App undo/redo 栈，只靠 document fuzz 不够；补 App 层连续操作
+   测试或专门的 undo/redo bench。
+
 ---
 
 ## 4. 提交前自检清单
