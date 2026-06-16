@@ -35,6 +35,7 @@ cargo clippy --all-targets
 如果你的改动影响用户可见行为，必须同步检查：
 
 - `README.md` / `README_CN.md`
+- `docs/user-guide.md` / `docs/user-guide_CN.md`
 - `docs/issues.md`
 - 命令提示 / 帮助文本（`commands/hints.rs`）
 - 对应测试

@@ -455,6 +455,7 @@ resolved indirect sites、switch/jump-table、callgraph 等更高级的控制流
 相关文档/提示同步：
 
 - `README.md` / `README_CN.md`
+- `docs/user-guide.md` / `docs/user-guide_CN.md`
 - `commands/hints.rs`
 - `docs/architecture.md`
 - `docs/modules.md`

@@ -29,6 +29,7 @@
 
 | 文档 | 内容 |
 |---|---|
+| [`docs/user-guide.md`](docs/user-guide.md) / [`docs/user-guide_CN.md`](docs/user-guide_CN.md) | 用户侧构建档位、CLI 参数、配置文件、命令参考、release / license 说明 |
 | [`docs/architecture.md`](docs/architecture.md) | 当前快照、产品定位、已落地用户面、行为边界、代码地图、CI/Release、仍需关注的点 |
 | [`docs/editing-model.md`](docs/editing-model.md) | 三类编辑语义、长度 / offset、光标与 mode 规则、inspector / save 不变量 |
 | [`docs/modules.md`](docs/modules.md) | 各高风险模块的改动须知（document / piece_table / app / commands / events / render / palette / format / memory） |
@@ -42,7 +43,7 @@
 
 ## 文档维护约定
 
-- 改动**用户可见行为**时，同步 `README.md` / `README_CN.md` / `docs/issues.md` / 命令提示（`commands/hints.rs`）/ 对应测试。
+- 改动**用户可见行为**时，同步 `README.md` / `README_CN.md` / `docs/user-guide.md` / `docs/user-guide_CN.md` / `docs/issues.md` / 命令提示（`commands/hints.rs`）/ 对应测试。
 - 改动**内部约束或工作流**时，同步本文件与 `docs/` 下对应主题文件。
 - 这些文档保持**短、当前、可执行**：已完成或过期的长列表移到 `docs/archive/`，不要继续占容量。
 - **本文件与 `docs/` 下文档随 git 一起提交，纳入版本管理。**

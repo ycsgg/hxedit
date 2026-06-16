@@ -88,7 +88,7 @@
 
 当前文档已经比以前收敛，但仍要持续避免：
 
-- README 写的是旧命令面（尤其搜索统一入口与 deprecated alias）
+- README / 用户指南写的是旧命令面（尤其搜索统一入口与 deprecated alias）
 - `docs/issues.md` 被已完成事项占满
 - `commands/hints.rs`、测试名、状态栏文案与实现脱节
 - `:diff` 文案必须继续写明 current side 是 logical bytes，不要退回成 display offset 对比

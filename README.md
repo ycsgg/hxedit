@@ -1,195 +1,145 @@
 # hxedit
 
-A terminal hex editor for large files, written in Rust.
+A fast terminal hex editor built for large binary files.
 
 [中文文档 / Chinese README](README_CN.md)
 
-`hxedit` focuses on correct byte-level editing semantics first: non-destructive editing, full undo/redo, search, format inspection, and optional executable/disassembly browsing.
+`hxedit` lets you open, navigate, edit, search, diff, hash, and export binary
+data without leaving the terminal. It reads files through a paged cache so
+gigabyte-scale files open quickly, and it keeps every byte edit explicit so
+undo, save, and search stay predictable.
 
-## Features
+![hxedit main view](docs/images/main_view.png)
 
-- Fixed byte-column header (`00 01 02 ... 0F` by default) for quick column lookup while scrolling
-- Non-destructive byte editing with three distinct operations:
-  - overwrite in place
-  - real insert
-  - tombstone delete
-- Full undo / redo across edits, paste, replace, and inspector writes
-- Unified text/hex/typed-value search with forward/backward traversal, wrap-around, and visible-hit highlighting; large files are scanned with SIMD `memmem` (only chunks containing tombstone/replacement edits fall back to byte-at-a-time)
-- Built-in format inspectors for ELF, PE/COFF, Mach-O, PNG, ZIP (central directory, EOCD, ZIP64, and data descriptors), SQLite, PCAP/PCAPNG, GZIP, GIF, BMP, WAV, TAR, and JPEG
-- Inspector fields can use format-specific readable editors, including classic PCAP UTC packet timestamps, GZIP/PE Unix timestamps, ZIP DOS modification times, TAR octal mode/size/mtime, and GIF frame delays
-- Hashing for MD5, SHA1, SHA256, SHA512, and CRC32
-- Clipboard copy/paste, export, fill/zero/xor/replace transforms
-- Read-only synchronized diff page against another file (`:diff`)
-- Process memory editing: attach to a running process by PID or name, browse and edit memory regions, freeze/thaw the target, and commit changes back
-- Large-file support through paged I/O and cache
-- Optional disassembly browsing, symbol search, Sagitta-backed analysis, and inline assemble patching
+*The paged hex/ASCII view with a movable cursor, a format-aware inspector side
+panel, and the command line and current mode along the bottom.*
 
-## Performance
+## Install
 
-Large-file benchmark results and scenario descriptions are tracked in
-[`docs/performance-report.md`](docs/performance-report.md). The report includes
-the public benchmark subset, 1 GiB save/search/diff scenarios, viewport reads,
-peak RSS, and the commands used to reproduce the measurements.
-
-## Quick Start
-
-Run from source:
+Install the latest release from crates.io:
 
 ```bash
-cargo run -- <file>
+cargo install hxedit
 ```
 
-Example:
+Or download a prebuilt binary from the
+[releases page](https://github.com/ycsgg/hxedit/releases), extract it, and put
+`hxedit` on your `PATH`.
 
-```bash
-cargo run -- --readonly --offset 0x100 --inspector some.bin
-```
-
-If you already built the binary:
+Then open a file:
 
 ```bash
 hxedit some.bin
 ```
 
-## Build
+Open read-only at an offset with the inspector visible:
 
-`hxedit` ships in three feature bundles:
-
-| Bundle | Build command | Includes |
-|------|------|------|
-| `core` | `cargo build --release --no-default-features` | Hex editor, inspector, search, diff, hash, copy/paste, export |
-| `default` | `cargo build --release` | `core` + process memory editing, disassembly view, instruction search, symbol panel |
-| `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching + Sagitta-backed `:ana` analysis |
-| `sagitta-analysis` add-on | `cargo build --release --features sagitta-analysis` | `default` + Sagitta-backed `:ana` analysis from crates.io `sagitta-rs` |
-
-Notes:
-
-- `default` is the normal build and includes process memory editing.
-- `full` enables the optional `hexpatch-keystone` dependency (under the local crate alias `keystone-engine`) for inline assembly patching inside `:dis`, and includes Sagitta analysis.
-- `sagitta-analysis` enables optional `sagitta-rs` analysis for x86/x64 ELF/PE inputs; analysis runs on current logical bytes and does not participate in undo/save/search byte semantics.
-- There is no separate `:asm` command.
-
-## CLI Flags
-
-| Flag | Description |
-|------|-------------|
-| `--readonly` | Open without write access; automatically falls back to read-only when needed |
-| `--offset <n\|0xhex>` | Start at a specific byte offset |
-| `--pid <PID>` | Attach to a running process by PID for memory editing |
-| `--process <NAME>` | Attach to a running process by name for memory editing |
-| `--inspector` | Open with the side panel visible on the inspector page |
-| `--bytes-per-line <n>` | Bytes shown per row, default `16` |
-| `--page-size <n>` | Page-cache read size, default `16384` |
-| `--cache-pages <n>` | Page-cache capacity, default `128` |
-| `--profile` | Print diagnostics to stderr on exit |
-| `--no-color` | Disable colors; `NO_COLOR` also disables styling |
-| `--config <path>` | Load settings from a specific config file (TOML) |
-
-## Configuration
-
-hxedit reads an optional TOML config file at startup. Resolution order (first match wins):
-
-1. `--config <path>`
-2. `$HXEDIT_CONFIG`
-3. `~/.config/hxedit/config.toml` (platform config dir)
-
-A missing file is fine; an existing file that fails to parse (or has unknown keys) is an error. CLI flags always override the config file, which overrides built-in defaults.
-
-```toml
-[display]
-bytes_per_line   = 16              # bytes per row
-data_panel_bytes = 16              # bytes decoded in the data panel
-inspector_depth  = 1              # structs at this depth and below start collapsed
-export_c_width   = 12              # bytes per line in `:export c`
-export_py_width  = 16              # bytes per chunk in `:export py`
-export_name      = "selection_bytes"  # default identifier for `:export c`/`py`
-
-[behavior]
-readonly    = false
-inspector   = false                # open with the inspector side panel visible
-color       = "auto"               # "auto" | "never" ("never" == --no-color)
-search_wrap = true                 # wrap around to the other end when search reaches a boundary
-
-[performance]
-page_size   = 16384                # page-cache read size
-cache_pages = 128                  # page-cache capacity
+```bash
+hxedit --readonly --offset 0x100 --inspector some.bin
 ```
 
-## Common Commands
+## Keys
+
+`hxedit` uses a modal, vim-like scheme. Press `:` to run a command, `Esc` to
+return to normal mode.
+
+| Key | Action |
+|---|---|
+| `h` `j` `k` `l` / arrows | Move cursor; `PageUp`/`PageDown`, `Home`/`End` for rows |
+| `i` | Enter insert mode (typed hex shifts following bytes) |
+| `r` | Enter overwrite mode (typed hex replaces bytes in place) |
+| `x` | Delete the byte (or selection) under the cursor |
+| `v` | Start/stop a visual selection |
+| `n` / `p` | Jump to next / previous search hit |
+| `t` or `Tab` | Toggle the side panel (inspector / memory / etc.) |
+| `:` | Open the command line |
+| `Esc` | Leave the current mode |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo while editing |
+| `Ctrl+C` | Force quit |
+
+## Commands
 
 | Command | Description |
-|---------|-------------|
-| `:w` / `:w <path>` / `:wq` | Save / save as / save and quit |
+|---|---|
+| `:w` / `:wq` | Save / save and quit |
+| `:q` / `:q!` | Quit / discard and quit |
 | `:u [n]` / `:redo [n]` | Undo / redo |
-| `:g <offset>` / `:g end` / `:g +n` / `:g -n` | Goto |
-| `:s [mode]<delim><pattern><delim>` / `:s! ...` | Unified search; default `/text/` searches UTF-8 bytes, `x/hex/` searches raw hex bytes, `b/255/` searches one byte, and `u32/u64/i32/i64` variants search typed integer bytes (`!` searches backward). `:S` remains only as a deprecated hex-search alias during transition |
-| `:p` / `:pi` / `:p?` / `:pi?` | Overwrite / insert paste and previews |
-| `:c [fmt] [disp]` | Copy the active selection |
-| `:export <path>` / `:export c` / `:export py` | Export logical bytes |
-| `:xor <key>` / `:xor! <key>` | XOR active selection to clipboard / XOR in place (`key`: decimal `0..255` or hex `0x00..0xff`) |
-| `:fill <pattern> <len>` / `:zero <len>` | Overwrite transforms |
-| `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | Replace using the same modes as `:s` (`/text/`, `x/hex/`, `b/byte/`, typed integers). `:re` is equal-length and asks for `--force` when more than 65535 matches are found; `:re!` allows length changes. Legacy `hex/ascii <needle> -> <replacement>` remains accepted |
-| `:hash md5|sha1|sha256|sha512|crc32` | Hash |
-| `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh|next|prev|off` | Show a synchronized page comparing current logical bytes with another file; visible pages realign inserted/deleted bytes within `N`, equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__`; `next` / `prev` scan in large progress-reporting steps, block other input while scanning, and Esc cancels |
-| `:insp` / `:insp more` | Open inspector / reveal more paginated entries |
-| `:format ...` | Force format |
+| `:g <offset>` / `:g end` | Jump to an offset |
+| `:s /text/` / `:s x/de ad be ef/` | Search text or hex bytes |
+| `:p` / `:pi` | Paste as overwrite / insert |
+| `:c [fmt]` | Copy the active selection |
+| `:export <path>` | Export the edited bytes |
+| `:hash sha256` | Hash the selection or whole file |
+| `:diff <path>` | Compare against another file |
+| `:insp` | Open the format inspector |
 
-Memory-related commands in `default`, `full`, or other `memory` builds:
+For full command syntax, CLI flags, configuration, memory editing, disassembly,
+and Sagitta analysis, see the [user guide](docs/user-guide.md).
 
-| Command | Description |
-|---------|-------------|
-| `:mem` / `:mem list|refresh|info|freeze|thaw|commit|commit-all` | Open the process-memory side panel, inspect regions, refresh maps, suspend/resume the target, write the active region's replacement spans back (`commit`), or commit every dirty region in virtual-address order (`commit-all`). The panel has three views: maps (region list — the selected/cursor row and the currently opened region are highlighted distinctly), `:mem list` process picker (Enter attaches to the highlighted process), and `:mem info` (aggregated report). All views scroll with the mouse wheel or arrow keys; clicking a row only changes the highlight |
-| `:w` / `:q` in memory mode | `:w` (no path) is equivalent to `:mem commit`; `:w <path>` is rejected (use `:export <path>`). Uncommitted replacements, undo, and redo are kept per region across region switches, so `:q` refuses to quit while any region is dirty and summarizes the total; `:q!` discards |
-| `:ms [mode]<delim><pattern><delim> [filter...]` / `:ms! ...` | Search readable process regions by virtual address; modes include text, `x/hex/`, `b/byte/`, `u32/u64`, and filters such as `in:rw-`, `in:heap`, `not:path:/usr/lib/*`, `in:va:start-end`. Repeat the last memory search with `gn` / `gN` (independent of the file-search `n` / `p` history) |
+## What You Can Do
 
-Disassembly-related commands in `default` / `full` builds:
+- Open and edit large files with overwrite, insert, and delete
+- Search text, hex bytes, single-byte values, or typed integers
+- Copy, export, hash, fill, zero, XOR, or replace selected bytes
+- Inspect ELF, PE/COFF, Mach-O, PNG, ZIP, SQLite, PCAP, GZIP, GIF, BMP, WAV,
+  TAR, and JPEG structures inline
+- Compare against another file in a synchronized read-only diff view
+- Optionally edit process memory, browse disassembly, look up symbols, run
+  Sagitta analysis, and apply inline assemble patches
 
-| Command | Description |
-|---------|-------------|
-| `:dis [arch]` | Enter read-only disassembly view for recognized ELF / PE / Mach-O executables; direct branch jump rails are shown when the text pane is wide enough |
-| `:dis! <arch> <offset>` | Force raw disassembly from a display offset |
-| `:dis off` | Leave disassembly view |
-| `:si` / `:si!` | Search decoded instruction text |
-| `:symbol` / `:symbol!` | Search by symbol name |
-| `:sym` / `:sym off` | Open / close the symbol panel |
-| `:data` / `:data off` | Open / close the cursor-relative data panel |
+![hxedit disassembly view](docs/images/dis_view.png)
 
-Sagitta analysis commands in `sagitta-analysis` builds:
+*Read-only disassembly with branch jump rails (`:dis`).*
 
-| Command | Description |
-|---------|-------------|
-| `:ana` / `:ana status` / `:ana off` | Run Sagitta on current logical bytes, show analysis state, or clear the Sagitta snapshot. Ready snapshots replace the symbol panel source and annotate disassembly with function labels, target names, and function body rails; equal-length edits mark analysis outdated, while layout-changing edits require rerunning `:ana` before symbol jumps. |
+![hxedit Sagitta analysis view](docs/images/ana_view.png)
 
-## Release Bundles
+*Sagitta-backed analysis on the current logical bytes (`:ana`).*
 
-Tagged releases publish an explicit `OS * arch * feature` matrix.
+![hxedit diff view](docs/images/diff_view.png)
 
-Current release matrix:
+*Synchronized read-only diff against another file (`:diff`).*
 
-- `linux` / `x86_64` / `core`
-- `linux` / `x86_64` / `default`
-- `linux` / `x86_64` / `full`
-- `linux` / `aarch64` / `core`
-- `linux` / `aarch64` / `default`
-- `linux` / `aarch64` / `full`
-- `macos` / `aarch64` / `core`
-- `macos` / `aarch64` / `default`
-- `macos` / `aarch64` / `full`
-- `windows` / `x86_64` / `core`
-- `windows` / `x86_64` / `default`
-- `windows` / `x86_64` / `full`
+## Performance
+
+`hxedit` is built for large files. On a 1 GiB file it opens in well under a
+millisecond, searches end to end in ~190 ms, and walks a synchronized diff in
+~320 ms, all while keeping peak RSS in the single-digit MiB range. Full
+scenarios, hardware, and reproduction commands are in
+[docs/performance-report.md](docs/performance-report.md).
+
+## Build Variants
+
+| Variant | Command | Use when |
+|---|---|---|
+| `core` | `cargo build --release --no-default-features` | You want the editor, inspector, search, diff, hash, copy/paste, and export only |
+| `default` | `cargo build --release` | You want the normal build with process memory editing, disassembly, and symbols |
+| `full` | `cargo build --release --no-default-features --features full` | You also want Keystone-backed inline assembly patching and Sagitta analysis |
+
+## Good To Know
+
+Byte edits are explicit: overwrites change bytes in place, inserts shift the
+following data, and deletes are non-destructive until you save or export. This
+is what keeps undo, save, search, export, hash, diff, and inspector writes
+consistent. Format inspectors only write the bytes you edit; they do not repair
+checksums, CRCs, or layouts for you. Process memory edits stay local until you
+explicitly commit them back to the target process. See
+[docs/editing-model.md](docs/editing-model.md) for the exact semantics.
+
+## Documentation
+
+| Document | Use |
+|---|---|
+| [docs/user-guide.md](docs/user-guide.md) | User-facing build, CLI, config, and command reference |
+| [docs/performance-report.md](docs/performance-report.md) | Large-file benchmark scenarios and reproduction commands |
+| [docs/architecture.md](docs/architecture.md) | Current product surface, behavior boundaries, and code map |
 
 ## License
 
-The `hxedit` source code in this repository is dual-licensed under either:
+The `hxedit` source code in this repository is dual-licensed under either MIT or
+Apache-2.0, at your option. See [licenses/](licenses/) for the full license
+texts and third-party notices.
 
-- MIT ([`licenses/LICENSE-MIT`](licenses/LICENSE-MIT))
-- Apache-2.0 ([`licenses/LICENSE-APACHE`](licenses/LICENSE-APACHE))
-
-at your option.
-
-`core` and `default` builds do not enable the optional Keystone-assembler dependency described below.
-
-`full` builds enable the optional Keystone-assembler dependency for inline assembly patching and the optional MIT-licensed `sagitta-rs` analysis dependency. When redistributing `full` source bundles or binaries from this repository, ship the included third-party notices and Keystone FOSS notice / license / exception files as well; see [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt).
-
-Builds that enable `sagitta-analysis` directly also include `sagitta-rs`; keep the Sagitta notice in [`licenses/THIRD_PARTY_NOTICES.txt`](licenses/THIRD_PARTY_NOTICES.txt) with redistributed artifacts.
+`full` builds enable optional Keystone-backed inline assembly patching and
+Sagitta analysis. Redistributed `full` artifacts must include the third-party
+and Keystone notice files described in
+[docs/user-guide.md](docs/user-guide.md#redistribution-notes).

@@ -35,7 +35,7 @@
 ## `src/app/clipboard_ops.rs`
 
 - paste 既有语义问题，也直接影响用户体感
-- 如果改变了 overwrite / insert 语义，必须同步 README 和测试
+- 如果改变了 overwrite / insert 语义，必须同步 README、用户指南和测试
 - copy / paste preview 若改动输出格式，记得同步命令提示、状态栏文案和测试
 
 ## `src/app/commands.rs` / `src/app/commands/*`

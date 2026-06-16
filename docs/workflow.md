@@ -54,7 +54,7 @@
 3. `src/commands/hints.rs` 增加提示
 4. `src/app/commands.rs` 接分发，并把执行逻辑放到 `src/app/commands/*` 对应领域文件
 5. 补 parser / app 行为测试
-6. 同步 README / `docs/issues.md`（若是新用户功能）
+6. 同步 README / 用户指南 / `docs/issues.md`（若是新用户功能）
 
 ### 3.2 修改编辑语义
 
@@ -120,7 +120,7 @@ display slot，`None` 是 tombstone。新增 fuzz 操作时按这个顺序做：
 - [ ] 是否区分了 real delete / tombstone / replacement
 - [ ] 是否检查了 mode 与 EOF cursor 规则
 - [ ] 是否补了测试，且测试真的会执行
-- [ ] 是否同步了 README / docs/issues.md / 提示文本
+- [ ] 是否同步了 README / 用户指南 / docs/issues.md / 提示文本
 - [ ] 是否没有把 inspector 做成“可编辑但极易产出坏文件”
 
 ---
