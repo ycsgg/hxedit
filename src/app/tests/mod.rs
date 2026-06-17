@@ -9,12 +9,13 @@ use std::io::{Seek, SeekFrom, Write};
 use tempfile::tempdir;
 
 use crate::action::Action;
-use crate::app::{App, BulkReplacement, EditOp, SearchDirection, StatusLevel};
+use crate::app::{App, SearchDirection, StatusLevel};
 use crate::cli::Cli;
 use crate::clipboard::test_clipboard_text;
 use crate::commands::types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm};
 use crate::config::Config;
 use crate::core::document::{ByteSlot, Document};
+use crate::exec::{BulkReplacement, EditOp};
 use crate::format::parse::{FieldValue, StructValue};
 use crate::format::types::{FieldDef, FieldType};
 use crate::mode::{Mode, NibblePhase};

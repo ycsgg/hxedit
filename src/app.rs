@@ -2,7 +2,6 @@ use std::collections::BTreeSet;
 use std::io;
 #[cfg(feature = "sagitta-analysis")]
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "sagitta-analysis")]
@@ -41,9 +40,9 @@ use ratatui::Terminal;
 use crate::action::Action;
 use crate::cli::{Cli, CliTarget};
 use crate::config::Config;
-use crate::core::document::{Document, ReplacementPatch};
-use crate::core::piece_table::CellId;
+use crate::core::document::Document;
 use crate::disasm::{DisasmCache, DisassemblyState};
+use crate::exec::EditOp;
 use crate::format::parse::{InspectorRow, NodePath};
 use crate::input::keymap::map_key;
 use crate::mode::Mode;
@@ -241,73 +240,6 @@ pub(crate) struct DisasmEdit {
     pub buffer: String,
     /// Cursor position within the buffer.
     pub cursor_pos: usize,
-}
-
-/// Snapshot of a single cell's replacement state before an edit.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ReplacementChange {
-    pub(crate) id: CellId,
-    /// `None` means the cell had no replacement (base byte was displayed).
-    pub(crate) before: Option<u8>,
-    /// `None` means the cell returns to its base byte.
-    pub(crate) after: Option<u8>,
-}
-
-/// Compact replacement state used by bulk undo records.
-///
-/// These variants intentionally describe replacement-only effects over a
-/// display range. They never insert, tombstone, or real-delete bytes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BulkReplacement {
-    /// No replacement entries are present in the range.
-    Clear,
-    /// Repeating overwrite pattern, starting at the first display cell.
-    Pattern(Vec<u8>),
-    /// Exact overwrite bytes, starting at the first display cell.
-    Bytes(Arc<[u8]>),
-    /// XOR every visible byte in the range with the given key.
-    Xor { key: u8 },
-}
-
-/// A single reversible edit operation.
-///
-/// Each variant stores enough information to undo itself:
-/// - `Insert` — undo by real-deleting `len` bytes at `offset`.
-/// - `RealDelete` — undo by re-inserting the saved `cells` at `offset`.
-/// - `TombstoneDelete` — undo by clearing the tombstones for `ids`.
-/// - `ReplaceBytes` — undo by restoring each cell's previous replacement.
-/// - `ReplaceBulk` — undo/redo by applying compact replacement recipes to a
-///   display range whose pre-edit replacement state was proven simple.
-/// - `ReplacePatch` — undo/redo by restoring a run-based replacement snapshot
-///   for dirty or mixed ranges without expanding one entry per byte.
-#[derive(Debug, Clone)]
-pub(crate) enum EditOp {
-    Insert {
-        offset: u64,
-        cells: Vec<CellId>,
-    },
-    RealDelete {
-        offset: u64,
-        cells: Vec<CellId>,
-    },
-    TombstoneDelete {
-        ids: Vec<CellId>,
-    },
-    ReplaceBytes {
-        changes: Vec<ReplacementChange>,
-    },
-    ReplaceBulk {
-        offset: u64,
-        len: u64,
-        before: BulkReplacement,
-        after: BulkReplacement,
-    },
-    ReplacePatch {
-        offset: u64,
-        len: u64,
-        before: ReplacementPatch,
-        after: ReplacementPatch,
-    },
 }
 
 /// One entry on the undo stack: the cursor/mode before the edit, plus the

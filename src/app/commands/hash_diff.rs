@@ -12,30 +12,26 @@ impl App {
             (0, self.document.len() - 1)
         };
 
-        let hasher = make_hasher(algorithm);
-        let (bytes_hashed, hash_bytes) = self.document.hash_logical_bytes(start, end, hasher)?;
+        let hash = crate::exec::hash_display_range(&mut self.document, algorithm, start, end)?;
+        let bytes_hashed = hash.bytes_hashed;
 
         if bytes_hashed == 0 {
             self.set_info_status(format!("{}: no data to hash", algorithm.label()));
             return Ok(());
         }
 
-        let hash_hex = hash_bytes
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>();
         let scope = if selection.is_some() {
             format!("sel 0x{:x}-0x{:x}", start, end)
         } else {
             "entire file".to_owned()
         };
 
-        if crate::clipboard::copy_text(&hash_hex).is_ok() {
+        if crate::clipboard::copy_text(&hash.hex).is_ok() {
             self.set_info_status(format!(
                 "{} [{}]: {} ({} bytes) [copied]",
                 algorithm.label(),
                 scope,
-                hash_hex,
+                hash.hex,
                 bytes_hashed
             ));
         } else {
@@ -43,7 +39,7 @@ impl App {
                 "{} [{}]: {} ({} bytes)",
                 algorithm.label(),
                 scope,
-                hash_hex,
+                hash.hex,
                 bytes_hashed
             ));
         }
@@ -68,67 +64,5 @@ impl App {
             self.diff_state = None;
             self.clear_diff_cell_selection();
         }
-    }
-}
-
-fn make_hasher(algorithm: HashAlgorithm) -> Box<dyn digest::DynDigest> {
-    use digest::Digest;
-    match algorithm {
-        HashAlgorithm::Md5 => Box::new(md5::Md5::new()),
-        HashAlgorithm::Sha1 => Box::new(sha1::Sha1::new()),
-        HashAlgorithm::Sha256 => Box::new(sha2::Sha256::new()),
-        HashAlgorithm::Sha512 => Box::new(sha2::Sha512::new()),
-        HashAlgorithm::Crc32 => Box::new(Crc32Hasher::new()),
-    }
-}
-
-struct Crc32Hasher {
-    hasher: crc32fast::Hasher,
-}
-
-impl Crc32Hasher {
-    fn new() -> Self {
-        Self {
-            hasher: crc32fast::Hasher::new(),
-        }
-    }
-}
-
-impl digest::DynDigest for Crc32Hasher {
-    fn update(&mut self, data: &[u8]) {
-        self.hasher.update(data);
-    }
-
-    fn finalize_into(self, out: &mut [u8]) -> Result<(), digest::InvalidBufferSize> {
-        let checksum = self.hasher.finalize();
-        if out.len() < 4 {
-            return Err(digest::InvalidBufferSize);
-        }
-        out[..4].copy_from_slice(&checksum.to_be_bytes());
-        Ok(())
-    }
-
-    fn finalize_into_reset(&mut self, out: &mut [u8]) -> Result<(), digest::InvalidBufferSize> {
-        let checksum = self.hasher.clone().finalize();
-        self.hasher = crc32fast::Hasher::new();
-        if out.len() < 4 {
-            return Err(digest::InvalidBufferSize);
-        }
-        out[..4].copy_from_slice(&checksum.to_be_bytes());
-        Ok(())
-    }
-
-    fn reset(&mut self) {
-        self.hasher = crc32fast::Hasher::new();
-    }
-
-    fn output_size(&self) -> usize {
-        4
-    }
-
-    fn box_clone(&self) -> Box<dyn digest::DynDigest> {
-        Box::new(Crc32Hasher {
-            hasher: self.hasher.clone(),
-        })
     }
 }

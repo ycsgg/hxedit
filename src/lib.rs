@@ -9,6 +9,7 @@ pub mod core;
 pub mod diff;
 pub mod disasm;
 pub mod error;
+pub mod exec;
 pub mod executable;
 pub mod export;
 pub mod format;

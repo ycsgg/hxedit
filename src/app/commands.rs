@@ -1,8 +1,6 @@
 #[cfg(feature = "symbols")]
 use crate::app::SymbolState;
-use crate::app::{
-    App, BulkReplacement, EditOp, SearchDirection, SearchKind, SearchState, SidePanelKind,
-};
+use crate::app::{App, SearchDirection, SearchKind, SearchState, SidePanelKind};
 use crate::commands::parser::parse_command;
 #[cfg(feature = "memory")]
 use crate::commands::types::MemoryCommand;

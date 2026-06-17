@@ -18,6 +18,18 @@
 - 这里的任何“看似简单的优化”都可能破坏 `CellId` 稳定性
 - 若改动了 piece 合并、split、restore，必须补回归测试
 
+## `src/exec/*`
+
+- 这里是无 UI 执行层，供 TUI、后续脚本 CLI / MCP 复用
+- 可以持有执行语义状态（document / cursor / selection / `EditOp` / undo replay helper），不要引入 TUI mode、status bar、side panel、render cache、clipboard 或 terminal event loop
+- 所有写操作都必须继续显式区分：
+  - replacement：overwrite / fill / zero / xor! / 等长 replace / inspector 固定宽字段写
+  - real insert：insert paste / 变长 replace 的插入部分
+  - tombstone delete：普通 delete / visual delete
+  - real delete：insert-mode backspace / 变长 replace 的删除部分
+- hash / binary export / logical read 必须继续走 `Document::hash_logical_bytes` 或 `Document::for_each_logical_chunk`；不要在 exec 层为了 JSON/脚本方便而整文件物化
+- `EditOp`、`BulkReplacement`、`ReplacementChange` 属于执行层；其他模块需要生成或回放编辑时直接依赖 `crate::exec`，不要再从 `app` 间接拿
+
 ## `src/app/editing_state.rs` / `src/app/mode_state.rs` / `src/app/inspector_state.rs` / `src/app/undo.rs`
 
 - 编辑行为和撤销语义在这里最容易出错

@@ -1,7 +1,8 @@
-use crate::app::{App, DisasmEdit, EditOp, ReplacementChange};
+use crate::app::{App, DisasmEdit};
 use crate::disasm::assembler::{resolve_assembler_backend, resolve_patch_symbols};
 use crate::disasm::{plan_assembly_patch, DisasmRow, DisasmRowKind};
 use crate::error::{HxError, HxResult};
+use crate::exec::EditOp;
 use crate::mode::Mode;
 
 use super::text_cursor::{
@@ -177,26 +178,15 @@ impl App {
             ));
         }
 
-        let mut changes = Vec::new();
-        for (id, &byte) in ids.into_iter().zip(bytes.iter()) {
+        for id in ids {
             if self.document.is_tombstone(id) {
                 return Err(HxError::AssemblyError(
                     "cannot patch over deleted display slots".to_owned(),
                 ));
             }
-            let before = self.document.replacement_state(id)?;
-            self.document.replace_display_byte_by_id(id, byte)?;
-            let after = self.document.replacement_state(id)?;
-            if after != before {
-                changes.push(ReplacementChange { id, before, after });
-            }
         }
 
-        if changes.is_empty() {
-            Ok(Vec::new())
-        } else {
-            Ok(vec![EditOp::ReplaceBytes { changes }])
-        }
+        crate::exec::replace_bytes_at(&mut self.document, offset, bytes)
     }
 
     fn set_disassembly_patch_status(

@@ -1,6 +1,6 @@
-use crate::app::{EditOp, ReplacementChange};
 use crate::core::document::Document;
 use crate::error::HxResult;
+use crate::exec::EditOp;
 use crate::format::types::FieldType;
 
 /// Encode a user-input text value back into raw bytes for writing to the document.
@@ -138,30 +138,7 @@ pub(crate) fn write_field(
     abs_offset: u64,
     bytes: &[u8],
 ) -> HxResult<Vec<EditOp>> {
-    let mut changes = Vec::new();
-    for (i, &byte) in bytes.iter().enumerate() {
-        let offset = abs_offset + i as u64;
-        if offset < doc.len() {
-            let Some(id) = doc.cell_id_at(offset) else {
-                continue;
-            };
-            let previous = doc.replacement_state(id)?;
-            doc.replace_display_byte(offset, byte)?;
-            let after = doc.replacement_state(id)?;
-            if after != previous {
-                changes.push(ReplacementChange {
-                    id,
-                    before: previous,
-                    after,
-                });
-            }
-        }
-    }
-    if changes.is_empty() {
-        Ok(Vec::new())
-    } else {
-        Ok(vec![EditOp::ReplaceBytes { changes }])
-    }
+    crate::exec::replace_bytes_at(doc, abs_offset, bytes)
 }
 
 fn parse_u64(input: &str) -> Result<u64, String> {

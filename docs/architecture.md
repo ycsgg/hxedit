@@ -69,6 +69,7 @@
 |---|---|---|
 | `src/core/document/*` | 文档读写、编辑、搜索、保存入口 | display / visible / logical 语义是否仍一致 |
 | `src/core/piece_table.rs` | 真实插入 / 真实删除、`CellId` 稳定性 | split / merge / restore 是否破坏 id 稳定性 |
+| `src/exec/*` | 无 UI 的执行层：range 解析、hash/export、可逆 `EditOp`、replacement / insert / tombstone / real-delete / replace 组合操作 | 是否继续复用 `Document` walker/overlay；是否把 TUI mode/status/clipboard 状态漏进执行层 |
 | `src/app/editing_state.rs` | nibble 编辑、插入、删除 | mode 切换、EOF 行为、undo 记录 |
 | `src/app/mode_state.rs` | mode 切换、selection range | Visual / Inspector / Command 返回路径 |
 | `src/app/clipboard_ops.rs` | copy / paste / preview | overwrite vs insert、display span vs logical bytes |
@@ -137,6 +138,7 @@
 - `src/app/render.rs` 只保留共享 render 类型、小 helper 与模块声明；主视图、diff 投影、side panel 和 render 测试分别放在 `src/app/render/*`
 - `src/app/events.rs` 只保留 `handle_action` 入口；分发、编辑入口、inspector edit 与 action 收尾分别放在 `src/app/events/*`
 - `src/app/commands.rs` 只保留 `submit_command` 与 command match 分发；文件导航、transform、inspector、search/disasm、hash/diff、symbols、memory 分别放在 `src/app/commands/*` 或所属状态模块
+- `src/exec/*` 承载可脚本化的无 UI 执行语义；App 命令层应只负责 active selection、mode/cursor clamp、status、clipboard、inspector/disasm invalidation 等 UI 接回逻辑
 - 后续继续拆分时，先做 move-only / helper 提取并跑相关测试，不要把结构移动和 real delete / tombstone / replacement 语义调整混在同一阶段
 
 ### 2.8 已落地的 disassembly 模式仍必须保持“view 层”定位

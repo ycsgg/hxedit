@@ -5,10 +5,11 @@ use std::thread;
 use crate::app::symbol_state::{
     SymbolNameKind, SymbolPanelEntry, SymbolPanelEntrySource, SymbolPanelSource,
 };
-use crate::app::{App, EditOp, SidePanelKind, SymbolState};
+use crate::app::{App, SidePanelKind, SymbolState};
 use crate::core::document::Document;
 use crate::disasm::{DisasmFunctionBoundary, DisasmFunctionScope, DisasmRow, DisasmRowKind};
 use crate::error::{HxError, HxResult};
+use crate::exec::EditOp;
 use crate::executable::SymbolType;
 
 const SAGITTA_INPUT_LIMIT: u64 = 128 * 1024 * 1024;

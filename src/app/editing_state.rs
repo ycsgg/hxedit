@@ -1,5 +1,6 @@
-use crate::app::{App, EditOp, ReplacementChange};
+use crate::app::App;
 use crate::error::HxResult;
+use crate::exec::{EditOp, ReplacementChange};
 use crate::mode::{Mode, NibblePhase, PendingInsert};
 
 impl App {
@@ -19,16 +20,11 @@ impl App {
 
     /// Tombstone-delete the single byte at cursor.
     pub(crate) fn delete_current(&mut self) -> HxResult<()> {
-        let Some(id) = self.document.delete_byte(self.cursor)? else {
+        let result = crate::exec::tombstone_delete_at(&mut self.document, self.cursor)?;
+        if result.deleted == 0 {
             return Ok(());
-        };
-        self.push_undo_step(
-            vec![EditOp::TombstoneDelete { ids: vec![id] }],
-            self.cursor,
-            self.mode,
-            self.cursor,
-            self.mode,
-        );
+        }
+        self.push_undo_step(result.ops, self.cursor, self.mode, self.cursor, self.mode);
         self.invalidate_disassembly_cache();
         self.refresh_inspector();
         self.set_info_status(format!("deleted 0x{:x}", self.cursor));
@@ -42,26 +38,12 @@ impl App {
         };
 
         let span = end - start + 1;
-        let candidates = self.document.cell_ids_range(start, span);
-        let mut ids = Vec::with_capacity(candidates.len());
-        for id in candidates {
-            if self.document.is_tombstone(id) {
-                continue;
-            }
-            self.document.mark_tombstones(&[id])?;
-            ids.push(id);
-        }
+        let result = crate::exec::tombstone_delete_range(&mut self.document, start, end)?;
 
         self.cursor = self.clamp_offset(start);
         self.selection_anchor = None;
         self.mode = Mode::Normal;
-        self.push_undo_step(
-            vec![EditOp::TombstoneDelete { ids }],
-            start,
-            Mode::Visual,
-            self.cursor,
-            self.mode,
-        );
+        self.push_undo_step(result.ops, start, Mode::Visual, self.cursor, self.mode);
         self.invalidate_disassembly_cache();
         self.refresh_inspector();
         self.set_info_status(format!("deleted selection {} bytes", span));
@@ -155,7 +137,7 @@ impl App {
             None => {
                 let offset = self.cursor;
                 self.redo_stack.clear();
-                self.document.insert_byte(offset, value << 4)?;
+                crate::exec::insert_bytes(&mut self.document, offset, &[value << 4])?;
                 self.mark_document_changed();
                 #[cfg(feature = "sagitta-analysis")]
                 self.mark_sagitta_invalid_layout();
@@ -190,7 +172,7 @@ impl App {
             Mode::InsertHex { pending } => {
                 if let Some(pending) = pending {
                     self.redo_stack.clear();
-                    self.document.delete_range_real(pending.offset, 1)?;
+                    crate::exec::real_delete_range(&mut self.document, pending.offset, 1)?;
                     self.mark_document_changed();
                     #[cfg(feature = "sagitta-analysis")]
                     self.mark_sagitta_invalid_layout();
@@ -207,12 +189,9 @@ impl App {
                 }
 
                 let delete_offset = self.cursor - 1;
-                let removed = self.document.delete_range_real(delete_offset, 1)?;
+                let result = crate::exec::real_delete_range(&mut self.document, delete_offset, 1)?;
                 self.push_undo_step(
-                    vec![EditOp::RealDelete {
-                        offset: delete_offset,
-                        cells: removed,
-                    }],
+                    result.ops,
                     self.cursor,
                     Mode::InsertHex { pending: None },
                     delete_offset,
@@ -270,7 +249,7 @@ impl App {
             _ => return Ok(false),
         };
 
-        self.document.delete_range_real(pending.offset, 1)?;
+        crate::exec::real_delete_range(&mut self.document, pending.offset, 1)?;
         self.mark_document_changed();
         #[cfg(feature = "sagitta-analysis")]
         self.mark_sagitta_invalid_layout();

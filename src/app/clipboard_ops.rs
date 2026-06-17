@@ -1,4 +1,4 @@
-use crate::app::{App, BulkReplacement, EditOp, PasteSource, PasteState};
+use crate::app::{App, PasteSource, PasteState};
 use crate::clipboard;
 use crate::copy::{format_selection, CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
@@ -243,60 +243,19 @@ impl App {
         }
 
         let cursor_before = self.cursor;
-        let doc_len = self.document.len();
-        let applied = bytes
-            .len()
-            .min(doc_len.saturating_sub(cursor_before) as usize);
-        let use_bulk_undo = self
-            .document
-            .replacement_range_is_pristine(cursor_before, applied as u64);
-
-        let ops = if use_bulk_undo {
-            let (_written, runs) = self
-                .document
-                .overwrite_run_bytes_overlay_changed(cursor_before, &bytes[..applied])?;
-            runs.into_iter()
-                .map(|(offset, bytes)| EditOp::ReplaceBulk {
-                    offset,
-                    len: bytes.len() as u64,
-                    before: BulkReplacement::Clear,
-                    after: BulkReplacement::Bytes(bytes),
-                })
-                .collect()
-        } else {
-            let len = applied as u64;
-            if self
-                .document
-                .display_range_has_tombstone(cursor_before, len)
-            {
-                return Err(HxError::OffsetOutOfRange);
-            }
-            let before = self
-                .document
-                .replacement_patch_for_display_range(cursor_before, len)?;
-            self.document
-                .overwrite_run_bytes_overlay_changed(cursor_before, &bytes[..applied])?;
-            let after = self
-                .document
-                .replacement_patch_for_display_range(cursor_before, len)?;
-            if before == after {
-                Vec::new()
-            } else {
-                vec![EditOp::ReplacePatch {
-                    offset: cursor_before,
-                    len,
-                    before,
-                    after,
-                }]
-            }
-        };
-
-        let written = applied;
+        let result = crate::exec::overwrite_bytes(&mut self.document, cursor_before, bytes)?;
+        let written = result.written as usize;
         let cursor_after =
             self.clamp_cursor_for_mode(cursor_before + written.saturating_sub(1) as u64, self.mode);
 
-        if !ops.is_empty() {
-            self.push_undo_step(ops, cursor_before, self.mode, cursor_after, self.mode);
+        if !result.ops.is_empty() {
+            self.push_undo_step(
+                result.ops,
+                cursor_before,
+                self.mode,
+                cursor_after,
+                self.mode,
+            );
         }
         self.cursor = cursor_after;
         self.invalidate_disassembly_cache();
@@ -314,16 +273,13 @@ impl App {
         }
 
         let cursor_before = self.cursor;
-        let inserted = self.document.insert_bytes(cursor_before, bytes)?;
+        let result = crate::exec::insert_bytes(&mut self.document, cursor_before, bytes)?;
         let cursor_after = self.clamp_cursor_for_mode(
             cursor_before + bytes.len().saturating_sub(1) as u64,
             self.mode,
         );
         self.push_undo_step(
-            vec![EditOp::Insert {
-                offset: cursor_before,
-                cells: inserted,
-            }],
+            result.ops,
             cursor_before,
             self.mode,
             cursor_after,
@@ -332,7 +288,7 @@ impl App {
         self.cursor = cursor_after;
         self.invalidate_disassembly_cache();
         self.refresh_inspector();
-        Ok(bytes.len())
+        Ok(result.inserted)
     }
 }
 
