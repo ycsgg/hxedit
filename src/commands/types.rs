@@ -119,6 +119,9 @@ pub enum Command {
     Redo {
         steps: usize,
     },
+    Source {
+        path: PathBuf,
+    },
     Copy {
         format: CopyFormat,
         display: CopyDisplay,

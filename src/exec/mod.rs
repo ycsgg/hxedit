@@ -1,3 +1,4 @@
+mod command;
 mod delete;
 mod edit;
 mod export;
@@ -8,6 +9,10 @@ mod replace;
 mod session;
 mod transform;
 
+pub(crate) use command::{
+    execute_batch, DeleteKind, ExecBatchOptions, ExecBatchReport, ExecCommand, ExecErrorPolicy,
+    ExecOffset, ExecScope, ExecSearchDirection, ExecState, ExecStep, ExecUndoPolicy, SearchSelect,
+};
 pub(crate) use delete::{real_delete_range, tombstone_delete_at, tombstone_delete_range};
 pub(crate) use edit::{
     apply_edit_op, edit_op_has_effect, undo_edit_op, BulkReplacement, EditOp, ReplacementChange,

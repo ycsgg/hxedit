@@ -6,8 +6,8 @@ use super::{
     is_alias, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES, FILL_ALIASES,
     FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES, LEGACY_HEX_SEARCH_ALIASES,
     PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES, QUIT_FORCE_ALIASES, REDO_ALIASES,
-    REPLACE_ALIASES, SEARCH_ALIASES, UNDO_ALIASES, WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES,
-    ZERO_ALIASES,
+    REPLACE_ALIASES, SEARCH_ALIASES, SOURCE_ALIASES, UNDO_ALIASES, WRITE_ALIASES,
+    WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
 };
 #[cfg(feature = "disasm")]
 use super::{DISASSEMBLE_ALIASES, DISASSEMBLE_FORCE_ALIASES, INSTRUCTION_SEARCH_ALIASES};
@@ -60,6 +60,15 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         name if is_alias(name, REDO_ALIASES) => Ok(Command::Redo {
             steps: parse_redo_steps(rest)?,
         }),
+        name if is_alias(name, SOURCE_ALIASES) => {
+            let path = rest
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .ok_or(HxError::MissingArgument("macro path"))?;
+            Ok(Command::Source {
+                path: PathBuf::from(path),
+            })
+        }
         name if is_alias(name, INSPECTOR_ALIASES) => match rest.map(str::trim) {
             None | Some("") => Ok(Command::Inspector),
             Some("more") => Ok(Command::InspectorMore),
@@ -888,6 +897,20 @@ mod tests {
     fn redo_command_accepts_optional_steps() {
         assert_eq!(parse_command("redo").unwrap(), Command::Redo { steps: 1 });
         assert_eq!(parse_command("redo 3").unwrap(), Command::Redo { steps: 3 });
+    }
+
+    #[test]
+    fn source_command_requires_path() {
+        assert_eq!(
+            parse_command("source patch.hxmacro").unwrap(),
+            Command::Source {
+                path: PathBuf::from("patch.hxmacro")
+            }
+        );
+        assert!(matches!(
+            parse_command("source"),
+            Err(HxError::MissingArgument("macro path"))
+        ));
     }
 
     #[test]

@@ -22,7 +22,7 @@
 - 搜索：统一 `:s [mode]<delim><pattern><delim>` / `:s! ...` 入口覆盖 UTF-8 bytes、hex bytes、单字节与整数 typed-value，支持前后向、自动 wrap-around、同屏命中高亮；`:S` 过渡期仅作为 deprecated hex-search 别名保留。底层 `search_forward` / `search_backward` 用 SIMD `memchr::memmem` 加速：clean 文档全程 memmem；dirty 文档（tombstone / replacement）仍逐 chunk 判脏净，**clean chunk 也走 memmem**（`scan_clean_chunk_forward` / `_backward`，首尾 `P-1` 字节用共享 `KmpMatcher` 衔接跨 chunk/piece 边界），只有含编辑的 chunk 才逐字节 KMP。实测 256MB worst-case：clean ~53ms、dirty(单 tombstone) ~38ms（旧版全 KMP ~330ms，约 8× 提升）。`default` / `full` 额外支持进程内存搜索、指令文本与 symbol 搜索；`memory` feature 下 `:ms` / `:ms!` 跨 region 搜索用同类 mode 前缀语法与 `memchr::memmem`，命中后 `gn` / `gN` 重放（独立于文件 `n` / `p`）
 - 主 hex 视图顶部固定显示 byte 列头（默认 `00 01 02 ... 0F`），列头不随 viewport 滚动；鼠标命中与 `view_rows` 只计算列头下方的数据行
 - 选区：Visual 选区，或 inspector 当前字段范围作为 active selection
-- 命令：`:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`；`default` / `full` 内置 `memory` feature，支持 `:mem freeze` / `:mem thaw` 暂停与恢复目标进程，`:mem commit` / `:mem commit-all` 写回 replacement（后者按 VA 升序遍历所有 dirty region），`:w` 等价 `:mem commit` 且 `:w <path>` 被拒绝（改用 `:export`）；`MemorySession` 按 region 持久化未提交 replacement / undo / redo，切换 region 不丢失编辑，`:q` 在任意 region dirty 时拒绝并汇总；`sagitta-analysis` feature 下额外支持 `:ana` / `:ana status` / `:ana off`，对当前 logical bytes 后台运行 crates.io `sagitta-rs` 并用 ready snapshot 覆盖 symbol panel 数据源
+- 命令：`:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:source`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`；`default` / `full` 内置 `memory` feature，支持 `:mem freeze` / `:mem thaw` 暂停与恢复目标进程，`:mem commit` / `:mem commit-all` 写回 replacement（后者按 VA 升序遍历所有 dirty region），`:w` 等价 `:mem commit` 且 `:w <path>` 被拒绝（改用 `:export`）；`MemorySession` 按 region 持久化未提交 replacement / undo / redo，切换 region 不丢失编辑，`:q` 在任意 region dirty 时拒绝并汇总；`sagitta-analysis` feature 下额外支持 `:ana` / `:ana status` / `:ana off`，对当前 logical bytes 后台运行 crates.io `sagitta-rs` 并用 ready snapshot 覆盖 symbol panel 数据源
 - Inspector / side panel：
   - Inspector：ELF、PE/COFF、Mach-O、PNG、ZIP（central directory / EOCD / ZIP64 / data descriptor 感知）、SQLite（database header / b-tree page header / cell pointer array，不深入 record payload）、PCAP / PCAPNG（capture/header/block/packet data range，不深入链路层 payload）、GZIP、GIF、BMP、WAV、TAR、JPEG
   - 格式自定义可读编辑字段：classic PCAP UTC packet timestamp（同步写回 `ts_sec` + `ts_usec` / `ts_nsec`）、GZIP / PE Unix timestamp、ZIP DOS `modified_at`、TAR octal `mode` / `size` / `mtime`、GIF frame delay
@@ -139,6 +139,7 @@
 - `src/app/events.rs` 只保留 `handle_action` 入口；分发、编辑入口、inspector edit 与 action 收尾分别放在 `src/app/events/*`
 - `src/app/commands.rs` 只保留 `submit_command` 与 command match 分发；文件导航、transform、inspector、search/disasm、hash/diff、symbols、memory 分别放在 `src/app/commands/*` 或所属状态模块
 - `src/exec/*` 承载可脚本化的无 UI 执行语义；App 命令层应只负责 active selection、mode/cursor clamp、status、clipboard、inspector/disasm invalidation 等 UI 接回逻辑
+- 宏 / 脚本执行层设计见 `docs/macro-design.md`：宏只操作 `ExecCommand` / `ExecSelection`，TUI Visual / inspector 选区只在启动时转换，后续不把 mode、anchor、side panel 状态带进执行层
 - 后续继续拆分时，先做 move-only / helper 提取并跑相关测试，不要把结构移动和 real delete / tombstone / replacement 语义调整混在同一阶段
 
 ### 2.8 已落地的 disassembly 模式仍必须保持“view 层”定位

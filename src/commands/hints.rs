@@ -4,8 +4,8 @@ use super::{
     is_alias, known_command_aliases, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES,
     FILL_ALIASES, FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES,
     LEGACY_HEX_SEARCH_ALIASES, PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES,
-    QUIT_FORCE_ALIASES, REDO_ALIASES, REPLACE_ALIASES, SEARCH_ALIASES, UNDO_ALIASES, WRITE_ALIASES,
-    WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
+    QUIT_FORCE_ALIASES, REDO_ALIASES, REPLACE_ALIASES, SEARCH_ALIASES, SOURCE_ALIASES,
+    UNDO_ALIASES, WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
 };
 #[cfg(feature = "disasm")]
 use super::{DISASSEMBLE_ALIASES, DISASSEMBLE_FORCE_ALIASES, INSTRUCTION_SEARCH_ALIASES};
@@ -143,6 +143,10 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "redo [steps]".to_owned(),
             details: "redo one undone change by default; pass a positive number to redo more"
                 .to_owned(),
+        },
+        name if is_alias(name, SOURCE_ALIASES) => CommandHint {
+            syntax: "source <path>".to_owned(),
+            details: "run a TOML macro file through the execution layer; supports explicit selection, grouped undo, and rollback-on-error macros".to_owned(),
         },
         name if is_alias(name, COPY_ALIASES) => copy_hint(name, rest),
         name if is_alias(name, EXPORT_ALIASES) => CommandHint {

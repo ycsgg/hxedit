@@ -141,9 +141,73 @@ cache_pages = 128                  # page-cache capacity
 | `:fill <pattern> <len>` / `:zero <len>` | Overwrite transforms |
 | `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | Replace using the same modes as `:s`. `:re` is equal-length and asks for `--force` when more than 65535 matches are found; `:re!` allows length changes. Legacy `hex/ascii <needle> -> <replacement>` remains accepted |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | Hash |
+| `:source <path>` | Run a TOML macro file. The macro uses explicit execution-layer steps, can inherit the current Visual / inspector selection, and defaults to grouped undo |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | Show a synchronized page comparing current logical bytes with another file. Visible pages realign inserted/deleted bytes within `N`; equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__`. `next` / `prev` scan in large progress-reporting steps, block other input while scanning, and Esc cancels |
 | `:insp` / `:insp more` | Open inspector / reveal more paginated entries |
 | `:format ...` | Force format |
+
+## Macro Files
+
+`:source <path>` executes a TOML macro file through the same execution layer as
+manual edits. The first implementation is intentionally declarative: it does
+not record raw keys and does not run `:diff`, `:insp`, `:sym`, or other UI-only
+commands.
+
+```toml
+version = 1
+selection = "inherit" # inherit | clear | require
+undo = "group"        # group | per-step
+on_error = "stop"     # stop | rollback
+
+[[steps]]
+cmd = "select"
+space = "display"
+start = "0x100"
+len = 16
+
+[[steps]]
+cmd = "xor"
+scope = "selection"
+key = "0xaa"
+in_place = true
+```
+
+Supported step names are `goto`, `select`, `clear-selection`, `read`, `hash`,
+`search`, `overwrite`, `insert`, `delete`, `fill`, `xor`, `replace`,
+`export-binary`, and `save`. Ranges are explicit: `scope = "selection"`,
+`scope = "all"`, or an inline range like
+`scope = { space = "display", start = "0x100", len = 16 }`. Bytes fields use
+hex streams by default, such as `"de ad be ef"`; `search` and `replace` also
+support `mode = "text"` and `mode = "byte"`. The `read` step intentionally
+rejects `scope = "all"`; use an explicit range to avoid materializing a large
+file.
+
+Result-producing steps can optionally bind an `id`. `read` stores the selected
+logical bytes, `hash` stores the digest bytes plus compact lowercase hex text,
+and `search` stores the matched pattern bytes when a match is found. Later byte
+fields can reference those values:
+
+```toml
+[[steps]]
+cmd = "hash"
+id = "payload_sha256"
+algorithm = "sha256"
+scope = { space = "display", start = "0x100", len = 0x40 }
+
+[[steps]]
+cmd = "insert"
+offset = "0x200"
+bytes = { from = "payload_sha256", format = "bytes" }
+
+[[steps]]
+cmd = "insert"
+offset = "0x220"
+bytes = { from = "payload_sha256", format = "hex-text" }
+```
+
+The `format` field defaults to `bytes`; `hex-text` writes ASCII hex. Variable
+references are accepted in byte-valued fields such as `bytes`, `pattern`,
+`needle`, and `replacement`.
 
 Memory-related commands in `default`, `full`, or other `memory` builds:
 

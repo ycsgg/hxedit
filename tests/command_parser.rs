@@ -41,6 +41,12 @@ fn parses_basic_commands() {
     assert_eq!(parse_command("redo").unwrap(), Command::Redo { steps: 1 });
     assert_eq!(parse_command("redo 2").unwrap(), Command::Redo { steps: 2 });
     assert_eq!(
+        parse_command("source patch.hxmacro").unwrap(),
+        Command::Source {
+            path: PathBuf::from("patch.hxmacro")
+        }
+    );
+    assert_eq!(
         parse_command("p").unwrap(),
         Command::Paste {
             raw: false,
@@ -304,6 +310,7 @@ fn rejects_invalid_commands() {
     assert!(parse_command("undo 0").is_err());
     assert!(parse_command("redo nope").is_err());
     assert!(parse_command("redo 0").is_err());
+    assert!(parse_command("source").is_err());
     assert!(parse_command("paste nope").is_err());
     assert!(parse_command("export").is_err());
     assert!(parse_command("copy nope").is_err());

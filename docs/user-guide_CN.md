@@ -135,9 +135,68 @@ cache_pages = 128                  # 页缓存容量
 | `:fill <pattern> <len>` / `:zero <len>` | overwrite 批量写入 |
 | `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | 使用与 `:s` 相同的模式替换。`:re` 是等长 replacement，命中超过 65535 处时需要加 `--force` 确认；`:re!` 允许长度变化。旧的 `hex/ascii <needle> -> <replacement>` 仍兼容 |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | 哈希 |
+| `:source <path>` | 执行 TOML 宏文件。宏使用显式执行层 step，可继承当前 Visual / inspector 选区，默认合并成一个 undo |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | 同步滚动显示 current logical bytes 与另一个文件；可见页会在 `N` 范围内重对齐插入/删除字节，右侧相同字节为灰色，不同字节左右亮黄，缺失字节以红色 `__` 占位；`next` / `prev` 会大块分步扫描并汇报进度，扫描中阻止其它输入，Esc 取消 |
 | `:insp` / `:insp more` | 打开 inspector / 加载更多分页项 |
 | `:format ...` | 强制格式 |
+
+## 宏文件
+
+`:source <path>` 会通过与手动编辑相同的执行层执行 TOML 宏文件。首版是声明式宏：
+不录制原始按键，也不运行 `:diff`、`:insp`、`:sym` 等 UI-only 命令。
+
+```toml
+version = 1
+selection = "inherit" # inherit | clear | require
+undo = "group"        # group | per-step
+on_error = "stop"     # stop | rollback
+
+[[steps]]
+cmd = "select"
+space = "display"
+start = "0x100"
+len = 16
+
+[[steps]]
+cmd = "xor"
+scope = "selection"
+key = "0xaa"
+in_place = true
+```
+
+当前支持的 step 名包括 `goto`、`select`、`clear-selection`、`read`、`hash`、
+`search`、`overwrite`、`insert`、`delete`、`fill`、`xor`、`replace`、
+`export-binary` 和 `save`。范围必须显式写出：`scope = "selection"`、
+`scope = "all"`，或内联 range，例如
+`scope = { space = "display", start = "0x100", len = 16 }`。字节字段默认使用
+hex stream，如 `"de ad be ef"`；`search` 和 `replace` 额外支持 `mode = "text"`
+与 `mode = "byte"`。`read` step 会拒绝 `scope = "all"`；请使用显式 range，
+避免把大文件一次性物化。
+
+会产生结果的 step 可以选择绑定 `id`。`read` 绑定选中范围的 logical bytes，
+`hash` 绑定 digest 原始 bytes 和紧凑小写 hex 文本，`search` 在命中时绑定匹配
+pattern bytes。后续字节字段可以引用这些值：
+
+```toml
+[[steps]]
+cmd = "hash"
+id = "payload_sha256"
+algorithm = "sha256"
+scope = { space = "display", start = "0x100", len = 0x40 }
+
+[[steps]]
+cmd = "insert"
+offset = "0x200"
+bytes = { from = "payload_sha256", format = "bytes" }
+
+[[steps]]
+cmd = "insert"
+offset = "0x220"
+bytes = { from = "payload_sha256", format = "hex-text" }
+```
+
+`format` 默认是 `bytes`；`hex-text` 会写入 ASCII hex。变量引用可用于
+`bytes`、`pattern`、`needle`、`replacement` 等字节字段。
 
 `default`、`full` 或其他启用 `memory` feature 的构建下的内存编辑命令：
 

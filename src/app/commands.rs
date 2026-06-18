@@ -40,6 +40,7 @@ impl App {
             Command::Goto { target } => self.execute_goto_command(target),
             Command::Undo { steps } => self.undo(steps, false),
             Command::Redo { steps } => self.redo(steps, false),
+            Command::Source { path } => self.execute_source_command(path),
             Command::Paste {
                 raw,
                 preview,
@@ -193,6 +194,7 @@ impl App {
 
 #[cfg(feature = "sagitta-analysis")]
 mod analysis;
+mod automation;
 mod file_nav;
 mod hash_diff;
 mod inspector;

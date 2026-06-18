@@ -67,6 +67,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 | `:c [fmt]`                        | 复制当前选区                |
 | `:export <path>`                  | 导出当前编辑后的字节            |
 | `:hash sha256`                    | 对选区或整个文件求哈希           |
+| `:source <path>`                  | 执行 TOML 宏文件             |
 | `:diff <path>`                    | 对比另一个文件               |
 | `:insp`                           | 打开格式 inspector        |
 
@@ -80,6 +81,8 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 - 搜索文本、hex bytes、单字节值或 typed integer
 
 - 对选区执行 copy、export、hash、fill、zero、XOR 或 replace
+
+- 通过与手动编辑相同的执行层运行 TOML 宏文件
 
 - 直接查看 ELF、PE/COFF、Mach-O、PNG、ZIP、SQLite、PCAP、GZIP、GIF、BMP、WAV、
   TAR 和 JPEG 的结构
@@ -139,4 +142,3 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 artifact 时必须附带
 [docs/user-guide\_CN.md](docs/user-guide_CN.md#redistribution-notes) 中说明的第三方与
 Keystone notice 文件。
-

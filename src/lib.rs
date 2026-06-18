@@ -1,5 +1,6 @@
 pub mod action;
 pub mod app;
+pub(crate) mod automation;
 pub mod cli;
 pub mod clipboard;
 pub mod commands;

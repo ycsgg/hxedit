@@ -70,6 +70,7 @@ return to normal mode.
 | `:c [fmt]` | Copy the active selection |
 | `:export <path>` | Export the edited bytes |
 | `:hash sha256` | Hash the selection or whole file |
+| `:source <path>` | Run a TOML macro file |
 | `:diff <path>` | Compare against another file |
 | `:insp` | Open the format inspector |
 
@@ -81,6 +82,7 @@ and Sagitta analysis, see the [user guide](docs/user-guide.md).
 - Open and edit large files with overwrite, insert, and delete
 - Search text, hex bytes, single-byte values, or typed integers
 - Copy, export, hash, fill, zero, XOR, or replace selected bytes
+- Run TOML macro files through the same execution layer as manual edits
 - Inspect ELF, PE/COFF, Mach-O, PNG, ZIP, SQLite, PCAP, GZIP, GIF, BMP, WAV,
   TAR, and JPEG structures inline
 - Compare against another file in a synchronized read-only diff view
