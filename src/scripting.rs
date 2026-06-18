@@ -79,7 +79,7 @@ pub(crate) fn run_script_source(
     source: &str,
     document: Document,
     state: ExecState,
-) -> Result<ScriptRunResult, ScriptRunFailure> {
+) -> Result<ScriptRunResult, Box<ScriptRunFailure>> {
     let budget = ScriptBudget::default();
     let script_dir = script_dir(path);
     let host = Rc::new(RefCell::new(ScriptHost::new(
@@ -93,27 +93,29 @@ pub(crate) fn run_script_source(
 
     drop(engine);
     let host = Rc::try_unwrap(host)
-        .map_err(|_| ScriptRunFailure {
-            document: Document::from_memory_bytes(
-                "<script-host-borrowed>".into(),
-                Vec::new(),
-                &crate::config::Config::default(),
-            ),
-            state: ExecState::new(0, None),
-            report: ScriptReport::default(),
-            error: HxError::CommandError("script host is still borrowed".to_owned()),
+        .map_err(|_| {
+            Box::new(ScriptRunFailure {
+                document: Document::from_memory_bytes(
+                    "<script-host-borrowed>".into(),
+                    Vec::new(),
+                    &crate::config::Config::default(),
+                ),
+                state: ExecState::new(0, None),
+                report: ScriptReport::default(),
+                error: HxError::CommandError("script host is still borrowed".to_owned()),
+            })
         })?
         .into_inner();
     let result = host.into_result();
 
     match eval_result {
         Ok(()) => Ok(result),
-        Err(err) => Err(ScriptRunFailure {
+        Err(err) => Err(Box::new(ScriptRunFailure {
             document: result.document,
             state: result.state,
             report: result.report,
             error: HxError::CommandError(format!("script {}: {err}", path.display())),
-        }),
+        })),
     }
 }
 

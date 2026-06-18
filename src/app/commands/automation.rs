@@ -83,6 +83,7 @@ impl App {
                 self.apply_script_report(&path, result.state, result.report, None)
             }
             Err(failure) => {
+                let failure = *failure;
                 self.document = failure.document;
                 self.apply_script_report(&path, failure.state, failure.report, Some(failure.error))
             }

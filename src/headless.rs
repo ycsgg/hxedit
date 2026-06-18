@@ -38,22 +38,22 @@ pub fn run(cli: Cli) -> Result<()> {
         execute_macro(path, &mut document, &mut state)?;
     }
 
-    for path in &cli.script {
-        #[cfg(feature = "scripting")]
-        {
+    #[cfg(feature = "scripting")]
+    {
+        for path in &cli.script {
             let result = crate::scripting::run_script(path, document, state)?;
             print_script_report(&format!("script {}", path.display()), &result.report);
             document = result.document;
             state = result.state;
         }
-        #[cfg(not(feature = "scripting"))]
-        {
-            let _ = path;
-            return Err(HxError::CommandError(
-                "--script requires a build with the scripting feature".to_owned(),
-            )
-            .into());
-        }
+    }
+
+    #[cfg(not(feature = "scripting"))]
+    if !cli.script.is_empty() {
+        return Err(HxError::CommandError(
+            "--script requires a build with the scripting feature".to_owned(),
+        )
+        .into());
     }
 
     for command in &cli.command {
@@ -250,6 +250,7 @@ fn execute_script(
                 Ok(())
             }
             Err(failure) => {
+                let failure = *failure;
                 *document = failure.document;
                 *state = failure.state;
                 Err(failure.error)
