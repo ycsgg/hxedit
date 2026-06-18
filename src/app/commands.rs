@@ -41,6 +41,7 @@ impl App {
             Command::Undo { steps } => self.undo(steps, false),
             Command::Redo { steps } => self.redo(steps, false),
             Command::Source { path } => self.execute_source_command(path),
+            Command::Script { path } => self.execute_script_command(path),
             Command::Paste {
                 raw,
                 preview,

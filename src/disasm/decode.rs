@@ -316,6 +316,7 @@ mod tests {
             run: Vec::new(),
             command: Vec::new(),
             select: None,
+            script: Vec::new(),
         };
         Document::open(cli.file.as_ref().unwrap(), &cli.config().unwrap()).unwrap()
     }

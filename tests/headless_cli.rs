@@ -21,6 +21,7 @@ fn base_cli(file: PathBuf) -> Cli {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     }
 }
 
@@ -115,6 +116,87 @@ fn select_applies_to_headless_export_and_xor_in_place() {
         fs::read(&file).unwrap(),
         vec![b'a', !b'b', !b'c', !b'd', b'e', b'f']
     );
+}
+
+#[cfg(feature = "scripting")]
+#[test]
+fn script_flag_executes_rhai_demo_and_saves() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("sample.bin");
+    fs::write(
+        &file,
+        [
+            0xde, 0xad, 0xbe, 0xef, b'.', b'.', b'.', b'.', b'.', b'.', b'.', b'.',
+        ],
+    )
+    .unwrap();
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("simple_hash_patch.hxscript");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_hxedit"))
+        .arg(&file)
+        .arg("--script")
+        .arg(&script)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let digest = crc32fast::hash(&[0xde, 0xad, 0xbe, 0xef]).to_be_bytes();
+    let hex = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let mut expected = vec![0xde, 0xad, 0xbe, 0xef];
+    expected.extend_from_slice(hex.as_bytes());
+    assert_eq!(fs::read(&file).unwrap(), expected);
+}
+
+#[cfg(feature = "scripting")]
+#[test]
+fn command_script_executes_rhai_then_command_save() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("sample.bin");
+    let script = dir.path().join("patch.hxscript");
+    fs::write(&file, b"abcd........").unwrap();
+    fs::write(
+        &script,
+        r#"
+hx_select_display(0, 4);
+let digest = hx_hash_hex("crc32");
+hx_overwrite(4, hx_ascii(digest));
+"#,
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_hxedit"))
+        .arg(&file)
+        .arg("--command")
+        .arg(format!("script {}", script.display()))
+        .arg("--command")
+        .arg("w")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let digest = crc32fast::hash(b"abcd").to_be_bytes();
+    let mut expected = b"abcd".to_vec();
+    expected.extend(
+        digest
+            .iter()
+            .flat_map(|byte| format!("{byte:02x}").into_bytes()),
+    );
+    assert_eq!(fs::read(&file).unwrap(), expected);
 }
 
 #[test]

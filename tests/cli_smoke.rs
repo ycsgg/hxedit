@@ -21,6 +21,7 @@ fn app_constructs_from_cli() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     App::from_cli(cli).unwrap();
 }

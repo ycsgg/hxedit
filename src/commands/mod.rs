@@ -30,6 +30,7 @@ pub(crate) const XOR_ALIASES: &[&str] = &["xor", "xor!"];
 pub(crate) const UNDO_ALIASES: &[&str] = &["u", "undo"];
 pub(crate) const REDO_ALIASES: &[&str] = &["redo"];
 pub(crate) const SOURCE_ALIASES: &[&str] = &["source"];
+pub(crate) const SCRIPT_ALIASES: &[&str] = &["script"];
 pub(crate) const INSPECTOR_ALIASES: &[&str] = &["insp", "inspector"];
 pub(crate) const FORMAT_ALIASES: &[&str] = &["format"];
 pub(crate) const GOTO_ALIASES: &[&str] = &["g", "goto"];
@@ -83,6 +84,7 @@ const COMMON_ALIAS_GROUPS: &[&[&str]] = &[
     UNDO_ALIASES,
     REDO_ALIASES,
     SOURCE_ALIASES,
+    SCRIPT_ALIASES,
     INSPECTOR_ALIASES,
     FORMAT_ALIASES,
     GOTO_ALIASES,

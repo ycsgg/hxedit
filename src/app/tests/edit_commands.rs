@@ -184,6 +184,60 @@ bytes = "cc"
     );
 }
 
+#[cfg(feature = "scripting")]
+#[test]
+fn script_command_runs_rhai_steps_as_grouped_undo() {
+    let dir = tempdir().unwrap();
+    let script_path = dir.path().join("patch.hxscript");
+    fs::write(
+        &script_path,
+        r#"
+hx_select_display(0, 4);
+let digest = hx_hash_hex("crc32");
+hx_overwrite(4, hx_ascii(digest));
+hx_insert(0, hx_ascii("!"));
+hx_fill(1, hx_hex("41"), 1);
+"#,
+    )
+    .unwrap();
+
+    let mut app = app_with_bytes(b"abcd........");
+    app.execute_command(Command::Script {
+        path: script_path.clone(),
+    })
+    .unwrap();
+
+    let digest = crc32fast::hash(b"abcd").to_be_bytes();
+    let mut expected = b"!Abcd".to_vec();
+    expected.extend(
+        digest
+            .iter()
+            .flat_map(|byte| format!("{byte:02x}").into_bytes()),
+    );
+    assert_eq!(app.document.logical_bytes(0, 12).unwrap(), expected);
+    assert_eq!(app.undo_stack.len(), 1);
+    assert!(app.status_message.contains("script"));
+    assert!(app.status_message.contains("ran 5 calls"));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 11).unwrap(),
+        b"abcd........".to_vec()
+    );
+}
+
+#[cfg(not(feature = "scripting"))]
+#[test]
+fn script_command_reports_missing_scripting_feature() {
+    let mut app = app_with_bytes(b"abcd");
+    let err = app
+        .execute_command(Command::Script {
+            path: "patch.hxscript".into(),
+        })
+        .unwrap_err();
+    assert!(err.to_string().contains("scripting feature"));
+}
+
 #[test]
 fn source_macro_inherits_visual_selection() {
     let dir = tempdir().unwrap();

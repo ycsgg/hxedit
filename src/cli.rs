@@ -59,6 +59,10 @@ pub struct Cli {
     /// Initial headless selection, e.g. display:0x100:16 or logical:0:32
     #[arg(long = "select", value_name = "SPACE:START:LEN")]
     pub select: Option<String>,
+
+    /// Run a Rhai script file headlessly and exit
+    #[arg(long = "script", value_name = "PATH")]
+    pub script: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,7 +74,7 @@ pub enum CliTarget {
 
 impl Cli {
     pub fn has_headless_actions(&self) -> bool {
-        !self.run.is_empty() || !self.command.is_empty()
+        !self.run.is_empty() || !self.command.is_empty() || !self.script.is_empty()
     }
 
     pub fn target(&self) -> HxResult<CliTarget> {
@@ -164,6 +168,7 @@ mod tests {
             run: Vec::new(),
             command: Vec::new(),
             select: None,
+            script: Vec::new(),
         }
     }
 

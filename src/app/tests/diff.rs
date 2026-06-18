@@ -107,6 +107,7 @@ fn diff_next_large_scan_steps_across_ticks() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
     app.execute_command(Command::Diff(DiffCommand::Open {
@@ -164,6 +165,7 @@ fn diff_scan_blocks_navigation_until_escape() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
     app.execute_command(Command::Diff(DiffCommand::Open {

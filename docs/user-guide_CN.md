@@ -59,7 +59,7 @@ hxedit some.bin
 | 档位 | 构建命令 | 包含内容 |
 |---|---|---|
 | `core` | `cargo build --release --no-default-features` | Hex editor、inspector、search、diff、hash、copy/paste、export |
-| `default` | `cargo build --release` | `core` + 进程内存编辑、反汇编视图、指令搜索、symbol panel |
+| `default` | `cargo build --release` | `core` + 进程内存编辑、反汇编视图、指令搜索、symbol panel、Rhai 脚本 |
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone 驱动的内联汇编 patch + Sagitta `:ana` 分析 |
 | `sagitta-analysis` 附加项 | `cargo build --release --features sagitta-analysis` | `default` + 基于 crates.io `sagitta-rs` 的 `:ana` 分析 |
 
@@ -83,8 +83,9 @@ hxedit some.bin
 | `--process <NAME>` | 通过进程名附加到运行中的进程进行内存编辑 |
 | `--inspector` | 启动时显示 side panel 的 inspector 页 |
 | `--run <path>` | headless 执行 TOML 宏文件并退出；可重复 |
+| `--script <path>` | headless 执行 Rhai 脚本并退出；在 `scripting` 构建中可用，可重复 |
 | `--command <cmd>` | headless 执行可映射到执行层的命令并退出；可重复 |
-| `--select display:<start>:<len>` / `--select logical:<start>:<len>` | `--run` / `--command` 的初始 headless 选区 |
+| `--select display:<start>:<len>` / `--select logical:<start>:<len>` | `--run` / `--script` / `--command` 的初始 headless 选区 |
 | `--bytes-per-line <n>` | 每行字节数，默认 `16` |
 | `--page-size <n>` | 页缓存读取大小，默认 `16384` |
 | `--cache-pages <n>` | 页缓存容量，默认 `128` |
@@ -92,10 +93,11 @@ hxedit some.bin
 | `--no-color` | 禁用颜色；`NO_COLOR` 同样生效 |
 | `--config <path>` | 从指定的配置文件（TOML）加载设置 |
 
-当出现 `--run` 或 `--command` 时，`hxedit` 会打开文件目标、执行自动化、输出人类可读的
-summary，然后直接退出，不创建 TUI。所有 `--run` 文件先执行，之后执行所有 `--command`
-字符串；两个组内各自保持传入顺序。修改只有在宏或命令列表包含 `save`、`w` 或 `wq` 时
-才会写入磁盘；`:diff`、`:insp`、`:copy`、剪贴板 paste 等 UI-only 命令会被拒绝。
+当出现 `--run`、`--script` 或 `--command` 时，`hxedit` 会打开文件目标、执行自动化、
+输出人类可读的 summary，然后直接退出，不创建 TUI。所有 `--run` 文件先执行，然后执行所有
+`--script` 文件，最后执行所有 `--command` 字符串；三个组内各自保持传入顺序。修改只有在
+宏、脚本或命令列表包含 `save`、`hx_save()`、`w` 或 `wq` 时才会写入磁盘；`:diff`、
+`:insp`、`:copy`、剪贴板 paste 等 UI-only 命令会被拒绝。
 headless `--command` 下，`hash`、binary `export`、`replace` 有 `--select` 时作用于该
 选区，否则作用于全文件；`xor!` 必须显式提供选区。
 
@@ -146,6 +148,7 @@ cache_pages = 128                  # 页缓存容量
 | `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | 使用与 `:s` 相同的模式替换。`:re` 是等长 replacement，命中超过 65535 处时需要加 `--force` 确认；`:re!` 允许长度变化。旧的 `hex/ascii <needle> -> <replacement>` 仍兼容 |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | 哈希 |
 | `:source <path>` | 执行 TOML 宏文件。宏使用显式执行层 step，可继承当前 Visual / inspector 选区，默认合并成一个 undo |
+| `:script <path>` | 执行 Rhai 脚本文件。脚本使用 `hx_` host API，可继承当前 Visual / inspector 选区；除非脚本保存，否则作为一个命令入 undo |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | 同步滚动显示 current logical bytes 与另一个文件；可见页会在 `N` 范围内重对齐插入/删除字节，右侧相同字节为灰色，不同字节左右亮黄，缺失字节以红色 `__` 占位；`next` / `prev` 会大块分步扫描并汇报进度，扫描中阻止其它输入，Esc 取消 |
 | `:insp` / `:insp more` | 打开 inspector / 加载更多分页项 |
 | `:format ...` | 强制格式 |
@@ -215,6 +218,33 @@ bytes = { from = "payload_sha256", format = "hex-text" }
 `format` 默认是 `bytes`；`hex-text` 会写入 ASCII hex。变量引用可用于
 `bytes`、`pattern`、`needle`、`replacement` 等字节字段。
 
+## Rhai 脚本
+
+`:script <path>` 会在 TUI 中运行 Rhai 脚本，`--script <path>` 会 headless 运行同一类脚本。
+两条路径都使用同一执行层。TUI 脚本会继承当前 Visual / inspector 选区；除非脚本调用
+`hx_save()`，否则脚本编辑会作为一个 undo step。
+
+当前 demo API 保持较小，并统一使用 `hx_` 前缀：`hx_hex`、`hx_ascii`、`hx_search`、`hx_select_display`、
+`hx_read_display`、`hx_read_selection`、`hx_hash_hex`、`hx_overwrite`、`hx_insert`、
+`hx_fill`、`hx_goto`、`hx_clear_selection`、`hx_cursor`、`hx_len_display`、`hx_save`。
+
+默认脚本预算为 `2,000,000` 次 Rhai operation、`100,000` 次执行层调用、`512 MiB`
+脚本读取总量、`64 MiB` 单次读取、`64 MiB` 单个 bytes blob。hash/search/export
+这类操作仍走 streaming document 路径；除非脚本显式调用 `hx_read_*`，不会把整文件物化进
+VM。
+
+示例：
+
+```bash
+hxedit sample.bin --script examples/simple_hash_patch.hxscript
+```
+
+TUI 命令行中使用：
+
+```text
+:script examples/simple_hash_patch.hxscript
+```
+
 `default`、`full` 或其他启用 `memory` feature 的构建下的内存编辑命令：
 
 | 命令 | 说明 |
@@ -276,3 +306,7 @@ tag release 会按明确的 `OS * arch * feature` 矩阵发布。
 
 直接启用 `sagitta-analysis` 的构建也会包含 `sagitta-rs`；再分发相关 artifact 时也应保留
 [licenses/THIRD_PARTY_NOTICES.txt](../licenses/THIRD_PARTY_NOTICES.txt) 中的 Sagitta notice。
+
+`default` / `full` 构建包含 `scripting` feature 和 `MIT OR Apache-2.0` 许可的 Rhai
+依赖；再分发相关 artifact 时也应保留
+[licenses/THIRD_PARTY_NOTICES.txt](../licenses/THIRD_PARTY_NOTICES.txt) 中的 Rhai notice。

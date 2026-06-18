@@ -62,7 +62,7 @@ hxedit some.bin
 | Bundle | Build command | Includes |
 |---|---|---|
 | `core` | `cargo build --release --no-default-features` | Hex editor, inspector, search, diff, hash, copy/paste, export |
-| `default` | `cargo build --release` | `core` + process memory editing, disassembly view, instruction search, symbol panel |
+| `default` | `cargo build --release` | `core` + process memory editing, disassembly view, instruction search, symbol panel, Rhai scripts |
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching + Sagitta-backed `:ana` analysis |
 | `sagitta-analysis` add-on | `cargo build --release --features sagitta-analysis` | `default` + Sagitta-backed `:ana` analysis from crates.io `sagitta-rs` |
 
@@ -87,8 +87,9 @@ Notes:
 | `--process <NAME>` | Attach to a running process by name for memory editing |
 | `--inspector` | Open with the side panel visible on the inspector page |
 | `--run <path>` | Run a TOML macro file headlessly and exit; may be repeated |
+| `--script <path>` | Run a Rhai script file headlessly and exit; may be repeated in `scripting` builds |
 | `--command <cmd>` | Run an exec-compatible command headlessly and exit; may be repeated |
-| `--select display:<start>:<len>` / `--select logical:<start>:<len>` | Initial headless selection for `--run` / `--command` |
+| `--select display:<start>:<len>` / `--select logical:<start>:<len>` | Initial headless selection for `--run` / `--script` / `--command` |
 | `--bytes-per-line <n>` | Bytes shown per row, default `16` |
 | `--page-size <n>` | Page-cache read size, default `16384` |
 | `--cache-pages <n>` | Page-cache capacity, default `128` |
@@ -96,11 +97,12 @@ Notes:
 | `--no-color` | Disable colors; `NO_COLOR` also disables styling |
 | `--config <path>` | Load settings from a specific config file (TOML) |
 
-When `--run` or `--command` is present, `hxedit` opens a file target, runs the
-requested automation, prints human-readable summaries, and exits without
-creating the TUI. All `--run` files execute before all `--command` strings, each
-group preserving its own order. Edits are written to disk only if the macro or
-command list includes `save`, `w`, or `wq`; UI-only commands such as `:diff`,
+When `--run`, `--script`, or `--command` is present, `hxedit` opens a file
+target, runs the requested automation, prints human-readable summaries, and
+exits without creating the TUI. All `--run` files execute first, then all
+`--script` files, then all `--command` strings; each group preserves its own
+order. Edits are written to disk only if the macro, script, or command list
+includes `save`, `hx_save()`, `w`, or `wq`; UI-only commands such as `:diff`,
 `:insp`, `:copy`, and clipboard paste are rejected.
 For headless `--command`, `hash`, binary `export`, and `replace` use `--select`
 when provided and otherwise apply to the whole file; `xor!` requires an explicit
@@ -155,6 +157,7 @@ cache_pages = 128                  # page-cache capacity
 | `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | Replace using the same modes as `:s`. `:re` is equal-length and asks for `--force` when more than 65535 matches are found; `:re!` allows length changes. Legacy `hex/ascii <needle> -> <replacement>` remains accepted |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | Hash |
 | `:source <path>` | Run a TOML macro file. The macro uses explicit execution-layer steps, can inherit the current Visual / inspector selection, and defaults to grouped undo |
+| `:script <path>` | Run a Rhai script file. The script uses the `hx_` host API, inherits the current Visual / inspector selection, and is undoable as one command unless it saves |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | Show a synchronized page comparing current logical bytes with another file. Visible pages realign inserted/deleted bytes within `N`; equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__`. `next` / `prev` scan in large progress-reporting steps, block other input while scanning, and Esc cancels |
 | `:insp` / `:insp more` | Open inspector / reveal more paginated entries |
 | `:format ...` | Force format |
@@ -229,6 +232,36 @@ The `format` field defaults to `bytes`; `hex-text` writes ASCII hex. Variable
 references are accepted in byte-valued fields such as `bytes`, `pattern`,
 `needle`, and `replacement`.
 
+## Rhai Scripts
+
+`:script <path>` runs a Rhai script in the TUI, and `--script <path>` runs the
+same script headlessly. Both paths use the same execution layer. TUI scripts
+inherit the current Visual / inspector selection and are pushed as one undo
+step unless the script calls `hx_save()`.
+
+The demo API is intentionally small and prefixed with `hx_`: `hx_hex`, `hx_ascii`,
+`hx_search`, `hx_select_display`, `hx_read_display`, `hx_read_selection`,
+`hx_hash_hex`, `hx_overwrite`, `hx_insert`, `hx_fill`, `hx_goto`,
+`hx_clear_selection`, `hx_cursor`, `hx_len_display`, and `hx_save`.
+
+Default script budgets are `2,000,000` Rhai operations, `100,000` exec calls,
+`512 MiB` total bytes returned to the script by reads, `64 MiB` per read, and
+`64 MiB` per bytes blob. Hash/search/export style operations still use the
+streaming document paths and do not materialize the whole file in the VM unless
+the script explicitly calls `hx_read_*`.
+
+Example:
+
+```bash
+hxedit sample.bin --script examples/simple_hash_patch.hxscript
+```
+
+From the TUI command line:
+
+```text
+:script examples/simple_hash_patch.hxscript
+```
+
 Memory-related commands in `default`, `full`, or other `memory` builds:
 
 | Command | Description |
@@ -296,3 +329,8 @@ license / exception files as well; see
 Builds that enable `sagitta-analysis` directly also include `sagitta-rs`; keep
 the Sagitta notice in [licenses/THIRD_PARTY_NOTICES.txt](../licenses/THIRD_PARTY_NOTICES.txt)
 with redistributed artifacts.
+
+Default/full builds include the `scripting` feature and the `MIT OR Apache-2.0`
+licensed Rhai dependency; keep the Rhai notice in
+[licenses/THIRD_PARTY_NOTICES.txt](../licenses/THIRD_PARTY_NOTICES.txt) with
+redistributed artifacts.

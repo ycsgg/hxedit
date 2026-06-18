@@ -41,3 +41,17 @@ crates.io package `sagitta-rs`.
 enable it through the `full` feature, and any build that directly enables
 `--features sagitta-analysis` also includes it. Redistributed artifacts that
 enable Sagitta should keep this notice with the artifact.
+
+## Rhai in `default` builds
+
+The `scripting` feature enables Rhai-based headless scripts and is part of the
+default bundle.
+
+- Package: `rhai`
+- Version: `1.25.1`
+- License: MIT OR Apache-2.0
+- Repository: https://github.com/rhaiscript/rhai
+
+Rhai's license is compatible with the repository's own `MIT OR Apache-2.0`
+license. Redistributed default/full artifacts should keep this notice with the
+artifact.

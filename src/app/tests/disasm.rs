@@ -231,6 +231,7 @@ fn sagitta_analysis_rejects_input_over_128_mib() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
 

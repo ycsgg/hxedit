@@ -19,7 +19,7 @@ pub fn run(cli: Cli) -> Result<()> {
         CliTarget::File(path) => path,
         CliTarget::Pid(_) | CliTarget::Process(_) => {
             return Err(HxError::InvalidCliSource(
-                "--run and --command require a file target".to_owned(),
+                "--run, --script, and --command require a file target".to_owned(),
             )
             .into())
         }
@@ -36,6 +36,24 @@ pub fn run(cli: Cli) -> Result<()> {
 
     for path in &cli.run {
         execute_macro(path, &mut document, &mut state)?;
+    }
+
+    for path in &cli.script {
+        #[cfg(feature = "scripting")]
+        {
+            let result = crate::scripting::run_script(path, document, state)?;
+            print_script_report(&format!("script {}", path.display()), &result.report);
+            document = result.document;
+            state = result.state;
+        }
+        #[cfg(not(feature = "scripting"))]
+        {
+            let _ = path;
+            return Err(HxError::CommandError(
+                "--script requires a build with the scripting feature".to_owned(),
+            )
+            .into());
+        }
     }
 
     for command in &cli.command {
@@ -110,12 +128,14 @@ fn execute_command(input: &str, document: &mut Document, state: &mut ExecState) 
             finish_report(input, report)
         }
         HeadlessAction::Source(path) => execute_macro(&path, document, state),
+        HeadlessAction::Script(path) => execute_script(&path, document, state),
     }
 }
 
 enum HeadlessAction {
     Exec(ExecCommand),
     Source(std::path::PathBuf),
+    Script(std::path::PathBuf),
 }
 
 fn map_command(command: Command, state: &ExecState) -> HxResult<HeadlessAction> {
@@ -124,6 +144,7 @@ fn map_command(command: Command, state: &ExecState) -> HxResult<HeadlessAction> 
             HeadlessAction::Exec(ExecCommand::Save { path })
         }
         Command::Source { path } => HeadlessAction::Source(path),
+        Command::Script { path } => HeadlessAction::Script(path),
         Command::Fill { pattern, len } => HeadlessAction::Exec(ExecCommand::Fill {
             offset: ExecOffset::Cursor(0),
             pattern,
@@ -206,6 +227,44 @@ fn map_command(command: Command, state: &ExecState) -> HxResult<HeadlessAction> 
     Ok(action)
 }
 
+fn execute_script(
+    path: &std::path::Path,
+    document: &mut Document,
+    state: &mut ExecState,
+) -> HxResult<()> {
+    #[cfg(feature = "scripting")]
+    {
+        let source = std::fs::read_to_string(path)?;
+        let placeholder = Document::from_memory_bytes(
+            "<headless-script-placeholder>".into(),
+            Vec::new(),
+            &crate::config::Config::default(),
+        );
+        let owned_document = std::mem::replace(document, placeholder);
+        let result = crate::scripting::run_script_source(path, &source, owned_document, *state);
+        match result {
+            Ok(result) => {
+                *document = result.document;
+                *state = result.state;
+                print_script_report(&format!("script {}", path.display()), &result.report);
+                Ok(())
+            }
+            Err(failure) => {
+                *document = failure.document;
+                *state = failure.state;
+                Err(failure.error)
+            }
+        }
+    }
+    #[cfg(not(feature = "scripting"))]
+    {
+        let _ = (path, document, state);
+        Err(HxError::CommandError(
+            "script command requires a build with the scripting feature".to_owned(),
+        ))
+    }
+}
+
 fn map_goto_target(target: GotoTarget) -> ExecOffset {
     match target {
         GotoTarget::Absolute(offset) => ExecOffset::Absolute(offset),
@@ -256,4 +315,15 @@ fn finish_report(label: &str, report: ExecBatchReport) -> HxResult<()> {
     }
 
     Ok(())
+}
+
+#[cfg(feature = "scripting")]
+fn print_script_report(label: &str, report: &crate::scripting::ScriptReport) {
+    if report.summaries.is_empty() {
+        println!("{label}: no exec calls");
+    } else {
+        for summary in &report.summaries {
+            println!("{label}: {summary}");
+        }
+    }
 }

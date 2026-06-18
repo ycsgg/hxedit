@@ -11,9 +11,10 @@ fn main() -> Result<()> {
         return hxedit::headless::run(cli);
     }
     if cli.select.is_some() {
-        return Err(
-            HxError::InvalidCliSource("--select requires --run or --command".to_owned()).into(),
-        );
+        return Err(HxError::InvalidCliSource(
+            "--select requires --run, --script, or --command".to_owned(),
+        )
+        .into());
     }
     let mut app = App::from_cli(cli)?;
     app.run()

@@ -40,6 +40,7 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 
 ```bash
 hxedit some.bin --run patch.hxmacro
+hxedit some.bin --script examples/simple_hash_patch.hxscript
 hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 ```
 
@@ -75,6 +76,7 @@ hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 | `:export <path>`                  | 导出当前编辑后的字节            |
 | `:hash sha256`                    | 对选区或整个文件求哈希           |
 | `:source <path>`                  | 执行 TOML 宏文件             |
+| `:script <path>`                  | 执行 Rhai 脚本文件            |
 | `:diff <path>`                    | 对比另一个文件               |
 | `:insp`                           | 打开格式 inspector        |
 
@@ -89,9 +91,9 @@ hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 
 - 对选区执行 copy、export、hash、fill、zero、XOR 或 replace
 
-- 通过与手动编辑相同的执行层运行 TOML 宏文件
+- 通过与手动编辑相同的执行层运行 TOML 宏文件和 Rhai 脚本
 
-- 从 CLI headless 执行宏文件或兼容命令
+- 从 CLI headless 执行宏文件、Rhai 脚本或兼容命令
 
 - 直接查看 ELF、PE/COFF、Mach-O、PNG、ZIP、SQLite、PCAP、GZIP、GIF、BMP、WAV、
   TAR 和 JPEG 的结构
@@ -123,7 +125,7 @@ hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 | 档位        | 命令                                                            | 适合场景                                              |
 | --------- | ------------------------------------------------------------- | ------------------------------------------------- |
 | `core`    | `cargo build --release --no-default-features`                 | 只需要编辑器、inspector、搜索、diff、hash、copy/paste 和 export |
-| `default` | `cargo build --release`                                       | 常规构建，包含进程内存编辑、反汇编和 symbol                         |
+| `default` | `cargo build --release`                                       | 常规构建，包含进程内存编辑、反汇编、symbol 和 Rhai 脚本              |
 | `full`    | `cargo build --release --no-default-features --features full` | 还需要 Keystone 内联汇编 patch 和 Sagitta 分析              |
 
 ## 需要知道的行为

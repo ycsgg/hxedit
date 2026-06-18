@@ -6,7 +6,7 @@ use super::{
     is_alias, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES, FILL_ALIASES,
     FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES, LEGACY_HEX_SEARCH_ALIASES,
     PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES, QUIT_FORCE_ALIASES, REDO_ALIASES,
-    REPLACE_ALIASES, SEARCH_ALIASES, SOURCE_ALIASES, UNDO_ALIASES, WRITE_ALIASES,
+    REPLACE_ALIASES, SCRIPT_ALIASES, SEARCH_ALIASES, SOURCE_ALIASES, UNDO_ALIASES, WRITE_ALIASES,
     WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
 };
 #[cfg(feature = "disasm")]
@@ -66,6 +66,15 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 .filter(|path| !path.is_empty())
                 .ok_or(HxError::MissingArgument("macro path"))?;
             Ok(Command::Source {
+                path: PathBuf::from(path),
+            })
+        }
+        name if is_alias(name, SCRIPT_ALIASES) => {
+            let path = rest
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .ok_or(HxError::MissingArgument("script path"))?;
+            Ok(Command::Script {
                 path: PathBuf::from(path),
             })
         }
@@ -910,6 +919,20 @@ mod tests {
         assert!(matches!(
             parse_command("source"),
             Err(HxError::MissingArgument("macro path"))
+        ));
+    }
+
+    #[test]
+    fn script_command_requires_path() {
+        assert_eq!(
+            parse_command("script patch.hxscript").unwrap(),
+            Command::Script {
+                path: PathBuf::from("patch.hxscript")
+            }
+        );
+        assert!(matches!(
+            parse_command("script"),
+            Err(HxError::MissingArgument("script path"))
         ));
     }
 

@@ -40,6 +40,7 @@ fn app_with_len(len: usize) -> App {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 4;
@@ -66,6 +67,7 @@ fn app_with_bytes(bytes: &[u8]) -> App {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 4;

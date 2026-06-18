@@ -29,6 +29,7 @@ pub(super) fn app_with_bytes(bytes: &[u8]) -> App {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 2;
@@ -165,6 +166,7 @@ fn visible_diff_page_shows_other_only_tail_beyond_current_eof() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 2;

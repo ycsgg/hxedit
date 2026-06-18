@@ -31,6 +31,7 @@ fn app_falls_back_to_readonly_when_write_open_is_denied() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let app = App::from_cli(cli).unwrap();
 
@@ -64,6 +65,7 @@ fn readonly_mode_allows_save_as_new_path() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
     let target = dir.path().join("copy.bin");
@@ -99,6 +101,7 @@ fn readonly_mode_rejects_save_in_place() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
 
@@ -153,6 +156,7 @@ fn viewport_can_scroll_to_large_tail_row() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 4;
@@ -190,6 +194,7 @@ fn diff_projection_can_scroll_to_other_only_tail_row() {
         run: Vec::new(),
         command: Vec::new(),
         select: None,
+        script: Vec::new(),
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 4;

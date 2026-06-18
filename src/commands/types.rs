@@ -122,6 +122,9 @@ pub enum Command {
     Source {
         path: PathBuf,
     },
+    Script {
+        path: PathBuf,
+    },
     Copy {
         format: CopyFormat,
         display: CopyDisplay,

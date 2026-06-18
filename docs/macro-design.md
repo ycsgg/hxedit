@@ -343,13 +343,14 @@ algorithm = "sha256"
 
 ## 8. TUI 接入
 
-第一阶段建议只加一个命令：
+已落地的自动化入口：
 
 ```text
 :source <path>
+:script <path>
 ```
 
-语义：
+`:source` 语义：
 
 1. App adapter 读取当前 active selection，转换成 `ExecSelection`。
 2. 解析宏文件。
@@ -367,6 +368,11 @@ App 层仍负责：
 - Sagitta invalidation
 
 执行层不接触这些 UI 状态。
+
+`:script` 语义与 `:source` 共用 App adapter：启动时继承 active selection，脚本通过 `hx_`
+host API 生成 `ExecCommand`，执行后把 cursor / selection 接回 TUI。脚本编辑在 TUI 中按一次
+`:script` 命令聚合成一个 undo step；如果脚本调用 `hx_save()`，保存前 undo 按现有 save
+不变量清空。
 
 录制命令后续再加：
 
@@ -386,6 +392,8 @@ App 层仍负责：
 
 ```bash
 hxedit file.bin --run patch.hxmacro
+hxedit file.bin --script patch.hxscript
+hxedit file.bin --command "script patch.hxscript" --command "w"
 hxedit file.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 hxedit file.bin --select display:0x100:16 --run patch.hxmacro
 ```
@@ -395,11 +403,12 @@ Headless 路径直接打开 file-backed `Document` 并创建 `ExecState`，不�
 - 默认输出人类可读 summary。
 - 只支持文件目标；`--pid` / `--process` 仍走 TUI 内存编辑路径。
 - `--select display:<start>:<len>` 或 `--select logical:<start>:<len>` 作为初始选区。
-- 所有 `--run` 文件先执行，之后执行所有 `--command` 字符串；两个组内各自保持顺序。
-- 修改只在宏或命令显式执行 `save` / `w` / `wq` 后落盘。
+- 所有 `--run` 文件先执行，然后执行所有 `--script` 文件，最后执行所有 `--command`
+  字符串；三个组内各自保持顺序。
+- 修改只在宏、脚本或命令显式执行 `save` / `hx_save()` / `w` / `wq` 后落盘。
 - `--command` 中 `hash`、binary `export`、`replace` 有 `--select` 时作用于该选区，
   否则作用于全文件；`xor!` 必须显式提供选区。
-- `--command` 只接受可映射到执行层的命令：`w`、`wq`、`source`、`fill`、`zero`、
+- `--command` 只接受可映射到执行层的命令：`w`、`wq`、`source`、`script`、`fill`、`zero`、
   `goto`、binary `export`、`xor!`、`replace`、`search`、`hash`。
 - `:diff`、`:insp`、`:sym`、`:data`、clipboard paste/copy 等 UI-only 命令拒绝执行。
 
@@ -409,33 +418,34 @@ Headless 路径直接打开 file-backed `Document` 并创建 `ExecState`，不�
 
 ## 10. 脚本层
 
-脚本层不是 MVP。若后续加入，必须满足：
+已加入 Rhai demo，入口是 TUI `:script <path>` 或 headless `--script <path>` / `--command "script <path>"`。当前只提供一组 `hx_` 前缀 host
+API，并继续满足：
 
 - 放在可选 feature，例如 `scripting`。
 - 脚本只能调用 host API，host API 只生成并执行 `ExecCommand`。
 - 脚本不能拿到 `&mut Document`。
-- 脚本读取大范围 bytes 必须有预算，默认禁止整文件物化。
+- 脚本读取大范围 bytes 必须有预算。当前默认：总读取 `512 MiB`、单次读取 `64 MiB`、
+  单个 bytes blob `64 MiB`。
 - 脚本步骤数、读字节数、写字节数、输出 artifact 数都要有上限。
 
-Host API 形态：
+当前 demo Host API：
 
 ```text
-cursor()
-goto(offset)
-select_display(start, len)
-select_logical(start, len)
-clear_selection()
-read(scope)
-hash(scope, algorithm)
-search(pattern, options)
-overwrite(offset, bytes)
-insert(offset, bytes)
-delete(scope)
-fill(offset, pattern, len)
-xor_in_place(scope, key)
-replace(scope, needle, replacement, options)
-export_binary(scope, path)
-save(path)
+hx_cursor()
+hx_len_display()
+hx_hex(text)
+hx_ascii(text)
+hx_goto(offset)
+hx_select_display(start, len)
+hx_clear_selection()
+hx_read_display(start, len)
+hx_read_selection()
+hx_search(pattern)
+hx_hash_hex(algorithm)
+hx_overwrite(offset, bytes)
+hx_insert(offset, bytes)
+hx_fill(offset, pattern, len)
+hx_save()
 ```
 
 脚本只是更灵活的宏生成器，不拥有新的编辑语义。
@@ -468,7 +478,7 @@ save(path)
 3. 给 `ExecSession` 接入 undo / redo 和 `execute_batch`。
 4. 新增 TOML 宏 parser 和 `:source <path>`。
 5. 新增 headless `--run` / `--command`。
-6. 新增录制命令。
-7. 评估可选脚本 feature。
+6. 新增 headless Rhai `--script` demo。
+7. 新增录制命令。
 
 每一步都应保持 App 层原行为不漂移。结构移动和编辑语义变更不得混在同一个阶段。

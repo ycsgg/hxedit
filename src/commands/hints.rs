@@ -4,8 +4,8 @@ use super::{
     is_alias, known_command_aliases, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES,
     FILL_ALIASES, FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES,
     LEGACY_HEX_SEARCH_ALIASES, PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES,
-    QUIT_FORCE_ALIASES, REDO_ALIASES, REPLACE_ALIASES, SEARCH_ALIASES, SOURCE_ALIASES,
-    UNDO_ALIASES, WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
+    QUIT_FORCE_ALIASES, REDO_ALIASES, REPLACE_ALIASES, SCRIPT_ALIASES, SEARCH_ALIASES,
+    SOURCE_ALIASES, UNDO_ALIASES, WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
 };
 #[cfg(feature = "disasm")]
 use super::{DISASSEMBLE_ALIASES, DISASSEMBLE_FORCE_ALIASES, INSTRUCTION_SEARCH_ALIASES};
@@ -147,6 +147,10 @@ pub fn hint_for(input: &str) -> CommandHint {
         name if is_alias(name, SOURCE_ALIASES) => CommandHint {
             syntax: "source <path>".to_owned(),
             details: "run a TOML macro file through the execution layer; supports explicit selection, grouped undo, and rollback-on-error macros".to_owned(),
+        },
+        name if is_alias(name, SCRIPT_ALIASES) => CommandHint {
+            syntax: "script <path>".to_owned(),
+            details: "run a Rhai script through the execution layer; available in scripting builds and undoable unless the script saves".to_owned(),
         },
         name if is_alias(name, COPY_ALIASES) => copy_hint(name, rest),
         name if is_alias(name, EXPORT_ALIASES) => CommandHint {
@@ -412,6 +416,13 @@ mod tests {
     fn redo_hint_mentions_redoing_changes() {
         let hint = hint_for("redo");
         assert!(hint.details.contains("redo"));
+    }
+
+    #[test]
+    fn script_hint_mentions_rhai_execution() {
+        let hint = hint_for("script");
+        assert_eq!(hint.syntax, "script <path>");
+        assert!(hint.details.contains("Rhai"));
     }
 
     #[test]

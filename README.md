@@ -42,6 +42,7 @@ Run automation without opening the TUI:
 
 ```bash
 hxedit some.bin --run patch.hxmacro
+hxedit some.bin --script examples/simple_hash_patch.hxscript
 hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 ```
 
@@ -78,6 +79,7 @@ return to normal mode.
 | `:export <path>` | Export the edited bytes |
 | `:hash sha256` | Hash the selection or whole file |
 | `:source <path>` | Run a TOML macro file |
+| `:script <path>` | Run a Rhai script file |
 | `:diff <path>` | Compare against another file |
 | `:insp` | Open the format inspector |
 
@@ -89,8 +91,8 @@ and Sagitta analysis, see the [user guide](docs/user-guide.md).
 - Open and edit large files with overwrite, insert, and delete
 - Search text, hex bytes, single-byte values, or typed integers
 - Copy, export, hash, fill, zero, XOR, or replace selected bytes
-- Run TOML macro files through the same execution layer as manual edits
-- Run macro files or compatible commands headlessly from the CLI
+- Run TOML macro files and Rhai scripts through the same execution layer as manual edits
+- Run macro files, Rhai scripts, or compatible commands headlessly from the CLI
 - Inspect ELF, PE/COFF, Mach-O, PNG, ZIP, SQLite, PCAP, GZIP, GIF, BMP, WAV,
   TAR, and JPEG structures inline
 - Compare against another file in a synchronized read-only diff view
@@ -122,7 +124,7 @@ scenarios, hardware, and reproduction commands are in
 | Variant | Command | Use when |
 |---|---|---|
 | `core` | `cargo build --release --no-default-features` | You want the editor, inspector, search, diff, hash, copy/paste, and export only |
-| `default` | `cargo build --release` | You want the normal build with process memory editing, disassembly, and symbols |
+| `default` | `cargo build --release` | You want the normal build with process memory editing, disassembly, symbols, and Rhai scripts |
 | `full` | `cargo build --release --no-default-features --features full` | You also want Keystone-backed inline assembly patching and Sagitta analysis |
 
 ## Good To Know
