@@ -86,12 +86,25 @@ Notes:
 | `--pid <PID>` | Attach to a running process by PID for memory editing |
 | `--process <NAME>` | Attach to a running process by name for memory editing |
 | `--inspector` | Open with the side panel visible on the inspector page |
+| `--run <path>` | Run a TOML macro file headlessly and exit; may be repeated |
+| `--command <cmd>` | Run an exec-compatible command headlessly and exit; may be repeated |
+| `--select display:<start>:<len>` / `--select logical:<start>:<len>` | Initial headless selection for `--run` / `--command` |
 | `--bytes-per-line <n>` | Bytes shown per row, default `16` |
 | `--page-size <n>` | Page-cache read size, default `16384` |
 | `--cache-pages <n>` | Page-cache capacity, default `128` |
 | `--profile` | Print diagnostics to stderr on exit |
 | `--no-color` | Disable colors; `NO_COLOR` also disables styling |
 | `--config <path>` | Load settings from a specific config file (TOML) |
+
+When `--run` or `--command` is present, `hxedit` opens a file target, runs the
+requested automation, prints human-readable summaries, and exits without
+creating the TUI. All `--run` files execute before all `--command` strings, each
+group preserving its own order. Edits are written to disk only if the macro or
+command list includes `save`, `w`, or `wq`; UI-only commands such as `:diff`,
+`:insp`, `:copy`, and clipboard paste are rejected.
+For headless `--command`, `hash`, binary `export`, and `replace` use `--select`
+when provided and otherwise apply to the whole file; `xor!` requires an explicit
+selection.
 
 ## Configuration
 
@@ -152,6 +165,13 @@ cache_pages = 128                  # page-cache capacity
 manual edits. The first implementation is intentionally declarative: it does
 not record raw keys and does not run `:diff`, `:insp`, `:sym`, or other UI-only
 commands.
+
+The same macro files can run headlessly:
+
+```bash
+hxedit sample.bin --run patch.hxmacro
+hxedit sample.bin --select display:0x100:16 --run selection_patch.hxmacro
+```
 
 ```toml
 version = 1

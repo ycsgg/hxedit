@@ -38,6 +38,13 @@ Open read-only at an offset with the inspector visible:
 hxedit --readonly --offset 0x100 --inspector some.bin
 ```
 
+Run automation without opening the TUI:
+
+```bash
+hxedit some.bin --run patch.hxmacro
+hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
+```
+
 ## Keys
 
 `hxedit` uses a modal, vim-like scheme. Press `:` to run a command, `Esc` to
@@ -83,6 +90,7 @@ and Sagitta analysis, see the [user guide](docs/user-guide.md).
 - Search text, hex bytes, single-byte values, or typed integers
 - Copy, export, hash, fill, zero, XOR, or replace selected bytes
 - Run TOML macro files through the same execution layer as manual edits
+- Run macro files or compatible commands headlessly from the CLI
 - Inspect ELF, PE/COFF, Mach-O, PNG, ZIP, SQLite, PCAP, GZIP, GIF, BMP, WAV,
   TAR, and JPEG structures inline
 - Compare against another file in a synchronized read-only diff view

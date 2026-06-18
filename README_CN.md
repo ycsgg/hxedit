@@ -36,6 +36,13 @@ hxedit some.bin
 hxedit --readonly --offset 0x100 --inspector some.bin
 ```
 
+不打开 TUI，直接执行自动化：
+
+```bash
+hxedit some.bin --run patch.hxmacro
+hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
+```
+
 ## 按键
 
 `hxedit` 采用类似 vim 的模式化操作。按 `:` 执行命令，按 `Esc` 回到 normal 模式。
@@ -83,6 +90,8 @@ hxedit --readonly --offset 0x100 --inspector some.bin
 - 对选区执行 copy、export、hash、fill、zero、XOR 或 replace
 
 - 通过与手动编辑相同的执行层运行 TOML 宏文件
+
+- 从 CLI headless 执行宏文件或兼容命令
 
 - 直接查看 ELF、PE/COFF、Mach-O、PNG、ZIP、SQLite、PCAP、GZIP、GIF、BMP、WAV、
   TAR 和 JPEG 的结构

@@ -14,6 +14,7 @@ pub mod exec;
 pub mod executable;
 pub mod export;
 pub mod format;
+pub mod headless;
 pub mod input;
 #[cfg(feature = "memory")]
 pub mod memory;

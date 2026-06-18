@@ -61,6 +61,9 @@ fn hash_command_various_algorithms_and_ranges() {
         no_color: true,
         offset: None,
         inspector: false,
+        run: Vec::new(),
+        command: Vec::new(),
+        select: None,
     };
     let mut app5 = App::from_cli(cli).unwrap();
     app5.execute_command(Command::Hash {

@@ -18,6 +18,9 @@ fn app_constructs_from_cli() {
         no_color: true,
         offset: None,
         inspector: false,
+        run: Vec::new(),
+        command: Vec::new(),
+        select: None,
     };
     App::from_cli(cli).unwrap();
 }

@@ -26,6 +26,9 @@ fn app_with_len(len: usize) -> App {
         no_color: true,
         offset: None,
         inspector: false,
+        run: Vec::new(),
+        command: Vec::new(),
+        select: None,
     };
     let mut app = App::from_cli(cli).unwrap();
     app.view_rows = 4;

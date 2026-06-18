@@ -47,6 +47,18 @@ pub struct Cli {
     /// Open with the side panel visible on the inspector page
     #[arg(long)]
     pub inspector: bool,
+
+    /// Run a TOML macro file headlessly and exit
+    #[arg(long = "run", value_name = "PATH")]
+    pub run: Vec<PathBuf>,
+
+    /// Run an editor command headlessly and exit; may be repeated
+    #[arg(long = "command", value_name = "COMMAND")]
+    pub command: Vec<String>,
+
+    /// Initial headless selection, e.g. display:0x100:16 or logical:0:32
+    #[arg(long = "select", value_name = "SPACE:START:LEN")]
+    pub select: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +69,10 @@ pub enum CliTarget {
 }
 
 impl Cli {
+    pub fn has_headless_actions(&self) -> bool {
+        !self.run.is_empty() || !self.command.is_empty()
+    }
+
     pub fn target(&self) -> HxResult<CliTarget> {
         let source_count = usize::from(self.file.is_some())
             + usize::from(self.pid.is_some())
@@ -145,6 +161,9 @@ mod tests {
             no_color: true,
             offset: None,
             inspector: false,
+            run: Vec::new(),
+            command: Vec::new(),
+            select: None,
         }
     }
 

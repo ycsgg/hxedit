@@ -104,6 +104,9 @@ fn diff_next_large_scan_steps_across_ticks() {
         no_color: true,
         offset: None,
         inspector: false,
+        run: Vec::new(),
+        command: Vec::new(),
+        select: None,
     };
     let mut app = App::from_cli(cli).unwrap();
     app.execute_command(Command::Diff(DiffCommand::Open {
@@ -158,6 +161,9 @@ fn diff_scan_blocks_navigation_until_escape() {
         no_color: true,
         offset: None,
         inspector: false,
+        run: Vec::new(),
+        command: Vec::new(),
+        select: None,
     };
     let mut app = App::from_cli(cli).unwrap();
     app.execute_command(Command::Diff(DiffCommand::Open {

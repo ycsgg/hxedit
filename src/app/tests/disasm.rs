@@ -228,6 +228,9 @@ fn sagitta_analysis_rejects_input_over_128_mib() {
         no_color: true,
         offset: None,
         inspector: false,
+        run: Vec::new(),
+        command: Vec::new(),
+        select: None,
     };
     let mut app = App::from_cli(cli).unwrap();
 

@@ -332,6 +332,9 @@ mod tests {
             no_color: true,
             offset: None,
             inspector: false,
+            run: Vec::new(),
+            command: Vec::new(),
+            select: None,
         };
         Document::open(cli.file.as_ref().unwrap(), &cli.config().unwrap()).unwrap()
     }

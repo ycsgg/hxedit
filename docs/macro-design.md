@@ -382,23 +382,28 @@ App 层仍负责：
 
 ## 9. Headless CLI 接入
 
-宏文件跑稳后可加：
+已落地：
 
 ```bash
 hxedit file.bin --run patch.hxmacro
-hxedit file.bin --command "goto 0x100" --command "fill 90 16"
-```
-
-Headless 路径直接创建 `ExecSession`，不创建 `App`。输出建议支持：
-
-- 默认人类可读 summary。
-- 后续 `--json` 输出 `ExecOutcome` / `ExecBatchOutcome`。
-
-Headless 下没有 inherited selection，除非 CLI 未来显式提供：
-
-```bash
+hxedit file.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 hxedit file.bin --select display:0x100:16 --run patch.hxmacro
 ```
+
+Headless 路径直接打开 file-backed `Document` 并创建 `ExecState`，不创建 `App`。当前行为：
+
+- 默认输出人类可读 summary。
+- 只支持文件目标；`--pid` / `--process` 仍走 TUI 内存编辑路径。
+- `--select display:<start>:<len>` 或 `--select logical:<start>:<len>` 作为初始选区。
+- 所有 `--run` 文件先执行，之后执行所有 `--command` 字符串；两个组内各自保持顺序。
+- 修改只在宏或命令显式执行 `save` / `w` / `wq` 后落盘。
+- `--command` 中 `hash`、binary `export`、`replace` 有 `--select` 时作用于该选区，
+  否则作用于全文件；`xor!` 必须显式提供选区。
+- `--command` 只接受可映射到执行层的命令：`w`、`wq`、`source`、`fill`、`zero`、
+  `goto`、binary `export`、`xor!`、`replace`、`search`、`hash`。
+- `:diff`、`:insp`、`:sym`、`:data`、clipboard paste/copy 等 UI-only 命令拒绝执行。
+
+后续仍可补 `--json`，输出结构化 `ExecOutcome` / `ExecBatchOutcome`。
 
 ---
 
@@ -462,7 +467,7 @@ save(path)
 2. 把 `fill`、`xor!`、`replace`、`delete`、`insert`、`overwrite`、`hash`、`export`、`search`、`goto` 逐步委托到 exec runner。
 3. 给 `ExecSession` 接入 undo / redo 和 `execute_batch`。
 4. 新增 TOML 宏 parser 和 `:source <path>`。
-5. 新增 headless `--run`。
+5. 新增 headless `--run` / `--command`。
 6. 新增录制命令。
 7. 评估可选脚本 feature。
 

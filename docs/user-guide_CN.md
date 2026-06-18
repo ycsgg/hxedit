@@ -82,12 +82,22 @@ hxedit some.bin
 | `--pid <PID>` | 通过 PID 附加到运行中的进程进行内存编辑 |
 | `--process <NAME>` | 通过进程名附加到运行中的进程进行内存编辑 |
 | `--inspector` | 启动时显示 side panel 的 inspector 页 |
+| `--run <path>` | headless 执行 TOML 宏文件并退出；可重复 |
+| `--command <cmd>` | headless 执行可映射到执行层的命令并退出；可重复 |
+| `--select display:<start>:<len>` / `--select logical:<start>:<len>` | `--run` / `--command` 的初始 headless 选区 |
 | `--bytes-per-line <n>` | 每行字节数，默认 `16` |
 | `--page-size <n>` | 页缓存读取大小，默认 `16384` |
 | `--cache-pages <n>` | 页缓存容量，默认 `128` |
 | `--profile` | 退出时向 stderr 输出诊断信息 |
 | `--no-color` | 禁用颜色；`NO_COLOR` 同样生效 |
 | `--config <path>` | 从指定的配置文件（TOML）加载设置 |
+
+当出现 `--run` 或 `--command` 时，`hxedit` 会打开文件目标、执行自动化、输出人类可读的
+summary，然后直接退出，不创建 TUI。所有 `--run` 文件先执行，之后执行所有 `--command`
+字符串；两个组内各自保持传入顺序。修改只有在宏或命令列表包含 `save`、`w` 或 `wq` 时
+才会写入磁盘；`:diff`、`:insp`、`:copy`、剪贴板 paste 等 UI-only 命令会被拒绝。
+headless `--command` 下，`hash`、binary `export`、`replace` 有 `--select` 时作用于该
+选区，否则作用于全文件；`xor!` 必须显式提供选区。
 
 ## 配置文件
 
@@ -144,6 +154,13 @@ cache_pages = 128                  # 页缓存容量
 
 `:source <path>` 会通过与手动编辑相同的执行层执行 TOML 宏文件。首版是声明式宏：
 不录制原始按键，也不运行 `:diff`、`:insp`、`:sym` 等 UI-only 命令。
+
+同一个宏文件也可以 headless 执行：
+
+```bash
+hxedit sample.bin --run patch.hxmacro
+hxedit sample.bin --select display:0x100:16 --run selection_patch.hxmacro
+```
 
 ```toml
 version = 1
