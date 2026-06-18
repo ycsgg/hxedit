@@ -1,0 +1,28 @@
+# Find the last DEBUG_TRAILER marker, remove that marker with real-delete
+# semantics, and save a trimmed copy. This is useful for fixed diagnostic
+# markers appended by simple build or capture pipelines.
+
+version = 1
+selection = "clear"
+undo = "group"
+on_error = "stop"
+
+[[steps]]
+cmd = "goto"
+offset = "end"
+
+[[steps]]
+cmd = "search"
+mode = "text"
+pattern = "DEBUG_TRAILER"
+direction = "backward"
+select = "match"
+
+[[steps]]
+cmd = "delete"
+scope = "selection"
+kind = "real"
+
+[[steps]]
+cmd = "save"
+path = "without-debug-marker.bin"

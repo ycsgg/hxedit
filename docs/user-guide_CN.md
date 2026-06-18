@@ -165,6 +165,15 @@ hxedit sample.bin --run patch.hxmacro
 hxedit sample.bin --select display:0x100:16 --run selection_patch.hxmacro
 ```
 
+顶层字段：
+
+| 字段 | 取值 | 说明 |
+|---|---|---|
+| `version` | `1` | 必填的文件格式版本 |
+| `selection` | `inherit`、`clear`、`require` | 启动选区策略。TUI 下 `inherit` 使用当前 Visual / inspector 选区；headless 下除非传入 `--select`，否则初始为空 |
+| `undo` | `group`、`per-step` | 整个宏合并成一个 undo step，或每个编辑 step 单独入 undo |
+| `on_error` | `stop`、`rollback` | `stop` 保留已成功编辑并可 undo；`rollback` 回滚已成功编辑，并拒绝包含 `save` / `export-binary` 的宏 |
+
 ```toml
 version = 1
 selection = "inherit" # inherit | clear | require
@@ -184,14 +193,29 @@ key = "0xaa"
 in_place = true
 ```
 
-当前支持的 step 名包括 `goto`、`select`、`clear-selection`、`read`、`hash`、
-`search`、`overwrite`、`insert`、`delete`、`fill`、`xor`、`replace`、
-`export-binary` 和 `save`。范围必须显式写出：`scope = "selection"`、
-`scope = "all"`，或内联 range，例如
+常用 step 形式：
+
+| Step | 必填字段 | 效果 |
+|---|---|---|
+| `goto` | `offset` | 移动执行 cursor。offset 支持十进制、`0x` 十六进制、`cursor`、`cursor+N`、`cursor-N` 或 `end` |
+| `select` | `space`、`start`、`len` | 设置 `display` 或 `logical` 空间的显式选区 |
+| `clear-selection` | 无 | 清空执行选区 |
+| `read` | `scope`；可选 `id` | 从选区或显式 range 读取 logical bytes。拒绝 `scope = "all"`，避免误把整文件物化 |
+| `hash` | `algorithm`、`scope`；可选 `id` | 用 `md5`、`sha1`、`sha256`、`sha512` 或 `crc32` 哈希 |
+| `search` | `pattern`；可选 `mode`、`direction`、`select`、`id` | 从当前 cursor 搜索。`select = "match"` 会选中命中范围 |
+| `overwrite` | `offset`、`bytes` | replacement-only 覆盖，不移动后续 display offset |
+| `insert` | `offset`、`bytes` | real insert，会移动后续 display offset，并清理不稳定选区 |
+| `delete` | `scope`；可选 `kind` | 删除范围。默认 `kind = "tombstone"`，保留 display slot；`kind = "real"` 会移动 offset |
+| `fill` | `offset`、`pattern`、`len` | replacement-only 重复 pattern 覆盖 |
+| `xor` | `scope`、`key`、`in_place = true` | 对选区 / logical bytes 原地 XOR |
+| `replace` | `scope`、`needle`、`replacement`；可选 `mode`、`allow_resize`、`force` | 替换命中内容；变长替换需要 `allow_resize = true` |
+| `export-binary` | `scope`、`path` | 导出 bytes 到文件；相对路径按宏文件所在目录解析 |
+| `save` | 可选 `path` | 原地保存或另存；保存成功会清空保存前 undo 历史 |
+
+范围必须显式写出：`scope = "selection"`、`scope = "all"`，或内联 range，例如
 `scope = { space = "display", start = "0x100", len = 16 }`。字节字段默认使用
 hex stream，如 `"de ad be ef"`；`search` 和 `replace` 额外支持 `mode = "text"`
-与 `mode = "byte"`。`read` step 会拒绝 `scope = "all"`；请使用显式 range，
-避免把大文件一次性物化。
+与 `mode = "byte"`。
 
 会产生结果的 step 可以选择绑定 `id`。`read` 绑定选中范围的 logical bytes，
 `hash` 绑定 digest 原始 bytes 和紧凑小写 hex 文本，`search` 在命中时绑定匹配
@@ -218,22 +242,123 @@ bytes = { from = "payload_sha256", format = "hex-text" }
 `format` 默认是 `bytes`；`hex-text` 会写入 ASCII hex。变量引用可用于
 `bytes`、`pattern`、`needle`、`replacement` 等字节字段。
 
+示例：搜索 marker，选中命中，计算 CRC32，把 CRC 的 ASCII hex 写到 marker 后面，然后保存：
+
+```toml
+version = 1
+selection = "clear"
+
+[[steps]]
+cmd = "search"
+id = "marker"
+pattern = "de ad be ef"
+select = "match"
+
+[[steps]]
+cmd = "hash"
+id = "marker_crc32"
+algorithm = "crc32"
+scope = "selection"
+
+[[steps]]
+cmd = "overwrite"
+offset = "cursor+4"
+bytes = { from = "marker_crc32", format = "hex-text" }
+
+[[steps]]
+cmd = "save"
+```
+
+在 TUI 中，宏执行结果会更新 cursor 和 selection。headless 模式会在请求的
+macro / script / command 列表执行完后退出。除非某个 step 或后续命令显式保存，
+否则编辑不会写入磁盘。
+
+更多实际宏示例位于 [examples/](../examples/)：
+
+| 文件 | 用途 |
+|---|---|
+| `firmware_header_crc.hxmacro` | 修复固定固件 header 的 CRC 和 reserved bytes |
+| `extract_selected_record.hxmacro` | 导出、hash、XOR 解码并审计继承选区 |
+| `sanitize_log_copy.hxmacro` | 通过 replacement 和 export 生成脱敏日志副本 |
+| `strip_debug_marker.hxmacro` | 移除尾部 debug marker 并保存裁剪副本 |
+
 ## Rhai 脚本
 
 `:script <path>` 会在 TUI 中运行 Rhai 脚本，`--script <path>` 会 headless 运行同一类脚本。
 两条路径都使用同一执行层。TUI 脚本会继承当前 Visual / inspector 选区；除非脚本调用
-`hx_save()`，否则脚本编辑会作为一个 undo step。
+`hx_save()`，否则脚本编辑会作为一个 undo step。Rhai scripting 包含在 `default` 和
+`full` 构建中；`core` / `--no-default-features` 构建会对 `:script` 和 `--script`
+返回 feature 错误。
 
-当前 demo API 保持较小，并统一使用 `hx_` 前缀：`hx_hex`、`hx_ascii`、`hx_search`、`hx_select_display`、
-`hx_read_display`、`hx_read_selection`、`hx_hash_hex`、`hx_overwrite`、`hx_insert`、
-`hx_fill`、`hx_goto`、`hx_clear_selection`、`hx_cursor`、`hx_len_display`、`hx_save`。
+脚本 API 只暴露执行层操作，并统一使用 `hx_` 前缀：
+
+| 函数 | 返回值 | 说明 |
+|---|---|---|
+| `hx_hex(text)` | bytes blob | 解析 hex stream，例如 `"de ad be ef"` |
+| `hx_ascii(text)` | bytes blob | 把文本转成原始 bytes |
+| `hx_cursor()` | integer | 当前 display cursor |
+| `hx_len_display()` | integer | 当前 display 长度 |
+| `hx_len_logical()` | integer | 当前 logical byte 长度 |
+| `hx_goto(offset)` | 无 | 跳到绝对 display offset |
+| `hx_goto_end()` | 无 | 跳到最后一个 display offset；空文件为 `0` |
+| `hx_select_display(start, len)` | 无 | 设置 display-space 选区 |
+| `hx_select_logical(start, len)` | 无 | 设置 logical-space 选区 |
+| `hx_clear_selection()` | 无 | 清空当前选区 |
+| `hx_has_selection()` | bool | 当前是否有选区 |
+| `hx_selection_start()` | integer | 当前选区起点；无选区时报错 |
+| `hx_selection_len()` | integer | 当前选区长度；无选区时报错 |
+| `hx_selection_space()` | string | 当前选区空间：`"display"` 或 `"logical"` |
+| `hx_read_display(start, len)` | bytes blob | 读取 display range 覆盖的 logical bytes |
+| `hx_read_logical(start, len)` | bytes blob | 读取 logical range 覆盖的 logical bytes |
+| `hx_read_selection()` | bytes blob | 读取当前选区的 logical bytes |
+| `hx_search(bytes)` | integer | `hx_search_forward(bytes)` 的兼容别名 |
+| `hx_search_forward(bytes)` / `hx_search_backward(bytes)` | integer | 从当前 cursor 搜索；命中返回 display offset，失败返回 `-1` |
+| `hx_search_forward_select(bytes)` / `hx_search_backward_select(bytes)` | integer | 搜索并把命中 display range 设为选区 |
+| `hx_hash_hex(algorithm)` | string | 有选区时 hash 当前选区；没有选区时 hash 整个文件 |
+| `hx_hash_display_hex(start, len, algorithm)` | string | hash display range |
+| `hx_hash_logical_hex(start, len, algorithm)` | string | hash logical range |
+| `hx_hash_selection_hex(algorithm)` | string | hash 当前选区；无选区时报错 |
+| `hx_hash_all_hex(algorithm)` | string | hash 当前全部 logical bytes |
+| `hx_overwrite(offset, bytes)` | 无 | 在 display offset 做 replacement-only 覆盖 |
+| `hx_insert(offset, bytes)` | 无 | 在 display offset 做 real insert |
+| `hx_fill(offset, pattern, len)` | 无 | replacement-only 重复 pattern 覆盖 |
+| `hx_delete_display(start, len)` / `hx_delete_logical(start, len)` / `hx_delete_selection()` | 无 | tombstone delete；display slot 保留，logical bytes 消失 |
+| `hx_delete_real_display(start, len)` / `hx_delete_real_logical(start, len)` / `hx_delete_real_selection()` | 无 | real delete；后续 display offset 左移 |
+| `hx_xor_display(start, len, key)` / `hx_xor_logical(start, len, key)` / `hx_xor_selection(key)` | 无 | replacement-only 原地 XOR；`key` 为 `0..255` |
+| `hx_replace_all(needle, replacement, allow_resize, force)` | 无 | 在当前全部 logical bytes 中替换匹配 |
+| `hx_replace_display(start, len, needle, replacement, allow_resize, force)` | 无 | 在 display range 中替换匹配 |
+| `hx_replace_logical(start, len, needle, replacement, allow_resize, force)` | 无 | 在 logical range 中替换匹配 |
+| `hx_replace_selection(needle, replacement, allow_resize, force)` | 无 | 在当前选区中替换匹配 |
+| `hx_export_display(start, len, path)` / `hx_export_logical(start, len, path)` / `hx_export_selection(path)` | 无 | 导出 logical bytes 到二进制文件 |
+| `hx_save()` | 无 | 保存当前 document |
+| `hx_save_as(path)` | 无 | 另存为指定路径 |
+
+`hx_export_*` 和 `hx_save_as()` 的相对路径从脚本文件所在目录解析。
+`allow_resize = false` 保持 replacement-only 替换；`allow_resize = true` 允许 real
+delete / insert，并会清空选区。
 
 默认脚本预算为 `2,000,000` 次 Rhai operation、`100,000` 次执行层调用、`512 MiB`
 脚本读取总量、`64 MiB` 单次读取、`64 MiB` 单个 bytes blob。hash/search/export
 这类操作仍走 streaming document 路径；除非脚本显式调用 `hx_read_*`，不会把整文件物化进
 VM。
 
-示例：
+脚本示例：
+
+```rhai
+let marker = hx_hex("de ad be ef");
+
+hx_goto(0);
+let hit = hx_search_forward_select(marker);
+if hit < 0 {
+    throw "marker not found";
+}
+
+let digest = hx_hash_selection_hex("crc32");
+hx_overwrite(hit + 4, hx_ascii(digest));
+hx_save();
+```
+
+headless 执行：
 
 ```bash
 hxedit sample.bin --script examples/simple_hash_patch.hxscript
@@ -244,6 +369,25 @@ TUI 命令行中使用：
 ```text
 :script examples/simple_hash_patch.hxscript
 ```
+
+headless command list 可以混合脚本和普通执行层命令：
+
+```bash
+hxedit sample.bin --command "script patch.hxscript" --command w
+```
+
+固定步骤、声明式流程优先用宏；需要分支、循环，或后续 offset / bytes 依赖前面
+search、read、hash 结果时，用脚本更合适。
+
+更多实际脚本示例位于 [examples/](../examples/)：
+
+| 文件 | 用途 |
+|---|---|
+| `simple_hash_patch.hxscript` | 给 marker 邻近字段写入 CRC32 |
+| `extract_payload_between_markers.hxscript` | 导出两个 marker 之间的 payload 并写入 SHA-256 |
+| `decode_selected_xor.hxscript` | 解码继承的 XOR 选区并保存审计产物 |
+| `sanitize_log_copy.hxscript` | 脱敏常见日志 token 并归一化换行 |
+| `trim_debug_trailer.hxscript` | 在保存副本中移除 debug / volatile marker |
 
 `default`、`full` 或其他启用 `memory` feature 的构建下的内存编辑命令：
 

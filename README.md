@@ -46,6 +46,20 @@ hxedit some.bin --script examples/simple_hash_patch.hxscript
 hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 ```
 
+Run the same automation from the TUI command line:
+
+```text
+:source patch.hxmacro
+:script examples/simple_hash_patch.hxscript
+```
+
+Macro files are TOML and are best for repeatable, declarative edit recipes.
+Rhai scripts are best when later edits depend on earlier search/read/hash
+results. Both paths use the same byte-editing execution layer as manual edits.
+See [examples/README.md](examples/README.md) for practical macro and script
+recipes covering header repair, record extraction, log sanitization, and
+payload carving.
+
 ## Keys
 
 `hxedit` uses a modal, vim-like scheme. Press `:` to run a command, `Esc` to

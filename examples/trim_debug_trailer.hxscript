@@ -1,0 +1,21 @@
+hx_goto_end();
+let marker = hx_ascii("DEBUG_TRAILER");
+let trailer = hx_search_backward_select(marker);
+if trailer < 0 {
+    hx_goto(0);
+    trailer = hx_search_forward_select(marker);
+}
+if trailer >= 0 {
+    hx_delete_real_selection();
+}
+
+hx_goto(0);
+let volatile = hx_search_forward_select(hx_ascii("VOLATILE"));
+if volatile >= 0 {
+    // Tombstone delete keeps the display slots during the current session
+    // while removing those bytes from logical readers and the saved copy.
+    hx_delete_selection();
+    hx_clear_selection();
+}
+
+hx_save_as("trimmed-debug-copy.bin");

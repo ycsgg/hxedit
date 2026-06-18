@@ -1,0 +1,41 @@
+# Build a sanitized copy of a text-like binary log:
+# - DEBUG is normalized to INFO plus one trailing space.
+# - SECRET is redacted with the same length.
+# - CRLF line endings are normalized to LF, using resize replace.
+# - The source file is not saved in place; the sanitized logical bytes are
+#   exported to sanitized-log.bin.
+
+version = 1
+selection = "clear"
+undo = "group"
+on_error = "stop"
+
+[[steps]]
+cmd = "replace"
+scope = "all"
+mode = "text"
+needle = "DEBUG"
+replacement = "INFO "
+force = true
+
+[[steps]]
+cmd = "replace"
+scope = "all"
+mode = "text"
+needle = "SECRET"
+replacement = "REDACT"
+force = true
+
+[[steps]]
+cmd = "replace"
+scope = "all"
+mode = "text"
+needle = "\r\n"
+replacement = "\n"
+allow_resize = true
+force = true
+
+[[steps]]
+cmd = "export-binary"
+scope = "all"
+path = "sanitized-log.bin"

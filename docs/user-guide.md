@@ -176,6 +176,15 @@ hxedit sample.bin --run patch.hxmacro
 hxedit sample.bin --select display:0x100:16 --run selection_patch.hxmacro
 ```
 
+Top-level fields:
+
+| Field | Values | Description |
+|---|---|---|
+| `version` | `1` | Required file format version |
+| `selection` | `inherit`, `clear`, `require` | Startup selection policy. TUI `inherit` uses the current Visual / inspector selection; headless `inherit` starts empty unless `--select` is provided |
+| `undo` | `group`, `per-step` | Whether edits become one undo step or one step per editing command |
+| `on_error` | `stop`, `rollback` | `stop` keeps successful edits undoable; `rollback` reverts successful edits and rejects `save` / `export-binary` steps |
+
 ```toml
 version = 1
 selection = "inherit" # inherit | clear | require
@@ -195,15 +204,29 @@ key = "0xaa"
 in_place = true
 ```
 
-Supported step names are `goto`, `select`, `clear-selection`, `read`, `hash`,
-`search`, `overwrite`, `insert`, `delete`, `fill`, `xor`, `replace`,
-`export-binary`, and `save`. Ranges are explicit: `scope = "selection"`,
-`scope = "all"`, or an inline range like
-`scope = { space = "display", start = "0x100", len = 16 }`. Bytes fields use
-hex streams by default, such as `"de ad be ef"`; `search` and `replace` also
-support `mode = "text"` and `mode = "byte"`. The `read` step intentionally
-rejects `scope = "all"`; use an explicit range to avoid materializing a large
-file.
+Common step forms:
+
+| Step | Required fields | Effect |
+|---|---|---|
+| `goto` | `offset` | Move the execution cursor. Offsets accept decimal, `0x` hex, `cursor`, `cursor+N`, `cursor-N`, or `end` |
+| `select` | `space`, `start`, `len` | Set an explicit selection in `display` or `logical` space |
+| `clear-selection` | none | Clear the execution selection |
+| `read` | `scope`; optional `id` | Read logical bytes from a selection or explicit range. `scope = "all"` is rejected to avoid accidental full-file materialization |
+| `hash` | `algorithm`, `scope`; optional `id` | Hash bytes with `md5`, `sha1`, `sha256`, `sha512`, or `crc32` |
+| `search` | `pattern`; optional `mode`, `direction`, `select`, `id` | Search from the current cursor. `select = "match"` selects the hit |
+| `overwrite` | `offset`, `bytes` | Replacement-only overwrite; does not shift later display offsets |
+| `insert` | `offset`, `bytes` | Real insert; shifts later display offsets and clears unstable selections |
+| `delete` | `scope`; optional `kind` | Delete a range. Default `kind = "tombstone"` preserves display slots; `kind = "real"` shifts offsets |
+| `fill` | `offset`, `pattern`, `len` | Replacement-only repeated pattern overwrite |
+| `xor` | `scope`, `key`, `in_place = true` | XOR selected/logical bytes in place |
+| `replace` | `scope`, `needle`, `replacement`; optional `mode`, `allow_resize`, `force` | Replace matches; length-changing replacement requires `allow_resize = true` |
+| `export-binary` | `scope`, `path` | Export bytes to a file. Relative paths are resolved from the macro file directory |
+| `save` | optional `path` | Save in place or save as. A successful save clears undo history before later edits |
+
+Ranges are explicit: `scope = "selection"`, `scope = "all"`, or an inline
+range like `scope = { space = "display", start = "0x100", len = 16 }`. Bytes
+fields use hex streams by default, such as `"de ad be ef"`; `search` and
+`replace` also support `mode = "text"` and `mode = "byte"`.
 
 Result-producing steps can optionally bind an `id`. `read` stores the selected
 logical bytes, `hash` stores the digest bytes plus compact lowercase hex text,
@@ -232,17 +255,104 @@ The `format` field defaults to `bytes`; `hex-text` writes ASCII hex. Variable
 references are accepted in byte-valued fields such as `bytes`, `pattern`,
 `needle`, and `replacement`.
 
+Example: search for a marker, select the match, compute a CRC32, write the CRC
+as ASCII hex after the marker, then save:
+
+```toml
+version = 1
+selection = "clear"
+
+[[steps]]
+cmd = "search"
+id = "marker"
+pattern = "de ad be ef"
+select = "match"
+
+[[steps]]
+cmd = "hash"
+id = "marker_crc32"
+algorithm = "crc32"
+scope = "selection"
+
+[[steps]]
+cmd = "overwrite"
+offset = "cursor+4"
+bytes = { from = "marker_crc32", format = "hex-text" }
+
+[[steps]]
+cmd = "save"
+```
+
+In the TUI, the macro result updates the cursor and selection. In headless
+mode, the process exits after the requested macro/script/command list finishes.
+No edit is written to disk unless a macro step or later command saves.
+
+Practical macro examples live in [examples/](../examples/):
+
+| File | Use case |
+|---|---|
+| `firmware_header_crc.hxmacro` | Repair a fixed firmware header CRC and reserved bytes |
+| `extract_selected_record.hxmacro` | Export, hash, XOR-decode, and audit an inherited selection |
+| `sanitize_log_copy.hxmacro` | Produce a sanitized log copy via replacement and export |
+| `strip_debug_marker.hxmacro` | Remove a trailing debug marker and save a trimmed copy |
+
 ## Rhai Scripts
 
 `:script <path>` runs a Rhai script in the TUI, and `--script <path>` runs the
 same script headlessly. Both paths use the same execution layer. TUI scripts
 inherit the current Visual / inspector selection and are pushed as one undo
-step unless the script calls `hx_save()`.
+step unless the script calls `hx_save()`. Rhai scripting is included in
+`default` and `full` builds; `core` / `--no-default-features` builds reject
+`:script` and `--script` with a feature error.
 
-The demo API is intentionally small and prefixed with `hx_`: `hx_hex`, `hx_ascii`,
-`hx_search`, `hx_select_display`, `hx_read_display`, `hx_read_selection`,
-`hx_hash_hex`, `hx_overwrite`, `hx_insert`, `hx_fill`, `hx_goto`,
-`hx_clear_selection`, `hx_cursor`, `hx_len_display`, and `hx_save`.
+The script API is intentionally constrained to execution-layer operations and
+prefixed with `hx_`:
+
+| Function | Returns | Description |
+|---|---|---|
+| `hx_hex(text)` | bytes blob | Parse a hex stream such as `"de ad be ef"` |
+| `hx_ascii(text)` | bytes blob | Convert text to raw bytes |
+| `hx_cursor()` | integer | Current display cursor |
+| `hx_len_display()` | integer | Current display length |
+| `hx_len_logical()` | integer | Current logical byte length |
+| `hx_goto(offset)` | none | Move to an absolute display offset |
+| `hx_goto_end()` | none | Move to the final display offset, or `0` for an empty document |
+| `hx_select_display(start, len)` | none | Set a display-space selection |
+| `hx_select_logical(start, len)` | none | Set a logical-space selection |
+| `hx_clear_selection()` | none | Clear the current selection |
+| `hx_has_selection()` | bool | Whether a selection is active |
+| `hx_selection_start()` | integer | Current selection start; errors without a selection |
+| `hx_selection_len()` | integer | Current selection length; errors without a selection |
+| `hx_selection_space()` | string | Current selection space: `"display"` or `"logical"` |
+| `hx_read_display(start, len)` | bytes blob | Read logical bytes covered by a display range |
+| `hx_read_logical(start, len)` | bytes blob | Read logical bytes covered by a logical range |
+| `hx_read_selection()` | bytes blob | Read logical bytes from the current selection |
+| `hx_search(bytes)` | integer | Compatibility alias for `hx_search_forward(bytes)` |
+| `hx_search_forward(bytes)` / `hx_search_backward(bytes)` | integer | Search from the current cursor; returns the display offset or `-1` |
+| `hx_search_forward_select(bytes)` / `hx_search_backward_select(bytes)` | integer | Search and select the matched display range |
+| `hx_hash_hex(algorithm)` | string | Hash the current selection, or the whole file when no selection exists |
+| `hx_hash_display_hex(start, len, algorithm)` | string | Hash a display range |
+| `hx_hash_logical_hex(start, len, algorithm)` | string | Hash a logical range |
+| `hx_hash_selection_hex(algorithm)` | string | Hash the current selection; errors without a selection |
+| `hx_hash_all_hex(algorithm)` | string | Hash all current logical bytes |
+| `hx_overwrite(offset, bytes)` | none | Replacement-only overwrite at a display offset |
+| `hx_insert(offset, bytes)` | none | Real insert at a display offset |
+| `hx_fill(offset, pattern, len)` | none | Replacement-only repeated pattern overwrite |
+| `hx_delete_display(start, len)` / `hx_delete_logical(start, len)` / `hx_delete_selection()` | none | Tombstone delete; display slots remain and logical bytes disappear |
+| `hx_delete_real_display(start, len)` / `hx_delete_real_logical(start, len)` / `hx_delete_real_selection()` | none | Real delete; following display offsets shift left |
+| `hx_xor_display(start, len, key)` / `hx_xor_logical(start, len, key)` / `hx_xor_selection(key)` | none | Replacement-only XOR in place; `key` is `0..255` |
+| `hx_replace_all(needle, replacement, allow_resize, force)` | none | Replace all matches in the current logical bytes |
+| `hx_replace_display(start, len, needle, replacement, allow_resize, force)` | none | Replace matches in a display range |
+| `hx_replace_logical(start, len, needle, replacement, allow_resize, force)` | none | Replace matches in a logical range |
+| `hx_replace_selection(needle, replacement, allow_resize, force)` | none | Replace matches in the current selection |
+| `hx_export_display(start, len, path)` / `hx_export_logical(start, len, path)` / `hx_export_selection(path)` | none | Export logical bytes to a binary file |
+| `hx_save()` | none | Save the current document |
+| `hx_save_as(path)` | none | Save to another path |
+
+Relative paths passed to `hx_export_*` and `hx_save_as()` are resolved from the
+script file directory. `allow_resize = false` keeps replace operations
+replacement-only; `allow_resize = true` permits real delete / insert behavior
+and clears the selection.
 
 Default script budgets are `2,000,000` Rhai operations, `100,000` exec calls,
 `512 MiB` total bytes returned to the script by reads, `64 MiB` per read, and
@@ -250,17 +360,53 @@ Default script budgets are `2,000,000` Rhai operations, `100,000` exec calls,
 streaming document paths and do not materialize the whole file in the VM unless
 the script explicitly calls `hx_read_*`.
 
-Example:
+Example script:
+
+```rhai
+let marker = hx_hex("de ad be ef");
+
+hx_goto(0);
+let hit = hx_search_forward_select(marker);
+if hit < 0 {
+    throw "marker not found";
+}
+
+let digest = hx_hash_selection_hex("crc32");
+hx_overwrite(hit + 4, hx_ascii(digest));
+hx_save();
+```
+
+Run it headlessly:
 
 ```bash
 hxedit sample.bin --script examples/simple_hash_patch.hxscript
 ```
 
-From the TUI command line:
+Or from the TUI command line:
 
 ```text
 :script examples/simple_hash_patch.hxscript
 ```
+
+Headless command lists can mix scripts with ordinary exec-compatible commands:
+
+```bash
+hxedit sample.bin --command "script patch.hxscript" --command w
+```
+
+Use macros when the workflow is a fixed list of declared steps. Use scripts
+when you need branching, loops, or when later offsets/bytes depend on earlier
+search, read, or hash results.
+
+Practical script examples live in [examples/](../examples/):
+
+| File | Use case |
+|---|---|
+| `simple_hash_patch.hxscript` | Patch a marker-adjacent CRC32 |
+| `extract_payload_between_markers.hxscript` | Export bytes between markers and stamp a SHA-256 |
+| `decode_selected_xor.hxscript` | Decode an inherited XOR selection and save audit artifacts |
+| `sanitize_log_copy.hxscript` | Sanitize common log tokens and normalize line endings |
+| `trim_debug_trailer.hxscript` | Remove debug/volatile markers in a saved copy |
 
 Memory-related commands in `default`, `full`, or other `memory` builds:
 

@@ -1,0 +1,30 @@
+let begin_marker = hx_ascii("BEGIN_PAYLOAD\n");
+let end_marker = hx_ascii("\nEND_PAYLOAD");
+
+hx_goto(0);
+let begin = hx_search_forward(begin_marker);
+if begin < 0 {
+    throw "BEGIN_PAYLOAD marker not found";
+}
+
+let payload_start = begin + 14;
+hx_goto(payload_start);
+let end = hx_search_forward(end_marker);
+if end < 0 {
+    throw "END_PAYLOAD marker not found";
+}
+
+let payload_len = end - payload_start;
+if payload_len <= 0 {
+    throw "payload is empty";
+}
+
+hx_select_display(payload_start, payload_len);
+hx_export_selection("payload.bin");
+
+let digest = hx_hash_selection_hex("sha256");
+
+// This assumes a 64-byte ASCII SHA-256 placeholder immediately after
+// "\nEND_PAYLOAD".
+hx_overwrite(end + 12, hx_ascii(digest));
+hx_save_as("with-payload-sha256.bin");

@@ -44,6 +44,18 @@ hxedit some.bin --script examples/simple_hash_patch.hxscript
 hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 ```
 
+也可以在 TUI 命令行里执行同类自动化：
+
+```text
+:source patch.hxmacro
+:script examples/simple_hash_patch.hxscript
+```
+
+宏文件使用 TOML，适合可重复的声明式编辑流程；Rhai 脚本适合后续编辑依赖前面
+search / read / hash 结果的场景。两条路径都复用与手动编辑相同的 byte 执行层。
+更多实际宏 / 脚本配方见 [examples/README.md](examples/README.md)，覆盖 header
+修复、记录提取、日志脱敏和 payload carve 等场景。
+
 ## 按键
 
 `hxedit` 采用类似 vim 的模式化操作。按 `:` 执行命令，按 `Esc` 回到 normal 模式。

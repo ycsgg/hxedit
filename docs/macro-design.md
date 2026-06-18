@@ -18,7 +18,7 @@
 - 第一阶段不录制原始按键序列。
 - 第一阶段不把 side panel、render、状态栏、terminal event loop、clipboard 写入执行层。
 - 第一阶段不让宏操作 `:diff`、`:insp`、`:sym`、`:data` 这类 UI / 投影视图命令。
-- 第一阶段不承诺脚本语言。先完成声明式宏，再评估可选 `scripting` feature。
+- 脚本语言不引入新的编辑语义；它只是更灵活的 `ExecCommand` 生成器。
 
 ---
 
@@ -418,37 +418,167 @@ Headless 路径直接打开 file-backed `Document` 并创建 `ExecState`，不�
 
 ## 10. 脚本层
 
-已加入 Rhai demo，入口是 TUI `:script <path>` 或 headless `--script <path>` / `--command "script <path>"`。当前只提供一组 `hx_` 前缀 host
-API，并继续满足：
+已加入 Rhai 脚本入口：TUI `:script <path>`、headless `--script <path>`、
+`--command "script <path>"`。脚本只提供一组 `hx_` 前缀 host API，并继续满足：
 
 - 放在可选 feature，例如 `scripting`。
 - 脚本只能调用 host API，host API 只生成并执行 `ExecCommand`。
 - 脚本不能拿到 `&mut Document`。
 - 脚本读取大范围 bytes 必须有预算。当前默认：总读取 `512 MiB`、单次读取 `64 MiB`、
   单个 bytes blob `64 MiB`。
-- 脚本步骤数、读字节数、写字节数、输出 artifact 数都要有上限。
+- 脚本 Rhai operation、执行层调用次数、读字节数和返回给脚本的 blob 大小都有上限。
+  写入、export、save-as 继续通过执行层路径做语义和 IO 校验。
 
-当前 demo Host API：
+当前 Host API：
 
 ```text
 hx_cursor()
 hx_len_display()
+hx_len_logical()
 hx_hex(text)
 hx_ascii(text)
 hx_goto(offset)
+hx_goto_end()
 hx_select_display(start, len)
+hx_select_logical(start, len)
 hx_clear_selection()
+hx_has_selection()
+hx_selection_start()
+hx_selection_len()
+hx_selection_space()
 hx_read_display(start, len)
+hx_read_logical(start, len)
 hx_read_selection()
 hx_search(pattern)
+hx_search_forward(pattern)
+hx_search_backward(pattern)
+hx_search_forward_select(pattern)
+hx_search_backward_select(pattern)
 hx_hash_hex(algorithm)
+hx_hash_display_hex(start, len, algorithm)
+hx_hash_logical_hex(start, len, algorithm)
+hx_hash_selection_hex(algorithm)
+hx_hash_all_hex(algorithm)
 hx_overwrite(offset, bytes)
 hx_insert(offset, bytes)
 hx_fill(offset, pattern, len)
+hx_delete_display(start, len)
+hx_delete_logical(start, len)
+hx_delete_selection()
+hx_delete_real_display(start, len)
+hx_delete_real_logical(start, len)
+hx_delete_real_selection()
+hx_xor_display(start, len, key)
+hx_xor_logical(start, len, key)
+hx_xor_selection(key)
+hx_replace_all(needle, replacement, allow_resize, force)
+hx_replace_display(start, len, needle, replacement, allow_resize, force)
+hx_replace_logical(start, len, needle, replacement, allow_resize, force)
+hx_replace_selection(needle, replacement, allow_resize, force)
+hx_export_display(start, len, path)
+hx_export_logical(start, len, path)
+hx_export_selection(path)
 hx_save()
+hx_save_as(path)
 ```
 
 脚本只是更灵活的宏生成器，不拥有新的编辑语义。
+
+### 10.1 Script API 暴露原则
+
+后续扩展 Script API 时按以下边界推进：
+
+- 只暴露可映射到 `ExecCommand` 的数据操作，不暴露 `Document`、`PieceTable`、
+  page cache、render、side panel、clipboard、terminal event loop 或 App 内部状态。
+- API 名字继续使用 `hx_` 前缀，默认显式表达 range space / scope，不用 TUI
+  命令里的隐式选区规则。
+- 写操作必须在名字中保留编辑语义。尤其 `hx_delete_*` 默认表示 tombstone delete，
+  real delete 必须写成 `hx_delete_real_*`。
+- 大范围读取、hash、export 继续走执行层 streaming path；返回给脚本的 bytes 仍受
+  单次读取、总读取、blob 大小和 exec 调用预算限制。
+- `:script` 在 TUI 中继续作为一个 undo step 聚合；脚本内部不暴露 undo / redo。
+  如果脚本调用 save，继续沿用 save 成功后清空 undo / redo 的不变量。
+- 脚本错误通过 Rhai exception 失败，已经执行的编辑按当前脚本事务规则保留；
+  不在脚本层新增独立 rollback 语义。
+
+暂不暴露：
+
+- `undo` / `redo` / 手工拆分事务。
+- `:diff`、`:insp`、`:sym`、`:data`、`:mem` 这类 UI / 投影视图 / 进程控制命令。
+- 任意 shell 执行或任意文件读写。文件输出只走 `hx_export_*` / `hx_save_as`。
+- 原始 format tree 或 inspector editable field 句柄；需要时先进入 exec 层的显式
+  range / overwrite 语义。
+
+### 10.2 扩展 API 分组
+
+已补齐 macro / exec 已有能力，让脚本可以完成“搜索 / 读取 / hash 结果再编辑”
+以及常见批处理：
+
+```text
+hx_select_logical(start, len)
+
+hx_read_logical(start, len)
+
+hx_hash_display_hex(start, len, algorithm)
+hx_hash_logical_hex(start, len, algorithm)
+hx_hash_selection_hex(algorithm)
+hx_hash_all_hex(algorithm)
+
+hx_search_forward(pattern)
+hx_search_backward(pattern)
+hx_search_forward_select(pattern)
+hx_search_backward_select(pattern)
+
+hx_delete_display(start, len)
+hx_delete_logical(start, len)
+hx_delete_selection()
+hx_delete_real_display(start, len)
+hx_delete_real_logical(start, len)
+hx_delete_real_selection()
+
+hx_xor_display(start, len, key)
+hx_xor_logical(start, len, key)
+hx_xor_selection(key)
+
+hx_export_display(start, len, path)
+hx_export_logical(start, len, path)
+hx_export_selection(path)
+
+hx_save_as(path)
+```
+
+脚本便利 API 只读或低风险：
+
+```text
+hx_len_logical()
+hx_goto_end()
+hx_has_selection()
+hx_selection_start()
+hx_selection_len()
+hx_selection_space()
+```
+
+replace 比 overwrite / insert / delete 风险更高，因为可能改变长度、跨范围、触发
+force 语义，因此单独分组维护和测试：
+
+```text
+hx_replace_all(needle, replacement, allow_resize, force)
+hx_replace_selection(needle, replacement, allow_resize, force)
+hx_replace_display(start, len, needle, replacement, allow_resize, force)
+hx_replace_logical(start, len, needle, replacement, allow_resize, force)
+```
+
+### 10.3 后续维护顺序
+
+后续继续扩展 Script API 时仍按这个顺序：
+
+1. 先做 logical range、显式 scope、search direction / select 这类低风险读操作。
+2. 再做 delete / xor / export / save-as 这类 execution-layer 对等操作，确保名称直接表达 tombstone 与 real delete。
+3. replace / resize 类 API 单独实现，并单独覆盖 resize、force、selection、range 边界。
+4. 只读 introspection helper 可以补，但不能反向驱动新的编辑语义。
+
+每批实现时同步用户文档中的 Script API 表、`commands/hints.rs` 中的命令提示以及
+`--no-default-features` 行为说明。
 
 ---
 
@@ -469,16 +599,35 @@ hx_save()
 
 若新增宏写操作，固定 seed document fuzz 也应补同构模型操作。
 
+新增 Script API 时至少覆盖：
+
+- 每个新增 API 与对应 `ExecCommand` / macro step 的同构结果。
+- TUI `:script` 继承 Visual / inspector selection 后的 read / hash / write。
+- 正常手动编辑、`:source`、`:script`、headless `--script`、`--command "script ..."`
+  混合后 undo / save / dirty / cursor / selection 不回退。
+- tombstone delete 与 real delete 的 display len、logical len、save bytes、undo 行为。
+- 大 read / hash / export、超大 blob、无效 range、缺失 selection、无效 algorithm、
+  无效 path 的失败路径。
+- `--no-default-features` 下继续拒绝 `:script` / `--script` / `--command "script ..."`。
+
 ---
 
-## 12. 推荐落地顺序
+## 12. 后续落地顺序
 
-1. 新增 `ExecCommand`、`ExecScope`、`ExecState`、`ExecStep`、batch runner。
-2. 把 `fill`、`xor!`、`replace`、`delete`、`insert`、`overwrite`、`hash`、`export`、`search`、`goto` 逐步委托到 exec runner。
-3. 给 `ExecSession` 接入 undo / redo 和 `execute_batch`。
-4. 新增 TOML 宏 parser 和 `:source <path>`。
-5. 新增 headless `--run` / `--command`。
-6. 新增 headless Rhai `--script` demo。
-7. 新增录制命令。
+当前 `ExecCommand` / batch runner / TOML 宏 / TUI `:source` / Rhai `:script` /
+headless `--run`、`--script`、`--command` 已落地。后续按以下顺序推进：
+
+1. 继续按 §10.1 的边界维护 Script API；当前 execution-layer 对等 host API 已补齐。
+2. 补 headless `--json`，输出结构化 `ExecOutcome` / `ExecBatchOutcome`，便于外部工具消费。
+3. 评估录制命令：
+
+```text
+:macro record <name>
+:macro stop
+:macro run <name>
+```
+
+录制只记录已经成功执行的 exec-compatible 命令；不录制裸按键、side panel navigation、
+render 状态或 UI-only 命令。
 
 每一步都应保持 App 层原行为不漂移。结构移动和编辑语义变更不得混在同一个阶段。

@@ -1,0 +1,9 @@
+hx_replace_all(hx_ascii("DEBUG"), hx_ascii("INFO "), false, true);
+hx_replace_all(hx_ascii("SECRET"), hx_ascii("REDACT"), false, true);
+hx_replace_all(hx_ascii("password"), hx_ascii("********"), false, true);
+
+// Normalize CRLF to LF in the copy. This is a resize replace, so it uses real
+// delete / insert semantics internally and clears unstable selections.
+hx_replace_all(hx_ascii("\r\n"), hx_ascii("\n"), true, true);
+
+hx_save_as("sanitized-log.bin");

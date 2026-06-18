@@ -1,0 +1,44 @@
+# Example layout:
+#   0x00..0x03  image magic
+#   0x04..0x0b  ASCII CRC32 placeholder for payload
+#   0x0c..0x0f  reserved flags to clear
+#   0x10..0x2f  payload bytes
+#
+# The macro writes CRC32(payload) as lowercase ASCII hex into the header,
+# clears reserved flags, appends a copy of the magic as a footer marker, then
+# saves in place.
+
+version = 1
+selection = "clear"
+undo = "group"
+on_error = "stop"
+
+[[steps]]
+cmd = "read"
+id = "image_magic"
+scope = { space = "display", start = "0x0", len = 4 }
+
+[[steps]]
+cmd = "hash"
+id = "payload_crc32"
+algorithm = "crc32"
+scope = { space = "display", start = "0x10", len = "0x20" }
+
+[[steps]]
+cmd = "overwrite"
+offset = "0x4"
+bytes = { from = "payload_crc32", format = "hex-text" }
+
+[[steps]]
+cmd = "fill"
+offset = "0x0c"
+pattern = "00"
+len = 4
+
+[[steps]]
+cmd = "insert"
+offset = "0x30"
+bytes = { from = "image_magic" }
+
+[[steps]]
+cmd = "save"

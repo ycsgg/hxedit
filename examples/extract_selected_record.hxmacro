@@ -1,0 +1,55 @@
+# Use with an active TUI Visual/inspector selection, or headlessly with:
+#
+#   hxedit sample.bin --select display:0x80:32 --run extract_selected_record.hxmacro
+#
+# The macro exports the selected record, hashes it, XOR-decodes it in place,
+# prepends the record SHA-256 as an audit tag, and writes a decoded copy.
+
+version = 1
+selection = "require"
+undo = "group"
+on_error = "stop"
+
+[[steps]]
+cmd = "read"
+id = "record"
+scope = "selection"
+
+[[steps]]
+cmd = "hash"
+id = "record_sha256"
+algorithm = "sha256"
+scope = "selection"
+
+[[steps]]
+cmd = "export-binary"
+scope = "selection"
+path = "selected-record.original.bin"
+
+[[steps]]
+cmd = "xor"
+scope = "selection"
+key = "0xaa"
+in_place = true
+
+[[steps]]
+cmd = "export-binary"
+scope = "selection"
+path = "selected-record.decoded.bin"
+
+[[steps]]
+cmd = "clear-selection"
+
+[[steps]]
+cmd = "insert"
+offset = "0x0"
+bytes = { from = "record_sha256", format = "hex-text" }
+
+[[steps]]
+cmd = "insert"
+offset = "0x40"
+bytes = { from = "record" }
+
+[[steps]]
+cmd = "save"
+path = "decoded-with-audit.bin"

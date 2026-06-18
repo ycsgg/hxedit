@@ -1,11 +1,10 @@
 let needle = hx_hex("de ad be ef");
-let hit = hx_search(needle);
+let hit = hx_search_forward_select(needle);
 
 if hit < 0 {
     throw "needle not found";
 }
 
-hx_select_display(hit, 4);
-let digest = hx_hash_hex("crc32");
+let digest = hx_hash_selection_hex("crc32");
 hx_overwrite(hit + 4, hx_ascii(digest));
 hx_save();

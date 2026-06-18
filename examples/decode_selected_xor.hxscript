@@ -1,0 +1,27 @@
+if !hx_has_selection() {
+    throw "select an obfuscated record first";
+}
+
+let start = hx_selection_start();
+let len = hx_selection_len();
+let space = hx_selection_space();
+if start < 0 || len <= 0 {
+    throw "invalid selection metadata";
+}
+
+let before = hx_hash_selection_hex("sha256");
+hx_export_selection("selection.before-xor.bin");
+
+hx_xor_selection(0xaa);
+
+let after = hx_hash_selection_hex("sha256");
+hx_export_selection("selection.after-xor.bin");
+
+let header = "decoded-selection-space=" + space
+    + "\noriginal-sha256=" + before
+    + "\ndecoded-sha256=" + after
+    + "\n";
+
+hx_clear_selection();
+hx_insert(0, hx_ascii(header));
+hx_save_as("decoded-selection-with-audit.bin");

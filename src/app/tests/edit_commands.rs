@@ -192,8 +192,11 @@ fn script_command_runs_rhai_steps_as_grouped_undo() {
     fs::write(
         &script_path,
         r#"
-hx_select_display(0, 4);
-let digest = hx_hash_hex("crc32");
+let hit = hx_search_forward_select(hx_ascii("abcd"));
+if hit != 0 || hx_selection_len() != 4 || hx_selection_space() != "display" {
+    throw "bad match selection";
+}
+let digest = hx_hash_selection_hex("crc32");
 hx_overwrite(4, hx_ascii(digest));
 hx_insert(0, hx_ascii("!"));
 hx_fill(1, hx_hex("41"), 1);
@@ -223,6 +226,47 @@ hx_fill(1, hx_hex("41"), 1);
     assert_eq!(
         app.document.logical_bytes(0, 11).unwrap(),
         b"abcd........".to_vec()
+    );
+}
+
+#[cfg(feature = "scripting")]
+#[test]
+fn script_command_inherits_visual_selection_for_new_api() {
+    let dir = tempdir().unwrap();
+    let script_path = dir.path().join("xor_selection.hxscript");
+    fs::write(
+        &script_path,
+        r#"
+if !hx_has_selection() || hx_selection_start() != 1 || hx_selection_len() != 2 {
+    throw "missing inherited selection";
+}
+if hx_hash_selection_hex("crc32") == "" {
+    throw "missing selection hash";
+}
+hx_xor_selection(255);
+"#,
+    )
+    .unwrap();
+
+    let mut app = app_with_bytes(&[0x00, 0x11, 0x22, 0x33]);
+    app.cursor = 1;
+    app.toggle_visual();
+    app.move_horizontal(1);
+
+    app.execute_command(Command::Script { path: script_path })
+        .unwrap();
+
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0x00, 0xee, 0xdd, 0x33]
+    );
+    assert_eq!(app.selection_range(), Some((1, 2)));
+    assert_eq!(app.undo_stack.len(), 1);
+
+    app.undo(1, true).unwrap();
+    assert_eq!(
+        app.document.logical_bytes(0, 3).unwrap(),
+        vec![0x00, 0x11, 0x22, 0x33]
     );
 }
 
