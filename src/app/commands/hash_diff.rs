@@ -3,14 +3,24 @@ use super::*;
 impl App {
     pub(super) fn execute_hash_command(&mut self, algorithm: HashAlgorithm) -> HxResult<()> {
         let selection = self.active_selection_range();
-        let (start, end) = if let Some((start, end)) = selection {
-            (start, end)
+        let (start, end, scope) = if let Some((start, end)) = selection {
+            (start, end, crate::app::hash_state::HashScope::Selection)
         } else if self.document.is_empty() {
             self.set_info_status(format!("{}: no data to hash", algorithm.label()));
             return Ok(());
         } else {
-            (0, self.document.len() - 1)
+            (
+                0,
+                self.document.len() - 1,
+                crate::app::hash_state::HashScope::EntireFile,
+            )
         };
+
+        let display_total = end.saturating_sub(start).saturating_add(1);
+        if display_total > crate::app::hash_state::HASH_PROGRESS_STEP_BYTES {
+            self.start_hash_scan(algorithm, scope, start, end);
+            return Ok(());
+        }
 
         let hash = crate::exec::hash_display_range(&mut self.document, algorithm, start, end)?;
         let bytes_hashed = hash.bytes_hashed;
@@ -20,29 +30,7 @@ impl App {
             return Ok(());
         }
 
-        let scope = if selection.is_some() {
-            format!("sel 0x{:x}-0x{:x}", start, end)
-        } else {
-            "entire file".to_owned()
-        };
-
-        if crate::clipboard::copy_text(&hash.hex).is_ok() {
-            self.set_info_status(format!(
-                "{} [{}]: {} ({} bytes) [copied]",
-                algorithm.label(),
-                scope,
-                hash.hex,
-                bytes_hashed
-            ));
-        } else {
-            self.set_info_status(format!(
-                "{} [{}]: {} ({} bytes)",
-                algorithm.label(),
-                scope,
-                hash.hex,
-                bytes_hashed
-            ));
-        }
+        self.set_hash_result_status(algorithm, scope.label(start, end), hash.hex, bytes_hashed);
         Ok(())
     }
 

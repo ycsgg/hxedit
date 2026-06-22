@@ -76,15 +76,9 @@ fn status_items(info: StatusInfo<'_>, palette: &Palette) -> Vec<StatusItem> {
         push_core_status_items(&mut items, &info, cursor_label, palette);
         push_context_status_items(&mut items, &info, palette, true);
         if !info.message.is_empty() {
-            let priority = match info.message_level {
-                StatusLevel::Notice => 3,
-                StatusLevel::Info => 4,
-                StatusLevel::Warning | StatusLevel::Error => unreachable!(),
-            };
-            items.push(StatusItem::optional(
+            items.push(StatusItem::required(
                 info.message.to_owned(),
                 message_style,
-                priority,
                 true,
             ));
         }
@@ -543,6 +537,68 @@ mod tests {
             .find(|span| span.content.contains("analysis outdated"))
             .expect("warning message span");
         assert_eq!(warning_span.style.bg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn long_info_message_is_preserved_on_narrow_status_line() {
+        let palette = Palette::new(ColorLevel::NoColor);
+        let line = build(
+            StatusInfo {
+                main_view_label: None,
+                mode: Mode::Normal,
+                path: "/very/long/path/that/should/not/hide/hash/results/sample.bin",
+                cursor: 0x14190,
+                cursor_label: None,
+                display_len: 314572800,
+                visible_len: 314572800,
+                selection_span: None,
+                selection_logical_len: None,
+                paste_info: None,
+                dirty: false,
+                message: "sha256 [entire file]: 254bcc3fc4f27172636df4bf32de9f107f620d559b20d760197e452b97453917 (134217728 bytes) [copied]",
+                message_level: StatusLevel::Info,
+                readonly: false,
+            },
+            80,
+            &palette,
+        );
+
+        let text = line_text(&line);
+        assert!(text_width(&text) <= 80);
+        assert!(text.contains("sha256 [entire file]"));
+        assert!(text.contains('…'));
+        assert!(!text.contains("very/long/path"));
+    }
+
+    #[test]
+    fn long_notice_message_is_preserved_on_narrow_status_line() {
+        let palette = Palette::new(ColorLevel::Basic);
+        let line = build(
+            StatusInfo {
+                main_view_label: None,
+                mode: Mode::Normal,
+                path: "/very/long/path/that/should/not/hide/progress/sample.bin",
+                cursor: 0,
+                cursor_label: None,
+                display_len: 314572800,
+                visible_len: 314572800,
+                selection_span: None,
+                selection_logical_len: None,
+                paste_info: None,
+                dirty: false,
+                message: "hashing sha256 [entire file]... 128 MiB / 300 MiB checked (43%); 128 MiB logical hashed; Esc to cancel",
+                message_level: StatusLevel::Notice,
+                readonly: false,
+            },
+            80,
+            &palette,
+        );
+
+        let text = line_text(&line);
+        assert!(text_width(&text) <= 80);
+        assert!(text.contains("hashing sha256"));
+        assert!(text.contains('…'));
+        assert!(!text.contains("very/long/path"));
     }
 
     #[test]

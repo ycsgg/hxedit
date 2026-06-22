@@ -73,3 +73,103 @@ fn hash_command_various_algorithms_and_ranges() {
     .unwrap();
     assert!(app5.status_message.contains("no data"));
 }
+
+#[test]
+fn hash_large_file_reports_progress_across_ticks() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("large-hash.bin");
+    let size = crate::app::hash_state::HASH_PROGRESS_STEP_BYTES * 2 + 1;
+    let mut source = fs::File::create(&file).unwrap();
+    source.set_len(size).unwrap();
+    source.seek(SeekFrom::Start(size - 1)).unwrap();
+    source.write_all(&[1]).unwrap();
+
+    let cli = Cli {
+        file: Some(file),
+        pid: None,
+        process: None,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+        run: Vec::new(),
+        command: Vec::new(),
+        select: None,
+        script: Vec::new(),
+    };
+    let mut app = App::from_cli(cli).unwrap();
+
+    app.execute_command(Command::Hash {
+        algorithm: HashAlgorithm::Crc32,
+    })
+    .unwrap();
+
+    assert!(app.hash_scan_pending());
+    assert!(app.status_message.contains("hashing crc32"));
+    assert!(app.status_message.contains("Esc to cancel"));
+
+    app.continue_hash_scan().unwrap();
+    assert!(app.hash_scan_pending());
+    assert!(app.status_message.contains("logical hashed"));
+
+    let mut steps = 1;
+    while app.hash_scan_pending() {
+        app.continue_hash_scan().unwrap();
+        steps += 1;
+        assert!(steps <= 4);
+    }
+
+    assert!(steps > 1);
+    assert!(app.status_message.contains("crc32"));
+    assert!(app.status_message.contains("entire file"));
+    assert!(app.status_message.contains(&format!("({size} bytes)")));
+}
+
+#[test]
+fn hash_large_file_blocks_input_until_escape() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("cancel-hash.bin");
+    let size = crate::app::hash_state::HASH_PROGRESS_STEP_BYTES + 1;
+    let source = fs::File::create(&file).unwrap();
+    source.set_len(size).unwrap();
+
+    let cli = Cli {
+        file: Some(file),
+        pid: None,
+        process: None,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+        run: Vec::new(),
+        command: Vec::new(),
+        select: None,
+        script: Vec::new(),
+    };
+    let mut app = App::from_cli(cli).unwrap();
+
+    app.execute_command(Command::Hash {
+        algorithm: HashAlgorithm::Sha256,
+    })
+    .unwrap();
+    assert!(app.hash_scan_pending());
+
+    app.handle_action(Action::MoveDown);
+    assert_eq!(app.cursor, 0);
+    assert!(app.hash_scan_pending());
+    assert!(app.status_message.contains("hashing sha256"));
+
+    app.handle_action(Action::LeaveMode);
+    assert!(!app.hash_scan_pending());
+    assert!(app.status_message.contains("hash canceled"));
+}

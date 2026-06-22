@@ -28,7 +28,7 @@ pub fn hash_display_range(
     })
 }
 
-fn make_hasher(algorithm: HashAlgorithm) -> Box<dyn digest::DynDigest> {
+pub(crate) fn make_hasher(algorithm: HashAlgorithm) -> Box<dyn digest::DynDigest> {
     use digest::Digest;
     match algorithm {
         HashAlgorithm::Md5 => Box::new(md5::Md5::new()),

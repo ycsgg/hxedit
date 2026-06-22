@@ -172,7 +172,8 @@ pub fn hint_for(input: &str) -> CommandHint {
         },
         name if is_alias(name, HASH_ALIASES) => CommandHint {
             syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
-            details: "compute hash of the current selection (visual or selected inspector field), or the entire file if no selection is active".to_owned(),
+            details: "compute hash of the current selection (visual or selected inspector field), or the entire file if no selection is active; large ranges report progress and Esc cancels"
+                .to_owned(),
         },
         name if is_alias(name, DIFF_ALIASES) => {
             let syntax = match rest.map(str::trim) {

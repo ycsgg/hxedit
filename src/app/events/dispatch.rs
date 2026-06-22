@@ -2,6 +2,14 @@ use super::*;
 
 impl App {
     pub(super) fn dispatch_action(&mut self, action: Action) -> HxResult<()> {
+        if self.hash_scan_pending() {
+            if matches!(action, Action::LeaveMode | Action::CommandCancel) {
+                self.cancel_hash_scan(Some("hash canceled"));
+                return Ok(());
+            }
+            self.report_hash_scan_blocked_input();
+            return Ok(());
+        }
         if self.diff_mismatch_scan_pending() {
             if matches!(action, Action::LeaveMode | Action::CommandCancel) {
                 self.cancel_diff_mismatch_scan(Some("diff scan canceled"));

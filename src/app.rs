@@ -14,6 +14,7 @@ mod diff_state;
 mod disasm_editing;
 mod editing_state;
 mod events;
+mod hash_state;
 mod inspector_state;
 mod memory_state;
 mod mode_state;
@@ -150,6 +151,8 @@ pub struct App {
     data_state: Option<DataState>,
     /// Cached diff side panel state.
     diff_state: Option<DiffState>,
+    /// Pending chunked hash operation for large ranges.
+    pending_hash_scan: Option<hash_state::HashProgressScan>,
     #[cfg(feature = "sagitta-analysis")]
     analysis_job_id: u64,
     #[cfg(feature = "sagitta-analysis")]
@@ -570,6 +573,7 @@ impl App {
             symbol_state: None,
             data_state: None,
             diff_state: None,
+            pending_hash_scan: None,
             #[cfg(feature = "sagitta-analysis")]
             analysis_job_id: 0,
             #[cfg(feature = "sagitta-analysis")]
@@ -725,14 +729,19 @@ impl App {
             terminal.draw(|frame| self.render(frame))?;
             #[cfg(feature = "sagitta-analysis")]
             self.drain_background_results();
-            if self.diff_mismatch_scan_pending() {
+            if self.hash_scan_pending() {
+                if let Err(err) = self.continue_hash_scan() {
+                    self.cancel_hash_scan(None);
+                    self.set_error_status(err.to_string());
+                }
+            } else if self.diff_mismatch_scan_pending() {
                 if let Err(err) = self.continue_diff_mismatch_scan() {
                     self.cancel_diff_mismatch_scan(None);
                     self.set_error_status(err.to_string());
                 }
             }
             let poll_start = self.profiler.as_ref().map(|_| Instant::now());
-            let poll_timeout = if self.diff_mismatch_scan_pending() {
+            let poll_timeout = if self.hash_scan_pending() || self.diff_mismatch_scan_pending() {
                 Duration::from_millis(0)
             } else {
                 Duration::from_millis(250)
@@ -746,6 +755,14 @@ impl App {
                     Event::Key(key) => {
                         if let Some(profiler) = self.profiler.as_mut() {
                             profiler.record_key_event();
+                        }
+                        if self.hash_scan_pending() {
+                            if matches!(key.code, KeyCode::Esc) {
+                                self.cancel_hash_scan(Some("hash canceled"));
+                            } else {
+                                self.report_hash_scan_blocked_input();
+                            }
+                            continue;
                         }
                         if self.diff_mismatch_scan_pending() {
                             if matches!(key.code, KeyCode::Esc) {

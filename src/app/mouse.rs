@@ -8,6 +8,10 @@ use crate::util::geometry::rect_contains;
 
 impl App {
     pub(crate) fn handle_mouse(&mut self, mouse_event: MouseEvent) {
+        if self.hash_scan_pending() {
+            self.report_hash_scan_blocked_input();
+            return;
+        }
         if self.diff_mismatch_scan_pending() {
             self.report_diff_mismatch_scan_blocked_input();
             return;

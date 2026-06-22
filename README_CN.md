@@ -86,7 +86,7 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 | `:p` / `:pi`                      | overwrite / insert 粘贴 |
 | `:c [fmt]`                        | 复制当前选区                |
 | `:export <path>`                  | 导出当前编辑后的字节            |
-| `:hash sha256`                    | 对选区或整个文件求哈希           |
+| `:hash sha256`                    | 对选区或整个文件求哈希；TUI 大文件会显示进度 |
 | `:source <path>`                  | 执行 TOML 宏文件             |
 | `:script <path>`                  | 执行 Rhai 脚本文件            |
 | `:diff <path>`                    | 对比另一个文件               |

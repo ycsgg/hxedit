@@ -91,7 +91,7 @@ return to normal mode.
 | `:p` / `:pi` | Paste as overwrite / insert |
 | `:c [fmt]` | Copy the active selection |
 | `:export <path>` | Export the edited bytes |
-| `:hash sha256` | Hash the selection or whole file |
+| `:hash sha256` | Hash the selection or whole file; large TUI hashes show progress |
 | `:source <path>` | Run a TOML macro file |
 | `:script <path>` | Run a Rhai script file |
 | `:diff <path>` | Compare against another file |

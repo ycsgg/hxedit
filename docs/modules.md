@@ -54,7 +54,7 @@
 
 - `src/app/commands.rs` 只保留 command 提交与分发；具体执行按领域放在 `src/app/commands/*`
 - 拆分命令实现时优先 move-only / helper 提取，不要把结构整理和命令语义变更混在一起
-- `:hash` 命令使用流式哈希（`hash_logical_bytes`），64 KB 分块读取，不将全部数据加载到内存
+- `:hash` 命令使用流式哈希（`hash_logical_bytes` / App 大范围 progress path 内的 `walk_logical_chunks`），64 KB 分块读取，不将全部数据加载到内存；TUI 大范围进度只属于 App pending state，exec / headless / macro / script 仍保持同步执行语义
 - `:hash` 结果默认拷贝到剪贴板，状态栏显示 `[copied]`；剪贴板不可用时仍正常显示哈希值
 - 文件搜索统一走 `:s [mode]<delim><pattern><delim>` / `:s! ...`；默认 `/text/` 是 UTF-8 bytes，`x/hex/` 是原始 hex bytes，`b` / `u32` / `u64` / `i32` / `i64` typed-value 都在同一入口解析；`:S` 只作为 deprecated hex-search 别名保留，命中时必须提示改用 `:s x/.../`
 - `save` / `logical_bytes()` / `read_logical_range()` / `hash_logical_bytes()` / `for_each_logical_chunk()` / diff current-source / `transform_visible_range_in_place()` 都必须复用 `src/core/document/walk.rs`；不要在调用方重新手写 Original/Add + tombstone + replacement 分支

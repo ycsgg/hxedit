@@ -146,7 +146,7 @@ cache_pages = 128                  # 页缓存容量
 | `:xor <key>` / `:xor! <key>` | 当前选区 XOR 后复制 / 原地 XOR 替换。`key` 可用十进制 `0..255` 或十六进制 `0x00..0xff` |
 | `:fill <pattern> <len>` / `:zero <len>` | overwrite 批量写入 |
 | `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | 使用与 `:s` 相同的模式替换。`:re` 是等长 replacement，命中超过 65535 处时需要加 `--force` 确认；`:re!` 允许长度变化。旧的 `hex/ascii <needle> -> <replacement>` 仍兼容 |
-| `:hash md5\|sha1\|sha256\|sha512\|crc32` | 哈希 |
+| `:hash md5\|sha1\|sha256\|sha512\|crc32` | 哈希当前选区或整文件；TUI 中大范围 hash 会显示进度，Esc 可取消 |
 | `:source <path>` | 执行 TOML 宏文件。宏使用显式执行层 step，可继承当前 Visual / inspector 选区，默认合并成一个 undo |
 | `:script <path>` | 执行 Rhai 脚本文件。脚本使用 `hx_` host API，可继承当前 Visual / inspector 选区；除非脚本保存，否则作为一个命令入 undo |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | 同步滚动显示 current logical bytes 与另一个文件；可见页会在 `N` 范围内重对齐插入/删除字节，右侧相同字节为灰色，不同字节左右亮黄，缺失字节以红色 `__` 占位；`next` / `prev` 会大块分步扫描并汇报进度，扫描中阻止其它输入，Esc 取消 |

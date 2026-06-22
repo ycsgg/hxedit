@@ -31,6 +31,11 @@
 
 ## Core / Correctness（已完成）
 
+- [x] **[P1] `:hash` 对大文件缺少进度反馈**
+  - 已解决：TUI `:hash` 对超过分段阈值的大范围先显示 `hashing...` 状态，再按分段继续流式处理 logical bytes，状态栏显示 checked / logical hashed 进度，扫描中阻塞其它输入并支持 Esc 取消
+  - 保持：小范围 hash、headless `--command`、macro / script 仍使用同步执行层；底层仍走 `Document::walk_logical_chunks` / 64 KB logical chunk，不整文件物化
+  - 已同步：App 回归测试、命令 hint、用户指南与当前 backlog
+
 - [x] **[P1] `:export` / `:fill` / `:xor!` 在大选区 / 大长度下会一次性物化整段 bytes**
   - 已解决：三条路径改为 streaming，单次 buffer 与 `:hash` 一致按 64 KB chunk（并按 `page_size * cache_pages` 上限裁剪，避免 `read_range` 跨页失效）
     - `:export <path>` binary：经 `Document::for_each_logical_chunk` 边读 chunk 边写 `BufWriter`，不再 `logical_bytes` 整段物化
