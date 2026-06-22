@@ -69,6 +69,9 @@
 
 ## Performance / Maintenance（已完成）
 
+- [x] **[P1] App 层回归仍需继续补**
+  - 已补齐：新增集中 App 回归覆盖 paste overwrite / insert、visual delete、inspector edit 提交、undo / redo、长度变化后的 mode clamp、command submission 返回 Visual / SidePanel mode
+
 - [x] **[P2] 性能类测试应迁移到 `cargo bench` 管理**
   - 现状：性能观测已迁移到 `cargo bench --bench perf_bench`，覆盖 16MB/64MB save 场景、hash / logical_bytes / paste overwrite / piece lookup / ELF parse / 当前 search 路径
   - 已完成：`cargo test` 中的大文件用例只保留 correctness 断言，不再使用 wall-clock 阈值；benchmark 输出统一由 bench harness 管理

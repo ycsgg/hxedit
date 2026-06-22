@@ -606,4 +606,5 @@ mod edit_commands;
 mod hash;
 #[cfg(feature = "memory")]
 mod memory;
+mod regression;
 mod search_nav;

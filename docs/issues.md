@@ -127,9 +127,6 @@
   - 现状：当前已可本地 `cargo package` / `cargo publish --dry-run`，但真正的 crates.io 发布仍依赖手工操作
   - 目标：补齐 tag / release 驱动的 crates.io 自动化发布流程，至少包含 dry-run、版本/tag 一致性检查、发布前校验与失败可观测日志
 
-- [ ] **[P1] App 层回归仍需继续补**
-  - 优先：paste、visual delete、inspector edit、undo / redo、mode clamp、command return mode
-
 - [ ] **[P1] Inspector 仍是全量 refresh**
   - 目前可接受；若未来格式树更深、表项更多，再评估增量刷新
 
