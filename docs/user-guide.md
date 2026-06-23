@@ -159,7 +159,7 @@ cache_pages = 128                  # page-cache capacity
 | `:source <path>` | Run a TOML macro file. The macro uses explicit execution-layer steps, can inherit the current Visual / inspector selection, and defaults to grouped undo |
 | `:script <path>` | Run a Rhai script file. The script uses the `hx_` host API, inherits the current Visual / inspector selection, and is undoable as one command unless it saves |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | Show a synchronized page comparing current logical bytes with another file. Visible pages realign inserted/deleted bytes within `N`; equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__`. `next` / `prev` scan in large progress-reporting steps, block other input while scanning, and Esc cancels |
-| `:insp` / `:insp more` | Open inspector / reveal more paginated entries |
+| `:insp` / `:insp more` | Open inspector / reveal more paginated entries. If editing a header or magic field makes the current format undetectable, the status line reports `format lost` |
 | `:format ...` | Force format |
 
 ## Macro Files

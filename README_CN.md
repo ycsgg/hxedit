@@ -144,7 +144,8 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 
 字节编辑是显式的：overwrite 原地改字节，insert 会移动后续数据，delete 在保存或导出前
 都是非破坏性的。这正是 undo、save、search、export、hash、diff 和 inspector 写入保持一致的
-原因。格式 inspector 只写入你编辑的字节，不会自动帮你修复 checksum、CRC 或布局。进程内存
+原因。格式 inspector 只写入你编辑的字节，不会自动帮你修复 checksum、CRC 或布局；如果
+header 编辑导致当前格式无法再识别，状态栏会提示格式已丢失。进程内存
 编辑在你显式 commit 回目标进程之前一直是本地的。准确语义见
 [docs/editing-model.md](docs/editing-model.md)。
 

@@ -31,6 +31,10 @@
 
 ## Core / Correctness（已完成）
 
+- [x] **[P2] magic / header 被编辑后，inspector 的“格式丢失”反馈仍不够明确**
+  - 已解决：inspector 字段编辑导致格式不再匹配时，保留 refresh 产生的 `format lost: <format> header/magic no longer matches` 状态，不再被后续 `edited field` 提示覆盖
+  - 已验证：最小 GIF 的 header `version` 字段从 `89a` 改成非法 `88a` 后，inspector 回到 Normal 并显示格式丢失提示
+
 - [x] **[P1] `:hash` 对大文件缺少进度反馈**
   - 已解决：TUI `:hash` 对超过分段阈值的大范围先显示 `hashing...` 状态，再按分段继续流式处理 logical bytes，状态栏显示 checked / logical hashed 进度，扫描中阻塞其它输入并支持 Esc 取消
   - 保持：小范围 hash、headless `--command`、macro / script 仍使用同步执行层；底层仍走 `Document::walk_logical_chunks` / 64 KB logical chunk，不整文件物化

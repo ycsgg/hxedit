@@ -150,7 +150,7 @@ cache_pages = 128                  # 页缓存容量
 | `:source <path>` | 执行 TOML 宏文件。宏使用显式执行层 step，可继承当前 Visual / inspector 选区，默认合并成一个 undo |
 | `:script <path>` | 执行 Rhai 脚本文件。脚本使用 `hx_` host API，可继承当前 Visual / inspector 选区；除非脚本保存，否则作为一个命令入 undo |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | 同步滚动显示 current logical bytes 与另一个文件；可见页会在 `N` 范围内重对齐插入/删除字节，右侧相同字节为灰色，不同字节左右亮黄，缺失字节以红色 `__` 占位；`next` / `prev` 会大块分步扫描并汇报进度，扫描中阻止其它输入，Esc 取消 |
-| `:insp` / `:insp more` | 打开 inspector / 加载更多分页项 |
+| `:insp` / `:insp more` | 打开 inspector / 加载更多分页项；如果 header 或 magic 字段编辑导致当前格式无法再识别，状态栏会提示 `format lost` |
 | `:format ...` | 强制格式 |
 
 ## 宏文件

@@ -147,8 +147,9 @@ Byte edits are explicit: overwrites change bytes in place, inserts shift the
 following data, and deletes are non-destructive until you save or export. This
 is what keeps undo, save, search, export, hash, diff, and inspector writes
 consistent. Format inspectors only write the bytes you edit; they do not repair
-checksums, CRCs, or layouts for you. Process memory edits stay local until you
-explicitly commit them back to the target process. See
+checksums, CRCs, or layouts for you. If a header edit makes the current format
+undetectable, the status line reports that the format was lost. Process memory
+edits stay local until you explicitly commit them back to the target process. See
 [docs/editing-model.md](docs/editing-model.md) for the exact semantics.
 
 ## Documentation

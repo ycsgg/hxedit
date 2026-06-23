@@ -121,6 +121,22 @@ fn inspector_edit_submits_and_roundtrips_through_undo_redo() {
 }
 
 #[test]
+fn inspector_header_edit_reports_format_lost_when_magic_no_longer_matches() {
+    let mut app = gif_inspector_app();
+
+    type_inspector_value(&mut app, "88a");
+
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app.inspector().is_none());
+    assert_eq!(app.document.logical_bytes(3, 5).unwrap(), b"88a");
+    assert_eq!(app.status_level, StatusLevel::Warning);
+    assert_eq!(
+        app.status_message,
+        "format lost: GIF header/magic no longer matches"
+    );
+}
+
+#[test]
 fn command_undo_clamps_cursor_after_length_changing_edit() {
     let mut app = app_with_bytes(&[0x11]);
     app.mode = Mode::InsertHex { pending: None };

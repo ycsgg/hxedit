@@ -542,10 +542,16 @@ impl App {
             self.invalidate_disassembly_cache();
         }
         self.refresh_inspector();
-        self.mode = Mode::SidePanel;
-        self.sync_cursor_to_inspector();
+        let inspector_refresh_failed = self.inspector().is_none();
+        if !inspector_refresh_failed {
+            self.mode = Mode::SidePanel;
+            self.sync_cursor_to_inspector();
+        }
         if !ops.is_empty() {
             self.push_undo_step(ops, cursor_before, mode_before, self.cursor, self.mode);
+        }
+        if inspector_refresh_failed {
+            return Ok(());
         }
         if let Some(warning) = self.inspector_edit_warning() {
             self.set_warning_status(format!("edited field at 0x{:x}; {}", abs_offset, warning));

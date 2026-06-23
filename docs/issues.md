@@ -5,14 +5,6 @@
 
 ---
 
-## Core / Correctness
-
-- [ ] **[P2] magic / header 被编辑后，inspector 的“格式丢失”反馈仍不够明确**
-  - 现状：格式从可识别变为不可识别时，用户容易只看到 inspector 消失
-  - 建议：从 Some → None 时给出显式状态提示，如 `format lost: header modified`
-
----
-
 ## UX / Editor Features
 
 - [ ] **[P1] Inspector 缺少跨 struct 快速跳转**
