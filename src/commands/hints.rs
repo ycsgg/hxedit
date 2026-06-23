@@ -5,7 +5,8 @@ use super::{
     FILL_ALIASES, FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES,
     LEGACY_HEX_SEARCH_ALIASES, PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES,
     QUIT_FORCE_ALIASES, REDO_ALIASES, REPLACE_ALIASES, SCRIPT_ALIASES, SEARCH_ALIASES,
-    SOURCE_ALIASES, UNDO_ALIASES, WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
+    SOURCE_ALIASES, STATS_ALIASES, UNDO_ALIASES, WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES,
+    ZERO_ALIASES,
 };
 #[cfg(feature = "disasm")]
 use super::{DISASSEMBLE_ALIASES, DISASSEMBLE_FORCE_ALIASES, INSTRUCTION_SEARCH_ALIASES};
@@ -173,6 +174,11 @@ pub fn hint_for(input: &str) -> CommandHint {
         name if is_alias(name, HASH_ALIASES) => CommandHint {
             syntax: "hash <md5|sha1|sha256|sha512|crc32>".to_owned(),
             details: "compute hash of the current selection (visual or selected inspector field), or the entire file if no selection is active; large ranges report progress and Esc cancels"
+                .to_owned(),
+        },
+        name if is_alias(name, STATS_ALIASES) => CommandHint {
+            syntax: "stats [all|selection|refresh|off]".to_owned(),
+            details: "show byte frequency, expandable top bytes, byte-range distribution, and entropy for the active selection, or whole file if no selection is active; large ranges report progress and Esc cancels"
                 .to_owned(),
         },
         name if is_alias(name, DIFF_ALIASES) => {
@@ -496,6 +502,13 @@ mod tests {
         let hint = hint_for("data");
         assert!(hint.syntax.contains("data off"));
         assert!(hint.details.contains("select"));
+    }
+
+    #[test]
+    fn stats_hint_mentions_entropy() {
+        let hint = hint_for("stats");
+        assert!(hint.syntax.contains("refresh"));
+        assert!(hint.details.contains("entropy"));
     }
 
     #[test]

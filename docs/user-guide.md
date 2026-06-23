@@ -103,7 +103,7 @@ exits without creating the TUI. All `--run` files execute first, then all
 `--script` files, then all `--command` strings; each group preserves its own
 order. Edits are written to disk only if the macro, script, or command list
 includes `save`, `hx_save()`, `w`, or `wq`; UI-only commands such as `:diff`,
-`:insp`, `:copy`, and clipboard paste are rejected.
+`:stats`, `:insp`, `:copy`, and clipboard paste are rejected.
 For headless `--command`, `hash`, binary `export`, and `replace` use `--select`
 when provided and otherwise apply to the whole file; `xor!` requires an explicit
 selection.
@@ -156,6 +156,7 @@ cache_pages = 128                  # page-cache capacity
 | `:fill <pattern> <len>` / `:zero <len>` | Overwrite transforms |
 | `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | Replace using the same modes as `:s`. `:re` is equal-length and asks for `--force` when more than 65535 matches are found; `:re!` allows length changes. Legacy `hex/ascii <needle> -> <replacement>` remains accepted |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | Hash the active selection or whole file; large TUI hashes report progress and Esc cancels |
+| `:stats [all\|selection\|refresh\|off]` | Show byte frequency, expandable top bytes, byte-range distribution, and Shannon entropy for the active selection or whole file; large ranges report progress and Esc cancels |
 | `:source <path>` | Run a TOML macro file. The macro uses explicit execution-layer steps, can inherit the current Visual / inspector selection, and defaults to grouped undo |
 | `:script <path>` | Run a Rhai script file. The script uses the `hx_` host API, inherits the current Visual / inspector selection, and is undoable as one command unless it saves |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | Show a synchronized page comparing current logical bytes with another file. Visible pages realign inserted/deleted bytes within `N`; equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__`. `next` / `prev` scan in large progress-reporting steps, block other input while scanning, and Esc cancels |

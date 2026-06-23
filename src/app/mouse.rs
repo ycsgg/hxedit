@@ -12,6 +12,10 @@ impl App {
             self.report_hash_scan_blocked_input();
             return;
         }
+        if self.stats_scan_pending() {
+            self.report_stats_scan_blocked_input();
+            return;
+        }
         if self.diff_mismatch_scan_pending() {
             self.report_diff_mismatch_scan_blocked_input();
             return;
@@ -46,6 +50,8 @@ impl App {
                         self.scroll_diff_panel(-3);
                     } else if self.active_side_panel == SidePanelKind::Memory {
                         self.scroll_memory_panel(-3);
+                    } else if self.active_side_panel == SidePanelKind::Stats {
+                        self.scroll_stats_panel(-3);
                     } else {
                         self.scroll_inspector(-3);
                     }
@@ -82,6 +88,8 @@ impl App {
                         self.scroll_diff_panel(3);
                     } else if self.active_side_panel == SidePanelKind::Memory {
                         self.scroll_memory_panel(3);
+                    } else if self.active_side_panel == SidePanelKind::Stats {
+                        self.scroll_stats_panel(3);
                     } else {
                         self.scroll_inspector(3);
                     }
@@ -182,6 +190,9 @@ impl App {
                         }
                         if self.show_side_panel && self.active_side_panel == SidePanelKind::Memory {
                             self.handle_memory_panel_click(visible_row);
+                            return;
+                        }
+                        if self.show_side_panel && self.active_side_panel == SidePanelKind::Stats {
                             return;
                         }
                         if self.show_side_panel

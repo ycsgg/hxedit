@@ -8,7 +8,7 @@
 ## Current Baseline（已落地）
 
 - [x] Rust 与 CI 基线已固定：`1.94.1` + `cargo fmt --check` + `cargo clippy --all-targets -- -D warnings` + `cargo test --all-targets`
-- [x] 当前对外命令面已经覆盖 `:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`
+- [x] 当前对外命令面已经覆盖 `:g`、`:hash`、`:stats`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`
 - [x] 搜索支持 forward / backward / wrap-around，并在 hex grid 对同屏命中做叠加高亮
 - [x] Inspector 当前支持 ELF / PE/COFF / Mach-O / PNG / ZIP / SQLite / PCAP / PCAPNG / GZIP / GIF / BMP / WAV / TAR / JPEG
 - [x] ELF inspector 已扩展到 section header / section data / dynamic entries / interpreter / notes / GNU property / string table / symbol table / relocation / SysV & GNU hash / version sections，并接入 `:insp more` 分页
@@ -30,6 +30,11 @@
 ---
 
 ## Core / Correctness（已完成）
+
+- [x] **[P2] 增加字节频率 / entropy 统计面板**
+  - 已解决：新增 `:stats [all|selection|refresh|off]`，按当前 active selection（Visual 或 inspector field）或整文件统计 logical bytes，展示 scope、display/logical 字节数、unique count、NUL/FF/ASCII 分类、可逐批展开的 Top bytes、byte range 分布和 Shannon entropy
+  - 性能策略：小范围同步统计；大范围进入可取消的 pending scan，按 64 KiB logical chunk 读取，每 tick 受字节上限与时间预算约束，避免整文件物化或长时间阻塞 UI
+  - 已同步：README / README_CN / user guide / command hints / parser 与 App 回归测试
 
 - [x] **[P2] magic / header 被编辑后，inspector 的“格式丢失”反馈仍不够明确**
   - 已解决：inspector 字段编辑导致格式不再匹配时，保留 refresh 产生的 `format lost: <format> header/magic no longer matches` 状态，不再被后续 `edited field` 提示覆盖

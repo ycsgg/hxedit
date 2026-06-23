@@ -212,6 +212,7 @@ fn map_command(command: Command, state: &ExecState) -> HxResult<HeadlessAction> 
         Command::Inspector | Command::InspectorMore => return unsupported("inspector"),
         Command::Format { .. } => return unsupported("format"),
         Command::Diff(_) => return unsupported("diff"),
+        Command::Stats(_) => return unsupported("stats"),
         #[cfg(feature = "sagitta-analysis")]
         Command::Analysis(_) => return unsupported("analysis"),
         #[cfg(feature = "memory")]

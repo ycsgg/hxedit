@@ -10,6 +10,14 @@ impl App {
             self.report_hash_scan_blocked_input();
             return Ok(());
         }
+        if self.stats_scan_pending() {
+            if matches!(action, Action::LeaveMode | Action::CommandCancel) {
+                self.cancel_stats_scan(Some("stats canceled"));
+                return Ok(());
+            }
+            self.report_stats_scan_blocked_input();
+            return Ok(());
+        }
         if self.diff_mismatch_scan_pending() {
             if matches!(action, Action::LeaveMode | Action::CommandCancel) {
                 self.cancel_diff_mismatch_scan(Some("diff scan canceled"));
@@ -57,6 +65,10 @@ impl App {
                 } else if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Diff
                 {
                     self.move_diff_selection(-(self.side_panel_visible_rows() as i64));
+                } else if self.mode.is_side_panel()
+                    && self.active_side_panel == SidePanelKind::Stats
+                {
+                    self.scroll_stats_panel(-(self.side_panel_visible_rows() as i64));
                 } else {
                     self.move_vertical(-(self.view_rows as i64));
                 }
@@ -71,6 +83,10 @@ impl App {
                 } else if self.mode.is_side_panel() && self.active_side_panel == SidePanelKind::Diff
                 {
                     self.move_diff_selection(self.side_panel_visible_rows() as i64);
+                } else if self.mode.is_side_panel()
+                    && self.active_side_panel == SidePanelKind::Stats
+                {
+                    self.scroll_stats_panel(self.side_panel_visible_rows() as i64);
                 } else {
                     self.move_vertical(self.view_rows as i64);
                 }
@@ -229,6 +245,7 @@ impl App {
                     SidePanelKind::Data => self.move_data_panel_selection(-1),
                     SidePanelKind::Diff => self.move_diff_selection(-1),
                     SidePanelKind::Memory => self.move_memory_selection(-1),
+                    SidePanelKind::Stats => self.scroll_stats_panel(-1),
                 }
                 Ok(true)
             }
@@ -239,6 +256,7 @@ impl App {
                     SidePanelKind::Data => self.move_data_panel_selection(1),
                     SidePanelKind::Diff => self.move_diff_selection(1),
                     SidePanelKind::Memory => self.move_memory_selection(1),
+                    SidePanelKind::Stats => self.scroll_stats_panel(1),
                 }
                 Ok(true)
             }
@@ -249,22 +267,26 @@ impl App {
                     SidePanelKind::Data => self.move_data_panel_selection(0),
                     SidePanelKind::Diff => self.navigate_to_selected_diff_hunk()?,
                     SidePanelKind::Memory => self.handle_memory_panel_enter()?,
+                    SidePanelKind::Stats => self.expand_stats_top_bytes(),
                 }
                 Ok(true)
             }
             Action::SidePanelToggleCollapse => {
-                if self.active_side_panel != SidePanelKind::Inspector {
-                    return Ok(true);
-                }
-                // While a field is being edited the space key should reach the
-                // edit buffer, not toggle collapse. Redirect to Char(' ').
-                if self
-                    .inspector()
-                    .is_some_and(|inspector| inspector.editing.is_some())
-                {
-                    self.insert_inspector_char(' ');
-                } else {
-                    self.toggle_inspector_collapse();
+                match self.active_side_panel {
+                    SidePanelKind::Inspector => {
+                        // While a field is being edited the space key should reach the
+                        // edit buffer, not toggle collapse. Redirect to Char(' ').
+                        if self
+                            .inspector()
+                            .is_some_and(|inspector| inspector.editing.is_some())
+                        {
+                            self.insert_inspector_char(' ');
+                        } else {
+                            self.toggle_inspector_collapse();
+                        }
+                    }
+                    SidePanelKind::Stats => self.expand_stats_top_bytes(),
+                    _ => {}
                 }
                 Ok(true)
             }

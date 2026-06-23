@@ -60,6 +60,15 @@ pub enum DiffCommand {
     Off,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatsCommand {
+    Auto,
+    All,
+    Selection,
+    Refresh,
+    Off,
+}
+
 #[cfg(feature = "memory")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemoryCommand {
@@ -178,6 +187,7 @@ pub enum Command {
         algorithm: HashAlgorithm,
     },
     Diff(DiffCommand),
+    Stats(StatsCommand),
     #[cfg(feature = "sagitta-analysis")]
     Analysis(AnalysisCommand),
     #[cfg(feature = "memory")]

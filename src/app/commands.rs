@@ -97,6 +97,10 @@ impl App {
             }
             Command::Hash { algorithm } => self.execute_hash_command(algorithm),
             Command::Diff(diff) => self.execute_diff_command(diff),
+            Command::Stats(command) => {
+                self.close_diff_projection_for_side_panel_switch();
+                self.execute_stats_command(command)
+            }
             #[cfg(feature = "sagitta-analysis")]
             Command::Analysis(command) => self.execute_analysis_command(command),
             #[cfg(feature = "memory")]

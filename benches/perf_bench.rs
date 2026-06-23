@@ -33,6 +33,7 @@ type BenchEntry = (&'static str, BenchFn);
 const BENCH_CHILD_ENV: &str = "HXEDIT_BENCH_CHILD";
 const BENCH_REPEAT_ENV: &str = "HXEDIT_BENCH_REPEAT";
 const BENCH_SUITE_ENV: &str = "HXEDIT_BENCH_SUITE";
+const STATS_BENCH_PATH_ENV: &str = "HXEDIT_STATS_BENCH_PATH";
 const EDIT_FILE_SIZE: usize = 8 * 1024 * 1024;
 const EDIT_SINGLE_OPS: usize = 200_000;
 const EDIT_BULK_BYTES: usize = 1024 * 1024;
@@ -45,6 +46,7 @@ const EDIT_256_BULK_BYTES: usize = 64 * 1024 * 1024;
 const EDIT_256_INSERT_BYTES: usize = 16 * 1024 * 1024;
 const EDIT_256_PER_BYTE_BYTES: usize = 8 * 1024 * 1024;
 const LARGE_FILE_SIZE_1GIB: usize = 1024 * 1024 * 1024;
+const STATS_TEMP_FILE_SIZE_800MB: usize = 800 * 1024 * 1024;
 const PATTERNED_FILE_SIZE_256MB: usize = 256 * 1024 * 1024;
 
 fn bench_config() -> Config {
@@ -1853,6 +1855,173 @@ fn bench_hash_crc32_1gib_clean() -> BenchResult {
     Ok(())
 }
 
+#[derive(Debug)]
+struct BenchByteStats {
+    counts: [u64; 256],
+    logical_bytes: u64,
+}
+
+impl Default for BenchByteStats {
+    fn default() -> Self {
+        Self {
+            counts: [0; 256],
+            logical_bytes: 0,
+        }
+    }
+}
+
+impl BenchByteStats {
+    fn update(&mut self, bytes: &[u8]) {
+        let mut local = [[0_u64; 256]; 4];
+        let chunks = bytes.chunks_exact(4);
+        let remainder = chunks.remainder();
+        for chunk in chunks {
+            local[0][chunk[0] as usize] += 1;
+            local[1][chunk[1] as usize] += 1;
+            local[2][chunk[2] as usize] += 1;
+            local[3][chunk[3] as usize] += 1;
+        }
+        for (index, byte) in remainder.iter().copied().enumerate() {
+            local[index][byte as usize] += 1;
+        }
+        for table in local {
+            for (byte, count) in table.into_iter().enumerate() {
+                self.counts[byte] = self.counts[byte].saturating_add(count);
+            }
+        }
+        self.logical_bytes = self.logical_bytes.saturating_add(bytes.len() as u64);
+    }
+
+    fn unique_count(&self) -> usize {
+        self.counts.iter().filter(|count| **count != 0).count()
+    }
+}
+
+fn stats_bench_path() -> BenchResult<Option<std::path::PathBuf>> {
+    let Some(path) = std::env::var_os(STATS_BENCH_PATH_ENV) else {
+        return Ok(None);
+    };
+    let path = std::path::PathBuf::from(path);
+    if !path.is_file() {
+        return Err(format!(
+            "{STATS_BENCH_PATH_ENV} must point at a readable file: {}",
+            path.display()
+        )
+        .into());
+    }
+    Ok(Some(path))
+}
+
+fn bench_stats_existing_walk_only() -> BenchResult {
+    let Some(path) = stats_bench_path()? else {
+        eprintln!("[bench] stats existing walk skipped: set {STATS_BENCH_PATH_ENV}");
+        print("stats existing walk skipped", Duration::ZERO, 1);
+        return Ok(());
+    };
+    let mut doc = Document::open(&path, &bench_config())?;
+
+    let t = Instant::now();
+    let visited = doc.for_each_logical_chunk(0, doc.len() - 1, |_chunk| Ok(()))?;
+    let elapsed = t.elapsed();
+    assert_eq!(visited, doc.len());
+    print(
+        &format!("stats walk-only existing {}", format_bytes(visited)),
+        elapsed,
+        visited as usize,
+    );
+    print_peak_rss("stats walk-only existing");
+    Ok(())
+}
+
+fn bench_stats_existing_histogram() -> BenchResult {
+    let Some(path) = stats_bench_path()? else {
+        eprintln!("[bench] stats existing histogram skipped: set {STATS_BENCH_PATH_ENV}");
+        print("stats existing histogram skipped", Duration::ZERO, 1);
+        return Ok(());
+    };
+    let mut doc = Document::open(&path, &bench_config())?;
+    let mut stats = BenchByteStats::default();
+
+    let t = Instant::now();
+    let visited = doc.for_each_logical_chunk(0, doc.len() - 1, |chunk| {
+        stats.update(chunk);
+        Ok(())
+    })?;
+    let elapsed = t.elapsed();
+    assert_eq!(visited, doc.len());
+    assert_eq!(stats.logical_bytes, visited);
+    assert!(stats.unique_count() > 1);
+    print(
+        &format!("stats histogram existing {}", format_bytes(visited)),
+        elapsed,
+        visited as usize,
+    );
+    print_peak_rss("stats histogram existing");
+    Ok(())
+}
+
+fn bench_stats_existing_dirty_histogram() -> BenchResult {
+    let Some(path) = stats_bench_path()? else {
+        eprintln!("[bench] stats existing dirty skipped: set {STATS_BENCH_PATH_ENV}");
+        print("stats existing dirty skipped", Duration::ZERO, 1);
+        return Ok(());
+    };
+    let mut doc = Document::open(&path, &bench_config())?;
+    if doc.is_readonly() {
+        eprintln!(
+            "[bench] stats existing dirty skipped: source is read-only ({})",
+            path.display()
+        );
+        print("stats existing dirty skipped", Duration::ZERO, 1);
+        return Ok(());
+    }
+    doc.delete_byte(128)?;
+    doc.insert_bytes(doc.len() / 2, &[0xaa, 0xbb, 0xcc, 0xdd])?;
+    let expected = doc.len().saturating_sub(1);
+    let mut stats = BenchByteStats::default();
+
+    let t = Instant::now();
+    let visited = doc.for_each_logical_chunk(0, doc.len() - 1, |chunk| {
+        stats.update(chunk);
+        Ok(())
+    })?;
+    let elapsed = t.elapsed();
+    assert_eq!(visited, expected);
+    assert_eq!(stats.logical_bytes, visited);
+    assert!(stats.unique_count() > 1);
+    print(
+        &format!("stats histogram existing dirty {}", format_bytes(visited)),
+        elapsed,
+        visited as usize,
+    );
+    print_peak_rss("stats histogram existing dirty");
+    Ok(())
+}
+
+fn bench_stats_800mb_temp_histogram() -> BenchResult {
+    let (_dir, path) =
+        write_patterned_file("stats-800mb-patterned.bin", STATS_TEMP_FILE_SIZE_800MB)?;
+    let mut doc = Document::open(&path, &bench_config())?;
+    let mut stats = BenchByteStats::default();
+
+    let t = Instant::now();
+    let visited = doc.for_each_logical_chunk(0, doc.len() - 1, |chunk| {
+        stats.update(chunk);
+        Ok(())
+    })?;
+    let elapsed = t.elapsed();
+    assert_eq!(visited, STATS_TEMP_FILE_SIZE_800MB as u64);
+    assert_eq!(stats.logical_bytes, visited);
+    assert_eq!(stats.unique_count(), 256);
+    print(
+        "stats histogram 800MB patterned temp",
+        elapsed,
+        visited as usize,
+    );
+    print_peak_rss("stats histogram 800MB patterned temp");
+    Ok(())
+}
+
 fn bench_diff_next_tail_mismatch_64mb() -> BenchResult {
     bench_diff_next_tail_mismatch("diff-next-64", 64 * 1024 * 1024)
 }
@@ -2316,6 +2485,16 @@ fn large_benches() -> &'static [BenchEntry] {
             bench_search_1gib_dirty_many_islands,
         ),
         ("hash_crc32_1gib_clean", bench_hash_crc32_1gib_clean),
+        ("stats_existing_walk_only", bench_stats_existing_walk_only),
+        ("stats_existing_histogram", bench_stats_existing_histogram),
+        (
+            "stats_existing_dirty_histogram",
+            bench_stats_existing_dirty_histogram,
+        ),
+        (
+            "stats_800mb_temp_histogram",
+            bench_stats_800mb_temp_histogram,
+        ),
         (
             "diff_next_tail_mismatch_1gib_stepper",
             bench_diff_next_tail_mismatch_1gib_stepper,
@@ -2359,6 +2538,12 @@ fn public_benches() -> &'static [BenchEntry] {
         (
             "search_1gib_dirty_many_islands",
             bench_search_1gib_dirty_many_islands,
+        ),
+        ("stats_existing_walk_only", bench_stats_existing_walk_only),
+        ("stats_existing_histogram", bench_stats_existing_histogram),
+        (
+            "stats_existing_dirty_histogram",
+            bench_stats_existing_dirty_histogram,
         ),
         (
             "diff_next_tail_mismatch_1gib_stepper",

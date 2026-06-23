@@ -97,7 +97,7 @@ hxedit some.bin
 输出人类可读的 summary，然后直接退出，不创建 TUI。所有 `--run` 文件先执行，然后执行所有
 `--script` 文件，最后执行所有 `--command` 字符串；三个组内各自保持传入顺序。修改只有在
 宏、脚本或命令列表包含 `save`、`hx_save()`、`w` 或 `wq` 时才会写入磁盘；`:diff`、
-`:insp`、`:copy`、剪贴板 paste 等 UI-only 命令会被拒绝。
+`:stats`、`:insp`、`:copy`、剪贴板 paste 等 UI-only 命令会被拒绝。
 headless `--command` 下，`hash`、binary `export`、`replace` 有 `--select` 时作用于该
 选区，否则作用于全文件；`xor!` 必须显式提供选区。
 
@@ -147,6 +147,7 @@ cache_pages = 128                  # 页缓存容量
 | `:fill <pattern> <len>` / `:zero <len>` | overwrite 批量写入 |
 | `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | 使用与 `:s` 相同的模式替换。`:re` 是等长 replacement，命中超过 65535 处时需要加 `--force` 确认；`:re!` 允许长度变化。旧的 `hex/ascii <needle> -> <replacement>` 仍兼容 |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | 哈希当前选区或整文件；TUI 中大范围 hash 会显示进度，Esc 可取消 |
+| `:stats [all\|selection\|refresh\|off]` | 查看当前选区或整文件的字节频率、可逐批展开的 Top bytes、byte range 分布和 Shannon entropy；大范围会显示进度，Esc 可取消 |
 | `:source <path>` | 执行 TOML 宏文件。宏使用显式执行层 step，可继承当前 Visual / inspector 选区，默认合并成一个 undo |
 | `:script <path>` | 执行 Rhai 脚本文件。脚本使用 `hx_` host API，可继承当前 Visual / inspector 选区；除非脚本保存，否则作为一个命令入 undo |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | 同步滚动显示 current logical bytes 与另一个文件；可见页会在 `N` 范围内重对齐插入/删除字节，右侧相同字节为灰色，不同字节左右亮黄，缺失字节以红色 `__` 占位；`next` / `prev` 会大块分步扫描并汇报进度，扫描中阻止其它输入，Esc 取消 |

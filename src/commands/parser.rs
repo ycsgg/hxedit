@@ -6,8 +6,8 @@ use super::{
     is_alias, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES, FILL_ALIASES,
     FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES, LEGACY_HEX_SEARCH_ALIASES,
     PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES, QUIT_FORCE_ALIASES, REDO_ALIASES,
-    REPLACE_ALIASES, SCRIPT_ALIASES, SEARCH_ALIASES, SOURCE_ALIASES, UNDO_ALIASES, WRITE_ALIASES,
-    WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
+    REPLACE_ALIASES, SCRIPT_ALIASES, SEARCH_ALIASES, SOURCE_ALIASES, STATS_ALIASES, UNDO_ALIASES,
+    WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
 };
 #[cfg(feature = "disasm")]
 use super::{DISASSEMBLE_ALIASES, DISASSEMBLE_FORCE_ALIASES, INSTRUCTION_SEARCH_ALIASES};
@@ -17,7 +17,7 @@ use super::{MEMORY_ALIASES, MEMORY_SEARCH_ALIASES};
 use super::{SYMBOL_PANEL_ALIASES, SYMBOL_SEARCH_ALIASES};
 use crate::commands::{
     split_command,
-    types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm},
+    types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm, StatsCommand},
 };
 use crate::copy::{CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
@@ -137,6 +137,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
                 .ok_or_else(|| HxError::InvalidHashAlgorithm(arg.to_owned()))?;
             Ok(Command::Hash { algorithm: algo })
         }
+        name if is_alias(name, STATS_ALIASES) => parse_stats(rest),
         name if is_alias(name, DIFF_ALIASES) => parse_diff(rest),
         #[cfg(feature = "sagitta-analysis")]
         name if is_alias(name, ANALYSIS_ALIASES) => parse_analysis(rest),
@@ -177,6 +178,18 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         },
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
+}
+
+fn parse_stats(rest: Option<&str>) -> HxResult<Command> {
+    let command = match rest.map(str::trim) {
+        None | Some("") => StatsCommand::Auto,
+        Some("all") => StatsCommand::All,
+        Some("selection") | Some("sel") => StatsCommand::Selection,
+        Some("refresh") => StatsCommand::Refresh,
+        Some("off") => StatsCommand::Off,
+        Some(other) => return Err(HxError::UnknownCommand(format!("stats {other}"))),
+    };
+    Ok(Command::Stats(command))
 }
 
 #[cfg(feature = "sagitta-analysis")]
@@ -980,6 +993,35 @@ mod tests {
     fn hash_command_requires_algorithm_argument() {
         let err = parse_command("hash").unwrap_err();
         assert!(err.to_string().contains("hash algorithm"));
+    }
+
+    #[test]
+    fn stats_command_parses_modes() {
+        assert_eq!(
+            parse_command("stats").unwrap(),
+            Command::Stats(StatsCommand::Auto)
+        );
+        assert_eq!(
+            parse_command("stat all").unwrap(),
+            Command::Stats(StatsCommand::All)
+        );
+        assert_eq!(
+            parse_command("stats selection").unwrap(),
+            Command::Stats(StatsCommand::Selection)
+        );
+        assert_eq!(
+            parse_command("stats sel").unwrap(),
+            Command::Stats(StatsCommand::Selection)
+        );
+        assert_eq!(
+            parse_command("stats refresh").unwrap(),
+            Command::Stats(StatsCommand::Refresh)
+        );
+        assert_eq!(
+            parse_command("stats off").unwrap(),
+            Command::Stats(StatsCommand::Off)
+        );
+        assert!(parse_command("stats nope").is_err());
     }
 
     #[test]

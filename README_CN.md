@@ -87,6 +87,7 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 | `:c [fmt]`                        | 复制当前选区                |
 | `:export <path>`                  | 导出当前编辑后的字节            |
 | `:hash sha256`                    | 对选区或整个文件求哈希；TUI 大文件会显示进度 |
+| `:stats`                          | 查看选区或整个文件的字节频率和熵统计 |
 | `:source <path>`                  | 执行 TOML 宏文件             |
 | `:script <path>`                  | 执行 Rhai 脚本文件            |
 | `:diff <path>`                    | 对比另一个文件               |
@@ -101,7 +102,7 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 
 - 搜索文本、hex bytes、单字节值或 typed integer
 
-- 对选区执行 copy、export、hash、fill、zero、XOR 或 replace
+- 对选区执行 copy、export、hash、stats、fill、zero、XOR 或 replace
 
 - 通过与手动编辑相同的执行层运行 TOML 宏文件和 Rhai 脚本
 

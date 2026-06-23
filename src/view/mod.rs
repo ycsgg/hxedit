@@ -9,5 +9,6 @@ pub mod hex_grid;
 pub mod inspector;
 pub mod layout;
 pub mod palette;
+pub mod stats_panel;
 pub mod status;
 pub mod symbol_panel;

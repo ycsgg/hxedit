@@ -22,6 +22,7 @@ mod mouse;
 mod navigation;
 mod render;
 mod search;
+mod stats_state;
 pub(crate) mod symbol_state;
 #[cfg(test)]
 mod tests;
@@ -72,6 +73,7 @@ pub(crate) enum SidePanelKind {
     Data,
     Diff,
     Memory,
+    Stats,
 }
 
 /// Data inspector state for cursor-relative primitive decoding.
@@ -81,6 +83,46 @@ pub(crate) struct DataState {
     pub bytes: Vec<u8>,
     pub scroll_offset: usize,
     pub selected_label: Option<String>,
+}
+
+/// Byte statistics scan scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StatsScope {
+    EntireFile,
+    Selection,
+}
+
+impl StatsScope {
+    pub(crate) fn label(self, start: u64, end: u64) -> String {
+        match self {
+            Self::EntireFile => "entire file".to_owned(),
+            Self::Selection => format!("sel 0x{start:x}-0x{end:x}"),
+        }
+    }
+}
+
+/// Cached byte statistics side panel state.
+#[derive(Debug, Clone)]
+pub(crate) struct StatsState {
+    pub scope: StatsScope,
+    pub start: u64,
+    pub end: u64,
+    pub scanned_display: u64,
+    pub stats: crate::byte_stats::ByteStats,
+    pub document_revision: u64,
+    pub scroll_offset: usize,
+    pub top_byte_limit: usize,
+}
+
+impl StatsState {
+    pub(crate) fn scope_label(&self) -> String {
+        self.scope.label(self.start, self.end)
+    }
+
+    pub(crate) fn clamped_top_byte_limit(&self) -> usize {
+        self.top_byte_limit
+            .clamp(1, crate::byte_stats::BYTE_VALUE_COUNT)
+    }
 }
 
 /// Symbol panel state.
@@ -151,8 +193,12 @@ pub struct App {
     data_state: Option<DataState>,
     /// Cached diff side panel state.
     diff_state: Option<DiffState>,
+    /// Cached byte statistics side panel state.
+    stats_state: Option<StatsState>,
     /// Pending chunked hash operation for large ranges.
     pending_hash_scan: Option<hash_state::HashProgressScan>,
+    /// Pending chunked byte statistics operation for large ranges.
+    pending_stats_scan: Option<stats_state::StatsProgressScan>,
     #[cfg(feature = "sagitta-analysis")]
     analysis_job_id: u64,
     #[cfg(feature = "sagitta-analysis")]
@@ -573,7 +619,9 @@ impl App {
             symbol_state: None,
             data_state: None,
             diff_state: None,
+            stats_state: None,
             pending_hash_scan: None,
+            pending_stats_scan: None,
             #[cfg(feature = "sagitta-analysis")]
             analysis_job_id: 0,
             #[cfg(feature = "sagitta-analysis")]
@@ -734,6 +782,11 @@ impl App {
                     self.cancel_hash_scan(None);
                     self.set_error_status(err.to_string());
                 }
+            } else if self.stats_scan_pending() {
+                if let Err(err) = self.continue_stats_scan() {
+                    self.cancel_stats_scan(None);
+                    self.set_error_status(err.to_string());
+                }
             } else if self.diff_mismatch_scan_pending() {
                 if let Err(err) = self.continue_diff_mismatch_scan() {
                     self.cancel_diff_mismatch_scan(None);
@@ -741,7 +794,10 @@ impl App {
                 }
             }
             let poll_start = self.profiler.as_ref().map(|_| Instant::now());
-            let poll_timeout = if self.hash_scan_pending() || self.diff_mismatch_scan_pending() {
+            let poll_timeout = if self.hash_scan_pending()
+                || self.stats_scan_pending()
+                || self.diff_mismatch_scan_pending()
+            {
                 Duration::from_millis(0)
             } else {
                 Duration::from_millis(250)
@@ -761,6 +817,14 @@ impl App {
                                 self.cancel_hash_scan(Some("hash canceled"));
                             } else {
                                 self.report_hash_scan_blocked_input();
+                            }
+                            continue;
+                        }
+                        if self.stats_scan_pending() {
+                            if matches!(key.code, KeyCode::Esc) {
+                                self.cancel_stats_scan(Some("stats canceled"));
+                            } else {
+                                self.report_stats_scan_blocked_input();
                             }
                             continue;
                         }

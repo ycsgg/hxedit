@@ -71,7 +71,43 @@ impl App {
             SidePanelKind::Memory => {
                 self.render_memory_panel(frame, side_panel_area);
             }
+            SidePanelKind::Stats => {
+                self.render_stats_panel(frame, side_panel_area);
+            }
         }
+    }
+
+    fn render_stats_panel(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let Some(state) = self.stats_state() else {
+            let message = if self.stats_scan_pending() {
+                "Stats scan is running..."
+            } else {
+                "No stats. Run :stats."
+            };
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::styled("Byte Stats", self.palette.inspector_header),
+                    Line::raw(message),
+                ])
+                .wrap(Wrap { trim: false }),
+                area,
+            );
+            return;
+        };
+
+        let lines = stats_panel::build_lines(
+            state,
+            area.width,
+            state.document_revision != self.document_revision,
+            &self.palette,
+        );
+        let visible_height = area.height as usize;
+        let visible_start = state.scroll_offset.min(lines.len());
+        let visible_end = (visible_start + visible_height).min(lines.len());
+        frame.render_widget(
+            Paragraph::new(lines[visible_start..visible_end].to_vec()),
+            area,
+        );
     }
 
     fn render_memory_panel(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {

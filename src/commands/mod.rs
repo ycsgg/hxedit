@@ -39,6 +39,7 @@ pub(crate) const LEGACY_HEX_SEARCH_ALIASES: &[&str] = &["S", "S!"];
 pub(crate) const HASH_ALIASES: &[&str] = &["hash"];
 pub(crate) const DIFF_ALIASES: &[&str] = &["diff"];
 pub(crate) const DATA_ALIASES: &[&str] = &["data"];
+pub(crate) const STATS_ALIASES: &[&str] = &["stats", "stat"];
 
 #[cfg(feature = "memory")]
 pub(crate) const MEMORY_ALIASES: &[&str] = &["mem"];
@@ -93,6 +94,7 @@ const COMMON_ALIAS_GROUPS: &[&[&str]] = &[
     HASH_ALIASES,
     DIFF_ALIASES,
     DATA_ALIASES,
+    STATS_ALIASES,
 ];
 
 pub(crate) fn is_alias(name: &str, aliases: &[&str]) -> bool {

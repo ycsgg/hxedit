@@ -608,3 +608,4 @@ mod hash;
 mod memory;
 mod regression;
 mod search_nav;
+mod stats;
