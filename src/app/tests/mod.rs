@@ -26,6 +26,7 @@ fn app_with_len(len: usize) -> App {
     fs::write(&file, vec![0_u8; len]).unwrap();
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,
@@ -53,6 +54,7 @@ fn app_with_bytes(bytes: &[u8]) -> App {
     fs::write(&file, bytes).unwrap();
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,

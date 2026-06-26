@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
+
+use crate::error::HxResult;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheStats {
@@ -66,7 +68,22 @@ impl PageCache {
         self.stats
     }
 
-    pub fn read_range(&mut self, file: &mut File, offset: u64, len: usize) -> io::Result<Vec<u8>> {
+    pub fn read_range(&mut self, file: &mut File, offset: u64, len: usize) -> HxResult<Vec<u8>> {
+        self.read_range_with(offset, len, |page_start, page_size| {
+            file.seek(SeekFrom::Start(page_start))?;
+            let mut buf = vec![0; page_size];
+            let read = file.read(&mut buf)?;
+            buf.truncate(read);
+            Ok(buf)
+        })
+    }
+
+    pub fn read_range_with(
+        &mut self,
+        offset: u64,
+        len: usize,
+        mut load_page: impl FnMut(u64, usize) -> HxResult<Vec<u8>>,
+    ) -> HxResult<Vec<u8>> {
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -78,7 +95,7 @@ impl PageCache {
 
         let mut out = Vec::with_capacity(len);
         for page_idx in start_page..=end_page {
-            self.ensure_loaded(file, page_idx)?;
+            self.ensure_loaded_with(page_idx, &mut load_page)?;
             let Some(entry) = self.entries.get(&page_idx) else {
                 continue;
             };
@@ -100,7 +117,11 @@ impl PageCache {
         Ok(out)
     }
 
-    fn ensure_loaded(&mut self, file: &mut File, page_idx: u64) -> io::Result<()> {
+    fn ensure_loaded_with(
+        &mut self,
+        page_idx: u64,
+        load_page: &mut impl FnMut(u64, usize) -> HxResult<Vec<u8>>,
+    ) -> HxResult<()> {
         if let Some(entry) = self.entries.get_mut(&page_idx) {
             self.stats.page_hits += 1;
             self.generation += 1;
@@ -110,10 +131,7 @@ impl PageCache {
 
         self.stats.page_misses += 1;
         let page_start = page_idx * self.page_size as u64;
-        file.seek(SeekFrom::Start(page_start))?;
-        let mut buf = vec![0; self.page_size];
-        let read = file.read(&mut buf)?;
-        buf.truncate(read);
+        let buf = load_page(page_start, self.page_size)?;
 
         self.generation += 1;
         self.entries.insert(

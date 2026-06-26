@@ -7,6 +7,7 @@ use tempfile::tempdir;
 fn base_cli(file: PathBuf) -> Cli {
     Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,

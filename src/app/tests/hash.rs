@@ -50,6 +50,7 @@ fn hash_command_various_algorithms_and_ranges() {
     fs::write(&file, []).unwrap();
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,
@@ -86,6 +87,7 @@ fn hash_large_file_reports_progress_across_ticks() {
 
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,
@@ -140,6 +142,7 @@ fn hash_large_file_blocks_input_until_escape() {
 
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,

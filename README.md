@@ -46,6 +46,17 @@ hxedit some.bin --script examples/simple_hash_patch.hxscript
 hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 ```
 
+Builds with the optional `remote-sftp` feature can open SFTP targets:
+
+```bash
+hxedit --remote sftp://user@host/path/to/file.bin
+```
+
+The default SFTP backend runs the system OpenSSH client as an SFTP subsystem,
+so normal SSH config, host-key checking, public keys, agents, and GSSAPI login
+work the same way as `ssh host`. Set `HXEDIT_SFTP_BACKEND=ssh2` to force the
+older libssh2 backend.
+
 Run the same automation from the TUI command line:
 
 ```text
@@ -104,6 +115,7 @@ and Sagitta analysis, see the [user guide](docs/user-guide.md).
 ## What You Can Do
 
 - Open and edit large files with overwrite, insert, and delete
+- Optionally open SFTP remote files with the same editing model
 - Search text, hex bytes, single-byte values, or typed integers
 - Copy, export, hash, view stats, fill, zero, XOR, or replace selected bytes
 - Run TOML macro files and Rhai scripts through the same execution layer as manual edits
@@ -141,6 +153,7 @@ scenarios, hardware, and reproduction commands are in
 | `core` | `cargo build --release --no-default-features` | You want the editor, inspector, search, diff, hash, copy/paste, and export only |
 | `default` | `cargo build --release` | You want the normal build with process memory editing, disassembly, symbols, and Rhai scripts |
 | `full` | `cargo build --release --no-default-features --features full` | You also want Keystone-backed inline assembly patching and Sagitta analysis |
+| `remote-sftp` add-on | `cargo build --release --features remote-sftp` | You also want `--remote sftp://...` file targets |
 
 ## Good To Know
 
@@ -151,7 +164,9 @@ consistent. Format inspectors only write the bytes you edit; they do not repair
 checksums, CRCs, or layouts for you. If a header edit makes the current format
 undetectable, the status line reports that the format was lost. Process memory
 edits stay local until you explicitly commit them back to the target process. See
-[docs/editing-model.md](docs/editing-model.md) for the exact semantics.
+[docs/editing-model.md](docs/editing-model.md) for the exact semantics. Remote
+SFTP saves rewrite through a remote temporary file and refuse to overwrite when
+the remote fingerprint changed since open.
 
 ## Documentation
 

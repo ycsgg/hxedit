@@ -35,6 +35,7 @@
 - Scripting：`default` / `full` 包含 Rhai `:script` / headless `--script` demo；脚本只能调用 `hx_` host API，
   host API 继续落到 `ExecCommand`，不直接暴露 `Document`
 - 保存：当前统一走 rewrite-save；同路径保存保留权限位；save-as 允许从 readonly 文档写到新路径
+- Remote：可选 `remote-sftp` feature 支持 `--remote sftp://user@host/path` 打开 SFTP 文件目标；默认 transport 是系统 OpenSSH SFTP subsystem（复用 SSH config / host-key / key / agent / GSSAPI），`HXEDIT_SFTP_BACKEND=ssh2` 可强制旧 libssh2 后端；远程 original bytes 通过同一 page-cache / `Document` walker 分块读取，clean remote 的 hash/search/export 使用 streaming fast path，编辑仍只落在 piece table / tombstone / replacement；远程 `:w` 通过远程临时文件 rewrite + fingerprint 冲突检测 + posix rename 覆盖原目标，远程 `:w <path>` 首版拒绝，使用 `:export <path>` 生成本地副本
 - 配置：启动时读取可选 TOML 配置文件（`--config` > `$HXEDIT_CONFIG` > `~/.config/hxedit/config.toml`）。优先级 CLI 参数 > 配置文件 > 内置默认值；文件缺失静默用默认，存在但解析失败/含未知字段则报错退出。当前覆盖 `[display]`（bytes_per_line / data_panel_bytes / inspector_depth / export_c_width / export_py_width / export_name）、`[behavior]`（readonly / inspector / color=auto\|never / search_wrap）、`[performance]`（page_size / cache_pages）。runtime `Config` 仍是扁平结构，三段式仅是磁盘 TOML 布局（`FileConfig`）
 - 许可 / 发布：仓库自身源码当前以 `MIT OR Apache-2.0` 双许可发布；`default` / `full`
   包含 `MIT OR Apache-2.0` 的 Rhai scripting 依赖；`full` 档位当前使用可选
@@ -76,6 +77,7 @@
 | 模块 | 责任 | 改动时重点检查 |
 |---|---|---|
 | `src/core/document/*` | 文档读写、编辑、搜索、保存入口 | display / visible / logical 语义是否仍一致 |
+| `src/remote/*` | Remote target 解析、fake remote 测试后端、OpenSSH / libssh2 SFTP 后端 | 不要绕过 `Document` walker；保存必须保留冲突检测和失败不清 dirty 状态 |
 | `src/core/piece_table.rs` | 真实插入 / 真实删除、`CellId` 稳定性 | split / merge / restore 是否破坏 id 稳定性 |
 | `src/exec/*` | 无 UI 的执行层：range 解析、hash/export、可逆 `EditOp`、replacement / insert / tombstone / real-delete / replace 组合操作 | 是否继续复用 `Document` walker/overlay；是否把 TUI mode/status/clipboard 状态漏进执行层 |
 | `src/app/editing_state.rs` | nibble 编辑、插入、删除 | mode 切换、EOF 行为、undo 记录 |

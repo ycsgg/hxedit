@@ -1,4 +1,5 @@
 use super::*;
+use crate::remote::{fake_bytes, install_fake};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // App initialization and readonly mode
@@ -17,6 +18,7 @@ fn app_falls_back_to_readonly_when_write_open_is_denied() {
 
     let cli = Cli {
         file: Some(file.clone()),
+        remote: None,
         pid: None,
         process: None,
         config: None,
@@ -51,6 +53,7 @@ fn readonly_mode_allows_save_as_new_path() {
 
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,
@@ -87,6 +90,7 @@ fn readonly_mode_rejects_save_in_place() {
 
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,
@@ -110,6 +114,38 @@ fn readonly_mode_rejects_save_in_place() {
         .expect_err("readonly in-place save should fail");
 
     assert_eq!(err.to_string(), "document is read-only");
+}
+
+#[test]
+fn remote_target_opens_and_writes_through_app() {
+    let target = install_fake("fake://app/sample.bin", b"abcd", false);
+    let cli = Cli {
+        file: None,
+        remote: Some(target.label()),
+        pid: None,
+        process: None,
+        config: None,
+        bytes_per_line: Some(16),
+        page_size: Some(4096),
+        cache_pages: Some(8),
+        profile: false,
+        readonly: false,
+        no_color: true,
+        offset: None,
+        inspector: false,
+        run: Vec::new(),
+        command: Vec::new(),
+        select: None,
+        script: Vec::new(),
+    };
+    let mut app = App::from_cli(cli).unwrap();
+
+    assert!(app.document.is_remote());
+    app.document.replace_display_byte(1, b'Z').unwrap();
+    app.execute_command(Command::Write { path: None }).unwrap();
+
+    assert_eq!(fake_bytes(&target), b"aZcd");
+    assert!(!app.document.is_dirty());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -142,6 +178,7 @@ fn viewport_can_scroll_to_large_tail_row() {
     sparse.set_len(0x4000_0001).unwrap();
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,
@@ -180,6 +217,7 @@ fn diff_projection_can_scroll_to_other_only_tail_row() {
 
     let cli = Cli {
         file: Some(current),
+        remote: None,
         pid: None,
         process: None,
         config: None,

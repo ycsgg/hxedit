@@ -12,6 +12,21 @@
   - visible len
   - original len
   - tombstone / replacement / insert 之间的关系
+- Remote 文件只改变 original bytes 的来源和 save sink；不要为了协议方便绕过
+  `Document::walk_logical_chunks` / page cache / piece table 语义
+
+## `src/remote/*`
+
+- Remote backend 必须提供 offset read，供 `FileView` page cache 使用；不要默认整文件下载
+- 默认 SFTP transport 通过系统 OpenSSH 客户端运行 SFTP subsystem；命令必须保持 argv
+  传参，不要 shell 拼接 host / path
+- `HXEDIT_SFTP_BACKEND=ssh2` 保留旧 libssh2 后端用于对照和 fallback，但它不覆盖
+  GSSAPI-only 等 OpenSSH 专属认证路径
+- SFTP 保存必须走远程临时文件 + fingerprint 冲突检测 + rename，失败时不得清空
+  dirty / undo / replacement / tombstone 状态
+- 认证失败必须在进入 TUI raw mode 前返回错误；不要在 TUI 内做密码 prompt
+- 不要把 URI 中的密码作为支持面；当前明确拒绝 `user:password@host`
+- 新增协议必须先建模 capability，不满足 random read / rewrite-save 的协议默认只读或拒绝保存
 
 ## `src/core/piece_table.rs`
 

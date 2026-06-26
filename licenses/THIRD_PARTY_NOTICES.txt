@@ -55,3 +55,34 @@ default bundle.
 Rhai's license is compatible with the repository's own `MIT OR Apache-2.0`
 license. Redistributed default/full artifacts should keep this notice with the
 artifact.
+
+## SFTP support in `remote-sftp` builds
+
+The optional `remote-sftp` feature enables SFTP remote file targets through the
+`ssh2` Rust crate and its low-level bindings.
+
+- Package: `ssh2`
+- Version: `0.9.5`
+- License: MIT OR Apache-2.0
+- Repository: https://github.com/alexcrichton/ssh2-rs
+
+Transitive crates enabled by this feature include:
+
+- Package: `libssh2-sys`
+- Version: `0.3.1`
+- License: MIT OR Apache-2.0
+- Repository: https://github.com/alexcrichton/ssh2-rs
+
+- Package: `openssl-sys`
+- Version: `0.9.117`
+- License: MIT
+- Repository: https://github.com/rust-openssl/rust-openssl
+
+- Package: `libz-sys`
+- Version: `1.1.29`
+- License: MIT OR Apache-2.0
+- Repository: https://github.com/rust-lang/libz-sys
+
+`remote-sftp` is not part of the default bundle. Redistributed artifacts that
+enable it should keep this notice with the artifact, and should account for any
+system or vendored native libraries used by the target build environment.

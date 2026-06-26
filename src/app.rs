@@ -512,6 +512,7 @@ impl App {
         let mut memory_message = None;
         let document = match cli.target()? {
             CliTarget::File(path) => Document::open(&path, &config)?,
+            CliTarget::Remote(target) => Document::open_remote(target, &config)?,
             #[cfg(feature = "memory")]
             CliTarget::Pid(pid) => {
                 let opened = Self::open_memory_cli_target(

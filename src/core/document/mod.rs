@@ -14,6 +14,7 @@ use crate::core::page_cache::CacheStats;
 use crate::core::piece_table::{CellId, Piece, PieceSource, PieceTable};
 use crate::core::save;
 use crate::error::{HxError, HxResult};
+use crate::remote::RemoteTarget;
 
 pub(crate) use replacement_store::ReplacementPatch;
 use replacement_store::ReplacementStore;
@@ -114,8 +115,36 @@ impl Document {
         }
     }
 
+    pub fn open_remote(target: RemoteTarget, config: &Config) -> HxResult<Self> {
+        let view = FileView::open_remote(
+            target,
+            config.readonly,
+            config.page_size,
+            config.cache_pages,
+        )?;
+        let readonly = config.readonly || view.is_remote_readonly().unwrap_or(false);
+        let original_len = view.len();
+        let path = PathBuf::from(view.label());
+        Ok(Self {
+            path,
+            readonly,
+            page_size: config.page_size,
+            cache_pages: config.cache_pages,
+            original_len,
+            fixed_size: false,
+            view,
+            pieces: PieceTable::new(original_len),
+            tombstones: BTreeSet::new(),
+            replacements: ReplacementStore::default(),
+        })
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn label(&self) -> String {
+        self.view.label()
     }
 
     pub fn original_len(&self) -> u64 {
@@ -152,6 +181,10 @@ impl Document {
         self.fixed_size
     }
 
+    pub fn is_remote(&self) -> bool {
+        self.view.is_remote()
+    }
+
     pub fn io_stats(&self) -> CacheStats {
         self.view.cache_stats()
     }
@@ -163,6 +196,23 @@ impl Document {
         if self.fixed_size {
             return Err(HxError::FixedSizeViolation);
         }
+        if self.view.is_remote() {
+            if path.is_some() {
+                return Err(HxError::RemoteSaveAsUnsupported);
+            }
+            if self.readonly {
+                return Err(HxError::ReadOnly);
+            }
+            let mut writer = self.view.begin_remote_save()?;
+            let profile = save::write_pieces_to_writer(self, writer.as_mut())?;
+            let stat = writer.finish()?;
+            self.view.complete_remote_save(stat)?;
+            self.original_len = self.view.len();
+            self.path = PathBuf::from(self.view.label());
+            self.reset_after_successful_save();
+            return Ok((self.path.clone(), profile));
+        }
+
         let target = path.unwrap_or_else(|| self.path.clone());
         if self.readonly && target == self.path {
             return Err(HxError::ReadOnly);
@@ -174,11 +224,15 @@ impl Document {
         self.view
             .reload(&target, self.readonly, self.page_size, self.cache_pages)?;
         self.original_len = self.view.len();
+        self.reset_after_successful_save();
+        Ok((target, profile))
+    }
+
+    fn reset_after_successful_save(&mut self) {
         self.fixed_size = false;
         self.pieces = PieceTable::new(self.original_len);
         self.tombstones.clear();
         self.replacements.clear();
-        Ok((target, profile))
     }
 
     /// Validate and return a display offset for `:goto`.
@@ -568,6 +622,7 @@ mod tests {
     use crate::core::piece_table::CellId;
     use crate::error::HxError;
     use crate::mode::NibblePhase;
+    use crate::remote::{fake_bytes, install_fake, touch_fake};
 
     #[test]
     fn fixed_size_memory_document_allows_replacement_only() {
@@ -589,6 +644,103 @@ mod tests {
         assert_eq!(doc.byte_at(1).unwrap(), ByteSlot::Present(0x34));
         assert_eq!(doc.len(), 4);
         assert_eq!(doc.visible_len(), 4);
+    }
+
+    #[test]
+    fn remote_document_reads_and_saves_via_backend() {
+        let config = Config::default();
+        let target = install_fake("fake://unit/save.bin", b"abcd", false);
+        let mut doc = Document::open_remote(target.clone(), &config).unwrap();
+
+        assert!(doc.is_remote());
+        assert_eq!(doc.logical_bytes(0, 3).unwrap(), b"abcd");
+        doc.replace_display_byte(1, b'Z').unwrap();
+        doc.insert_byte(4, b'!').unwrap();
+
+        let (saved, _profile) = doc.save(None).unwrap();
+
+        assert_eq!(saved.to_string_lossy(), "fake://unit/save.bin");
+        assert!(!doc.is_dirty());
+        assert_eq!(doc.len(), 5);
+        assert_eq!(fake_bytes(&target), b"aZcd!");
+        assert_eq!(doc.logical_bytes(0, 4).unwrap(), b"aZcd!");
+    }
+
+    #[test]
+    fn remote_hash_fast_path_preserves_dirty_overlay_semantics() {
+        use sha2::Digest;
+
+        let config = Config::default();
+        let bytes = (0..(2 * 1024 * 1024 + 17))
+            .map(|idx| (idx % 251) as u8)
+            .collect::<Vec<_>>();
+        let target = install_fake("fake://unit/hash-fast-path.bin", &bytes, false);
+        let mut doc = Document::open_remote(target, &config).unwrap();
+
+        let (bytes_hashed, hash) = doc
+            .hash_logical_bytes(0, doc.len() - 1, Box::new(sha2::Sha256::new()))
+            .unwrap();
+        assert_eq!(bytes_hashed, bytes.len() as u64);
+        assert_eq!(hash, sha2::Sha256::digest(&bytes).to_vec());
+
+        doc.replace_display_byte(42, 0xaa).unwrap();
+        let logical = doc.logical_bytes(0, doc.len() - 1).unwrap();
+        let (bytes_hashed, hash) = doc
+            .hash_logical_bytes(0, doc.len() - 1, Box::new(sha2::Sha256::new()))
+            .unwrap();
+        assert_eq!(bytes_hashed, logical.len() as u64);
+        assert_eq!(hash, sha2::Sha256::digest(&logical).to_vec());
+    }
+
+    #[test]
+    fn remote_search_fast_path_preserves_dirty_overlay_semantics() {
+        let config = Config::default();
+        let mut bytes = vec![b'x'; 1024 * 1024 + 19];
+        let hit = 700_001usize;
+        bytes[hit..hit + 6].copy_from_slice(b"needle");
+        let target = install_fake("fake://unit/search-fast-path.bin", &bytes, false);
+        let mut doc = Document::open_remote(target, &config).unwrap();
+
+        assert_eq!(doc.search_forward(0, b"needle").unwrap(), Some(hit as u64));
+        assert_eq!(
+            doc.search_backward(doc.len(), b"needle").unwrap(),
+            Some(hit as u64)
+        );
+
+        doc.replace_display_byte(hit as u64 + 1, b'X').unwrap();
+        assert_eq!(doc.search_forward(0, b"needle").unwrap(), None);
+        assert_eq!(doc.search_forward(0, b"nXedle").unwrap(), Some(hit as u64));
+        assert_eq!(
+            doc.search_backward(doc.len(), b"nXedle").unwrap(),
+            Some(hit as u64)
+        );
+    }
+
+    #[test]
+    fn remote_document_rejects_save_as_path() {
+        let config = Config::default();
+        let target = install_fake("fake://unit/save-as.bin", b"abcd", false);
+        let mut doc = Document::open_remote(target, &config).unwrap();
+
+        assert!(matches!(
+            doc.save(Some(PathBuf::from("local-copy.bin"))),
+            Err(HxError::RemoteSaveAsUnsupported)
+        ));
+    }
+
+    #[test]
+    fn remote_document_keeps_dirty_state_on_conflict() {
+        let config = Config::default();
+        let target = install_fake("fake://unit/document-conflict.bin", b"abcd", false);
+        let mut doc = Document::open_remote(target.clone(), &config).unwrap();
+        doc.replace_display_byte(0, b'X').unwrap();
+        touch_fake(&target, b"changed");
+
+        let err = doc.save(None).unwrap_err();
+
+        assert!(matches!(err, HxError::RemoteConflict { .. }));
+        assert!(doc.is_dirty());
+        assert_eq!(fake_bytes(&target), b"changed");
     }
 
     #[test]

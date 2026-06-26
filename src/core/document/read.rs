@@ -5,6 +5,7 @@ use crate::error::HxResult;
 use super::walk::WalkControl;
 
 const LOGICAL_CHUNK: usize = 64 * 1024;
+const REMOTE_STREAM_CHUNK: usize = 32 * 1024 * 1024;
 
 impl Document {
     pub fn raw_range(&mut self, offset: u64, len: usize) -> HxResult<Vec<u8>> {
@@ -97,6 +98,10 @@ impl Document {
         }
 
         let end = end_inclusive.min(len - 1);
+        if let Some((start, end)) = self.clean_remote_original_range(start, end) {
+            return self.read_clean_remote_original_range(start, end);
+        }
+
         let mut out = Vec::with_capacity((end - start + 1) as usize);
         self.walk_logical_chunks(start, end, LOGICAL_CHUNK, |chunk| {
             out.extend_from_slice(chunk.bytes);
@@ -143,6 +148,10 @@ impl Document {
             return Ok(0);
         }
 
+        if let Some((start, end)) = self.clean_remote_original_range(start, end_inclusive) {
+            return self.for_each_clean_remote_original_chunk(start, end, sink);
+        }
+
         let mut visited: u64 = 0;
         self.walk_logical_chunks(start, end_inclusive, LOGICAL_CHUNK, |chunk| {
             if !chunk.bytes.is_empty() {
@@ -169,16 +178,74 @@ impl Document {
             return Ok((0, Vec::new()));
         }
 
-        let mut bytes_hashed: u64 = 0;
-        self.walk_logical_chunks(start, end_inclusive, LOGICAL_CHUNK, |chunk| {
-            if !chunk.bytes.is_empty() {
-                hasher.update(chunk.bytes);
-                bytes_hashed += chunk.bytes.len() as u64;
+        let bytes_hashed = self.for_each_logical_chunk(start, end_inclusive, |bytes| {
+            if !bytes.is_empty() {
+                hasher.update(bytes);
             }
-            Ok(WalkControl::Continue)
+            Ok(())
         })?;
 
         let result = hasher.finalize();
         Ok((bytes_hashed, result.to_vec()))
+    }
+
+    pub(crate) fn clean_remote_original_range(
+        &self,
+        start: u64,
+        end_inclusive: u64,
+    ) -> Option<(u64, u64)> {
+        if !self.view.is_remote() || self.is_dirty() {
+            return None;
+        }
+        let len = self.len();
+        if len == 0 || start > end_inclusive || start >= len {
+            return None;
+        }
+        Some((start, end_inclusive.min(len - 1)))
+    }
+
+    pub(crate) fn read_clean_remote_original_range(
+        &mut self,
+        start: u64,
+        end: u64,
+    ) -> HxResult<Vec<u8>> {
+        let len = end.saturating_sub(start).saturating_add(1);
+        let read_len = len as usize;
+        self.view
+            .read_remote_direct(start, read_len)?
+            .ok_or_else(|| unreachable!("clean remote fast path checked remote storage"))
+    }
+
+    pub(crate) fn for_each_clean_remote_original_chunk(
+        &mut self,
+        start: u64,
+        end: u64,
+        mut sink: impl FnMut(&[u8]) -> HxResult<()>,
+    ) -> HxResult<u64> {
+        let mut offset = start;
+        let mut visited = 0_u64;
+        while offset <= end {
+            let remaining = end.saturating_sub(offset).saturating_add(1);
+            let read_len = if remaining > REMOTE_STREAM_CHUNK as u64 {
+                REMOTE_STREAM_CHUNK
+            } else {
+                remaining as usize
+            };
+            let chunk = self
+                .view
+                .read_remote_direct(offset, read_len)?
+                .expect("clean remote fast path checked remote storage");
+            if chunk.is_empty() {
+                break;
+            }
+            let read = chunk.len() as u64;
+            sink(&chunk)?;
+            visited += read;
+            offset = offset.saturating_add(read);
+            if chunk.len() < read_len {
+                break;
+            }
+        }
+        Ok(visited)
     }
 }

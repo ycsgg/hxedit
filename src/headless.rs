@@ -15,17 +15,16 @@ use crate::util::parse::parse_offset;
 pub fn run(cli: Cli) -> Result<()> {
     let config = cli.config()?;
     let target = cli.target()?;
-    let path = match target {
-        CliTarget::File(path) => path,
+    let mut document = match target {
+        CliTarget::File(path) => Document::open(&path, &config)?,
+        CliTarget::Remote(target) => Document::open_remote(target, &config)?,
         CliTarget::Pid(_) | CliTarget::Process(_) => {
             return Err(HxError::InvalidCliSource(
-                "--run, --script, and --command require a file target".to_owned(),
+                "--run, --script, and --command require a file or remote target".to_owned(),
             )
             .into())
         }
     };
-
-    let mut document = Document::open(&path, &config)?;
     let selection = parse_initial_selection(cli.select.as_deref(), &document)?;
     let cursor = if document.is_empty() {
         0
@@ -327,5 +326,46 @@ fn print_script_report(label: &str, report: &crate::scripting::ScriptReport) {
         for summary in &report.summaries {
             println!("{label}: {summary}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::remote::{fake_bytes, install_fake};
+
+    fn remote_cli(uri: String) -> Cli {
+        Cli {
+            file: None,
+            remote: Some(uri),
+            pid: None,
+            process: None,
+            config: None,
+            bytes_per_line: Some(16),
+            page_size: Some(4096),
+            cache_pages: Some(8),
+            profile: false,
+            readonly: false,
+            no_color: true,
+            offset: None,
+            inspector: false,
+            run: Vec::new(),
+            command: vec![
+                "goto 0x1".to_owned(),
+                "fill 5a 1".to_owned(),
+                "w".to_owned(),
+            ],
+            select: None,
+            script: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn remote_target_runs_headless_commands_and_saves() {
+        let target = install_fake("fake://headless/sample.bin", b"abcd", false);
+
+        run(remote_cli(target.label())).unwrap();
+
+        assert_eq!(fake_bytes(&target), b"aZcd");
     }
 }

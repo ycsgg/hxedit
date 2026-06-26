@@ -58,6 +58,14 @@ pub enum HxError {
         len: usize,
         message: String,
     },
+    #[error("remote error: {0}")]
+    Remote(String),
+    #[error("remote file changed since open: {target}")]
+    RemoteConflict { target: String },
+    #[error(
+        ":w <path> is not supported for remote documents; use :export <path> for a local copy"
+    )]
+    RemoteSaveAsUnsupported,
     #[error("assembly error: {0}")]
     AssemblyError(String),
     #[error("invalid hex pattern: {0}")]

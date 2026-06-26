@@ -321,6 +321,7 @@ mod tests {
         fs::write(&file, bytes).unwrap();
         let cli = Cli {
             file: Some(file),
+            remote: None,
             pid: None,
             process: None,
             config: None,

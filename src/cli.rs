@@ -4,6 +4,7 @@ use clap::Parser;
 
 use crate::config::{Config, FileConfig};
 use crate::error::{HxError, HxResult};
+use crate::remote::RemoteTarget;
 use crate::util::parse::parse_offset;
 
 use crate::view::palette::ColorLevel;
@@ -19,6 +20,9 @@ pub struct Cli {
 
     #[arg(long, value_name = "NAME")]
     pub process: Option<String>,
+
+    #[arg(long, value_name = "URI")]
+    pub remote: Option<String>,
 
     #[arg(long, value_name = "PATH", help = "Path to a config file (TOML)")]
     pub config: Option<PathBuf>,
@@ -68,6 +72,7 @@ pub struct Cli {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliTarget {
     File(PathBuf),
+    Remote(RemoteTarget),
     Pid(u32),
     Process(String),
 }
@@ -79,15 +84,18 @@ impl Cli {
 
     pub fn target(&self) -> HxResult<CliTarget> {
         let source_count = usize::from(self.file.is_some())
+            + usize::from(self.remote.is_some())
             + usize::from(self.pid.is_some())
             + usize::from(self.process.is_some());
         match source_count {
             0 => Err(HxError::InvalidCliSource(
-                "a file or a memory target is required".to_owned(),
+                "a file, remote URI, or memory target is required".to_owned(),
             )),
             1 => {
                 if let Some(file) = &self.file {
                     Ok(CliTarget::File(file.clone()))
+                } else if let Some(remote) = &self.remote {
+                    Ok(CliTarget::Remote(RemoteTarget::parse(remote)?))
                 } else if let Some(pid) = self.pid {
                     Ok(CliTarget::Pid(pid))
                 } else {
@@ -97,7 +105,7 @@ impl Cli {
                 }
             }
             _ => Err(HxError::InvalidCliSource(
-                "file, --pid, and --process are mutually exclusive".to_owned(),
+                "file, --remote, --pid, and --process are mutually exclusive".to_owned(),
             )),
         }
     }
@@ -154,6 +162,7 @@ mod tests {
     fn base_cli() -> Cli {
         Cli {
             file: None,
+            remote: None,
             pid: None,
             process: None,
             config: None,
@@ -187,6 +196,10 @@ mod tests {
         let mut cli = base_cli();
         cli.file = Some("test.bin".into());
         assert!(matches!(cli.target().unwrap(), CliTarget::File(_)));
+
+        let mut cli = base_cli();
+        cli.remote = Some("sftp://example.com/tmp/blob.bin".to_owned());
+        assert!(matches!(cli.target().unwrap(), CliTarget::Remote(_)));
 
         let mut cli = base_cli();
         cli.pid = Some(123);

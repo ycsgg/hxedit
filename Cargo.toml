@@ -42,6 +42,7 @@ full = ["default-bundle", "asm", "sagitta-analysis"]
 sagitta-analysis = ["symbols", "disasm", "dep:sagitta-rs"]
 disasm-iced-x86 = ["disasm", "dep:iced-x86"]
 disasm-yaxpeax-arm = ["disasm", "dep:yaxpeax-arch", "dep:yaxpeax-arm"]
+remote-sftp = ["dep:ssh2"]
 
 [dependencies]
 anyhow = "1.0"
@@ -68,6 +69,7 @@ sagitta-rs = { version = "0.0.2", optional = true }
 iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "fast_fmt"], optional = true }
 yaxpeax-arch = { version = "0.3", default-features = false, features = ["std"], optional = true }
 yaxpeax-arm = { version = "0.4", default-features = false, features = ["std"], optional = true }
+ssh2 = { version = "0.9", optional = true }
 
 [dev-dependencies]
 libc = "0.2"

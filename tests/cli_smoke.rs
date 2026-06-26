@@ -7,6 +7,7 @@ use hxedit::cli::Cli;
 fn app_constructs_from_cli() {
     let cli = Cli {
         file: Some(Path::new("tests/fixtures/ascii.bin").to_path_buf()),
+        remote: None,
         pid: None,
         process: None,
         config: None,

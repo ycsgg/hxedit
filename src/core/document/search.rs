@@ -3,6 +3,8 @@ use crate::error::{HxError, HxResult};
 
 use super::walk::WalkControl;
 
+const REMOTE_SEARCH_CHUNK: usize = 32 * 1024 * 1024;
+
 impl Document {
     /// Search forward through the display stream. Tombstoned bytes break
     /// matches (they are treated as gaps). Inserted bytes participate normally.
@@ -12,6 +14,12 @@ impl Document {
         }
         if start >= self.len() {
             return Ok(None);
+        }
+
+        if let Some((start, end)) =
+            self.clean_remote_original_range(start, self.len().saturating_sub(1))
+        {
+            return self.search_clean_remote_forward(start, end, pattern);
         }
 
         // Segment walking forwards clean chunks as raw bytes and only builds a
@@ -120,6 +128,10 @@ impl Document {
             return Ok(None);
         }
 
+        if self.clean_remote_original_range(0, end - 1).is_some() {
+            return self.search_clean_remote_backward(end, pattern);
+        }
+
         let chunk_len = self
             .max_contiguous_read_len()
             .min(SEARCH_CHUNK)
@@ -132,6 +144,92 @@ impl Document {
             let want = (cursor as usize).min(chunk_len);
             let chunk_start = cursor - want as u64;
             let chunk = self.read_logical_range(chunk_start, want)?;
+            if chunk.is_empty() {
+                break;
+            }
+            let mut searchable = chunk;
+            searchable.extend_from_slice(&overlap);
+
+            if let Some(pos) = memchr::memmem::rfind(&searchable, pattern) {
+                let found = chunk_start + pos as u64;
+                if found + pattern.len() as u64 <= end {
+                    return Ok(Some(found));
+                }
+            }
+
+            let keep = overlap_keep.min(searchable.len());
+            overlap = searchable[..keep].to_vec();
+            cursor = chunk_start;
+        }
+
+        Ok(None)
+    }
+
+    fn search_clean_remote_forward(
+        &mut self,
+        start: u64,
+        end: u64,
+        pattern: &[u8],
+    ) -> HxResult<Option<u64>> {
+        let overlap_keep = pattern.len() - 1;
+        let mut overlap: Vec<u8> = Vec::new();
+        let mut searchable: Vec<u8> = Vec::new();
+        let mut offset = start;
+
+        while offset <= end {
+            let remaining = end.saturating_sub(offset).saturating_add(1);
+            let read_len = if remaining > REMOTE_SEARCH_CHUNK as u64 {
+                REMOTE_SEARCH_CHUNK
+            } else {
+                remaining as usize
+            };
+            let chunk_end = offset + read_len as u64 - 1;
+            let chunk = self.read_clean_remote_original_range(offset, chunk_end)?;
+            if chunk.is_empty() {
+                break;
+            }
+
+            if overlap.is_empty() {
+                if let Some(pos) = memchr::memmem::find(&chunk, pattern) {
+                    return Ok(Some(offset + pos as u64));
+                }
+
+                let keep = overlap_keep.min(chunk.len());
+                overlap.extend_from_slice(&chunk[chunk.len() - keep..]);
+            } else {
+                let base = offset - overlap.len() as u64;
+                searchable.clear();
+                searchable.extend_from_slice(&overlap);
+                searchable.extend_from_slice(&chunk);
+
+                if let Some(pos) = memchr::memmem::find(&searchable, pattern) {
+                    return Ok(Some(base + pos as u64));
+                }
+
+                let keep = overlap_keep.min(searchable.len());
+                overlap.clear();
+                overlap.extend_from_slice(&searchable[searchable.len() - keep..]);
+            }
+
+            let read = chunk.len() as u64;
+            offset = offset.saturating_add(read);
+            if chunk.len() < read_len {
+                break;
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn search_clean_remote_backward(&mut self, end: u64, pattern: &[u8]) -> HxResult<Option<u64>> {
+        let overlap_keep = pattern.len() - 1;
+        let mut cursor = end;
+        let mut overlap: Vec<u8> = Vec::new();
+
+        while cursor > 0 {
+            let want = (cursor as usize).min(REMOTE_SEARCH_CHUNK);
+            let chunk_start = cursor - want as u64;
+            let chunk = self.read_clean_remote_original_range(chunk_start, cursor - 1)?;
             if chunk.is_empty() {
                 break;
             }

@@ -15,6 +15,7 @@ pub(super) fn app_with_bytes(bytes: &[u8]) -> App {
     fs::write(&file, bytes).unwrap();
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,
@@ -152,6 +153,7 @@ fn visible_diff_page_shows_other_only_tail_beyond_current_eof() {
     other_file.write_all(&[1]).unwrap();
     let cli = Cli {
         file: Some(current),
+        remote: None,
         pid: None,
         process: None,
         config: None,

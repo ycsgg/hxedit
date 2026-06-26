@@ -217,6 +217,7 @@ fn sagitta_analysis_rejects_input_over_128_mib() {
     drop(handle);
     let cli = Cli {
         file: Some(file),
+        remote: None,
         pid: None,
         process: None,
         config: None,

@@ -25,6 +25,7 @@ The project overview stays in [README.md](../README.md).
 - Read-only synchronized diff page against another file (`:diff`)
 - Process memory editing by PID or process name, with region browsing,
   freeze/thaw, and explicit commit commands
+- Optional SFTP remote file targets via `--remote sftp://...`
 - Optional disassembly browsing, symbol search, Sagitta-backed analysis, and
   inline assemble patching
 
@@ -65,6 +66,7 @@ hxedit some.bin
 | `default` | `cargo build --release` | `core` + process memory editing, disassembly view, instruction search, symbol panel, Rhai scripts |
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching + Sagitta-backed `:ana` analysis |
 | `sagitta-analysis` add-on | `cargo build --release --features sagitta-analysis` | `default` + Sagitta-backed `:ana` analysis from crates.io `sagitta-rs` |
+| `remote-sftp` add-on | `cargo build --release --features remote-sftp` | `default` + `--remote sftp://...` targets over OpenSSH SFTP transport |
 
 Notes:
 
@@ -75,6 +77,8 @@ Notes:
 - `sagitta-analysis` enables optional `sagitta-rs` analysis for x86/x64 ELF/PE
   inputs; analysis runs on current logical bytes and does not participate in
   undo/save/search byte semantics.
+- `remote-sftp` enables SFTP remote file targets. It is not part of the default
+  bundle to avoid adding SSH/OpenSSL native dependency risk to normal builds.
 - There is no separate `:asm` command.
 
 ## CLI Flags
@@ -85,6 +89,7 @@ Notes:
 | `--offset <n\|0xhex>` | Start at a specific byte offset |
 | `--pid <PID>` | Attach to a running process by PID for memory editing |
 | `--process <NAME>` | Attach to a running process by name for memory editing |
+| `--remote <sftp://user@host/path>` | Open an SFTP remote file target in builds with `remote-sftp` |
 | `--inspector` | Open with the side panel visible on the inspector page |
 | `--run <path>` | Run a TOML macro file headlessly and exit; may be repeated |
 | `--script <path>` | Run a Rhai script file headlessly and exit; may be repeated in `scripting` builds |
@@ -98,8 +103,8 @@ Notes:
 | `--config <path>` | Load settings from a specific config file (TOML) |
 
 When `--run`, `--script`, or `--command` is present, `hxedit` opens a file
-target, runs the requested automation, prints human-readable summaries, and
-exits without creating the TUI. All `--run` files execute first, then all
+or remote target, runs the requested automation, prints human-readable
+summaries, and exits without creating the TUI. All `--run` files execute first, then all
 `--script` files, then all `--command` strings; each group preserves its own
 order. Edits are written to disk only if the macro, script, or command list
 includes `save`, `hx_save()`, `w`, or `wq`; UI-only commands such as `:diff`,
@@ -107,6 +112,23 @@ includes `save`, `hx_save()`, `w`, or `wq`; UI-only commands such as `:diff`,
 For headless `--command`, `hash`, binary `export`, and `replace` use `--select`
 when provided and otherwise apply to the whole file; `xor!` requires an explicit
 selection.
+
+Remote targets are mutually exclusive with positional `FILE`, `--pid`, and
+`--process`. The SFTP implementation accepts URI form only, such as
+`sftp://user@host:22/absolute/path.bin`; scp-like `host:path` syntax is not
+accepted. By default hxedit runs the system OpenSSH client as an SFTP
+subsystem, so authentication, SSH config, host-key checking, public keys,
+agents, and GSSAPI login follow normal `ssh host` behavior. Setting
+`HXEDIT_SFTP_INSECURE=1` passes relaxed host-key options to OpenSSH. Set
+`HXEDIT_SFTP_BACKEND=ssh2` to force the older libssh2 backend, which supports
+agent/key authentication but not GSSAPI-only hosts. Remote sources use at least
+1 MiB page-cache reads to keep sequential scans from degenerating into many
+small network round trips; clean remote `hash`, `search`, and binary `export`
+use a larger streaming fast path and fall back to the normal logical walker as
+soon as the document has inserts, tombstones, or replacements.
+Remote `:w` rewrites through a remote temporary file, checks that the remote
+fingerprint has not changed since open, then renames over the original. Remote
+`:w <path>` is rejected; use `:export <path>` for a local copy.
 
 ## Configuration
 

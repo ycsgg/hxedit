@@ -21,6 +21,7 @@ pub mod input;
 pub mod memory;
 pub mod mode;
 pub mod profile;
+pub mod remote;
 #[cfg(feature = "scripting")]
 pub(crate) mod scripting;
 pub mod util;

@@ -56,16 +56,23 @@ pub fn save_rewrite(document: &mut Document, target: &Path) -> HxResult<SaveProf
     write_pieces(document, target)
 }
 
-/// Walk logical chunks and write them in bulk.
+/// Walk logical chunks and write them in bulk to a filesystem path.
 fn write_pieces(document: &mut Document, target: &Path) -> HxResult<SaveProfile> {
-    let save_start = Instant::now();
-
     let file = OpenOptions::new()
         .create(true)
         .truncate(true)
         .write(true)
         .open(target)?;
     let mut writer = BufWriter::new(file);
+    write_pieces_to_writer(document, &mut writer)
+}
+
+/// Walk logical chunks and write them in bulk to any sink.
+pub(crate) fn write_pieces_to_writer(
+    document: &mut Document,
+    writer: &mut dyn Write,
+) -> HxResult<SaveProfile> {
+    let save_start = Instant::now();
 
     const CHUNK: usize = 64 * 1024; // 64 KB read chunks
 

@@ -93,6 +93,7 @@ fn diff_next_large_scan_steps_across_ticks() {
 
     let cli = Cli {
         file: Some(current),
+        remote: None,
         pid: None,
         process: None,
         config: None,
@@ -151,6 +152,7 @@ fn diff_scan_blocks_navigation_until_escape() {
 
     let cli = Cli {
         file: Some(current),
+        remote: None,
         pid: None,
         process: None,
         config: None,

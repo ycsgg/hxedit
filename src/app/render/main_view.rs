@@ -117,7 +117,7 @@ impl App {
     }
 
     pub(crate) fn render_status(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {
-        let path_display = self.document.path().to_string_lossy().into_owned();
+        let path_display = self.document.label();
         let (selection_span, selection_logical_len) = match self.selection_range() {
             Some((start, end)) => {
                 let logical_len = match self.document.logical_byte_count(start, end) {
