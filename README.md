@@ -46,16 +46,20 @@ hxedit some.bin --script examples/simple_hash_patch.hxscript
 hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 ```
 
-Builds with the optional `remote-sftp` feature can open SFTP targets:
+Builds with optional remote features can open remote targets:
 
 ```bash
 hxedit --remote sftp://user@host/path/to/file.bin
+hxedit --remote ssh://host/path/to/file.bin
+hxedit --remote ftp://user@host/path/to/file.bin
 ```
 
 The default SFTP backend runs the system OpenSSH client as an SFTP subsystem,
 so normal SSH config, host-key checking, public keys, agents, and GSSAPI login
 work the same way as `ssh host`. Set `HXEDIT_SFTP_BACKEND=ssh2` to force the
-older libssh2 backend.
+older libssh2 backend. `ssh://` uses OpenSSH command execution with `python3`
+on the remote host. `ftp://` uses passive binary FTP; non-anonymous FTP logins
+read the password from `HXEDIT_FTP_PASSWORD`.
 
 Run the same automation from the TUI command line:
 
@@ -115,7 +119,8 @@ and Sagitta analysis, see the [user guide](docs/user-guide.md).
 ## What You Can Do
 
 - Open and edit large files with overwrite, insert, and delete
-- Optionally open SFTP remote files with the same editing model
+- Optionally open SFTP, SSH command-transport, and FTP remote files with the
+  same editing model
 - Search text, hex bytes, single-byte values, or typed integers
 - Copy, export, hash, view stats, fill, zero, XOR, or replace selected bytes
 - Run TOML macro files and Rhai scripts through the same execution layer as manual edits
@@ -154,6 +159,9 @@ scenarios, hardware, and reproduction commands are in
 | `default` | `cargo build --release` | You want the normal build with process memory editing, disassembly, symbols, and Rhai scripts |
 | `full` | `cargo build --release --no-default-features --features full` | You also want Keystone-backed inline assembly patching and Sagitta analysis |
 | `remote-sftp` add-on | `cargo build --release --features remote-sftp` | You also want `--remote sftp://...` file targets |
+| `remote-ssh` add-on | `cargo build --release --features remote-ssh` | You also want `--remote ssh://...` command-transport targets |
+| `remote-ftp` add-on | `cargo build --release --features remote-ftp` | You also want `--remote ftp://...` passive FTP targets |
+| `remote-all` add-on | `cargo build --release --features remote-all` | You want all remote protocol backends |
 
 ## Good To Know
 
@@ -165,8 +173,8 @@ checksums, CRCs, or layouts for you. If a header edit makes the current format
 undetectable, the status line reports that the format was lost. Process memory
 edits stay local until you explicitly commit them back to the target process. See
 [docs/editing-model.md](docs/editing-model.md) for the exact semantics. Remote
-SFTP saves rewrite through a remote temporary file and refuse to overwrite when
-the remote fingerprint changed since open.
+saves rewrite through a remote temporary file and refuse to overwrite when the
+remote fingerprint changed since open.
 
 ## Documentation
 

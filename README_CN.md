@@ -44,15 +44,19 @@ hxedit some.bin --script examples/simple_hash_patch.hxscript
 hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 ```
 
-启用可选 `remote-sftp` feature 的构建可以打开 SFTP 目标：
+启用可选 remote feature 的构建可以打开远程目标：
 
 ```bash
 hxedit --remote sftp://user@host/path/to/file.bin
+hxedit --remote ssh://host/path/to/file.bin
+hxedit --remote ftp://user@host/path/to/file.bin
 ```
 
 默认 SFTP 后端会把系统 OpenSSH 客户端作为 SFTP subsystem 运行，因此 SSH config、
 host-key 检查、公钥、agent 和 GSSAPI 登录行为都与 `ssh host` 一致。设置
-`HXEDIT_SFTP_BACKEND=ssh2` 可强制使用旧的 libssh2 后端。
+`HXEDIT_SFTP_BACKEND=ssh2` 可强制使用旧的 libssh2 后端。`ssh://` 使用 OpenSSH
+命令执行，远端需要有 `python3`；`ftp://` 使用 passive binary FTP，非匿名 FTP 登录
+从 `HXEDIT_FTP_PASSWORD` 读取密码。
 
 也可以在 TUI 命令行里执行同类自动化：
 
@@ -110,7 +114,7 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 
 - 用 overwrite、insert、delete 打开和编辑大文件
 
-- 可选打开 SFTP 远程文件，并复用同一套编辑模型
+- 可选打开 SFTP、SSH 命令传输和 FTP 远程文件，并复用同一套编辑模型
 
 - 搜索文本、hex bytes、单字节值或 typed integer
 
@@ -153,6 +157,9 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 | `default` | `cargo build --release`                                       | 常规构建，包含进程内存编辑、反汇编、symbol 和 Rhai 脚本              |
 | `full`    | `cargo build --release --no-default-features --features full` | 还需要 Keystone 内联汇编 patch 和 Sagitta 分析              |
 | `remote-sftp` 附加项 | `cargo build --release --features remote-sftp` | 还需要 `--remote sftp://...` 文件目标 |
+| `remote-ssh` 附加项 | `cargo build --release --features remote-ssh` | 还需要 `--remote ssh://...` 命令传输目标 |
+| `remote-ftp` 附加项 | `cargo build --release --features remote-ftp` | 还需要 `--remote ftp://...` passive FTP 目标 |
+| `remote-all` 附加项 | `cargo build --release --features remote-all` | 需要全部远程协议后端 |
 
 ## 需要知道的行为
 
@@ -161,8 +168,8 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 原因。格式 inspector 只写入你编辑的字节，不会自动帮你修复 checksum、CRC 或布局；如果
 header 编辑导致当前格式无法再识别，状态栏会提示格式已丢失。进程内存
 编辑在你显式 commit 回目标进程之前一直是本地的。准确语义见
-[docs/editing-model.md](docs/editing-model.md)。SFTP 远程保存会通过远程临时文件
-rewrite，并且当远端 fingerprint 自打开后发生变化时拒绝覆盖。
+[docs/editing-model.md](docs/editing-model.md)。远程保存会通过远程临时文件 rewrite，
+并且当远端 fingerprint 自打开后发生变化时拒绝覆盖。
 
 ## 文档
 

@@ -22,7 +22,11 @@
   传参，不要 shell 拼接 host / path
 - `HXEDIT_SFTP_BACKEND=ssh2` 保留旧 libssh2 后端用于对照和 fallback，但它不覆盖
   GSSAPI-only 等 OpenSSH 专属认证路径
-- SFTP 保存必须走远程临时文件 + fingerprint 冲突检测 + rename，失败时不得清空
+- `ssh://` 是无 SFTP 主机的 fallback，依赖系统 OpenSSH 和远端 `python3`；它的 remote
+  command 参数必须经过 shell quoting，不能拼接未转义 path
+- `ftp://` 使用明文 passive binary FTP；FTP 缺少强 metadata / 原子覆盖保证，保存失败时必须
+  保留本地 dirty 状态并尽量清理临时文件，不能删除原文件来强行覆盖
+- 远程保存必须走远程临时文件 + fingerprint 冲突检测 + rename，失败时不得清空
   dirty / undo / replacement / tombstone 状态
 - 认证失败必须在进入 TUI raw mode 前返回错误；不要在 TUI 内做密码 prompt
 - 不要把 URI 中的密码作为支持面；当前明确拒绝 `user:password@host`

@@ -43,6 +43,9 @@ sagitta-analysis = ["symbols", "disasm", "dep:sagitta-rs"]
 disasm-iced-x86 = ["disasm", "dep:iced-x86"]
 disasm-yaxpeax-arm = ["disasm", "dep:yaxpeax-arch", "dep:yaxpeax-arm"]
 remote-sftp = ["dep:ssh2"]
+remote-ssh = []
+remote-ftp = []
+remote-all = ["remote-sftp", "remote-ssh", "remote-ftp"]
 
 [dependencies]
 anyhow = "1.0"

@@ -25,7 +25,8 @@ The project overview stays in [README.md](../README.md).
 - Read-only synchronized diff page against another file (`:diff`)
 - Process memory editing by PID or process name, with region browsing,
   freeze/thaw, and explicit commit commands
-- Optional SFTP remote file targets via `--remote sftp://...`
+- Optional remote file targets via `--remote sftp://...`, `ssh://...`, or
+  `ftp://...`
 - Optional disassembly browsing, symbol search, Sagitta-backed analysis, and
   inline assemble patching
 
@@ -67,6 +68,9 @@ hxedit some.bin
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching + Sagitta-backed `:ana` analysis |
 | `sagitta-analysis` add-on | `cargo build --release --features sagitta-analysis` | `default` + Sagitta-backed `:ana` analysis from crates.io `sagitta-rs` |
 | `remote-sftp` add-on | `cargo build --release --features remote-sftp` | `default` + `--remote sftp://...` targets over OpenSSH SFTP transport |
+| `remote-ssh` add-on | `cargo build --release --features remote-ssh` | `default` + `--remote ssh://...` targets over OpenSSH command transport |
+| `remote-ftp` add-on | `cargo build --release --features remote-ftp` | `default` + `--remote ftp://...` targets over passive binary FTP |
+| `remote-all` add-on | `cargo build --release --features remote-all` | `default` + all remote protocol backends |
 
 Notes:
 
@@ -79,6 +83,10 @@ Notes:
   undo/save/search byte semantics.
 - `remote-sftp` enables SFTP remote file targets. It is not part of the default
   bundle to avoid adding SSH/OpenSSL native dependency risk to normal builds.
+- `remote-ssh` enables an OpenSSH command-transport fallback for hosts without
+  SFTP. It depends on the local `ssh` executable and remote `python3`.
+- `remote-ftp` enables plain passive binary FTP. It is separate from SFTP and
+  does not provide FTPS/TLS.
 - There is no separate `:asm` command.
 
 ## CLI Flags
@@ -89,7 +97,7 @@ Notes:
 | `--offset <n\|0xhex>` | Start at a specific byte offset |
 | `--pid <PID>` | Attach to a running process by PID for memory editing |
 | `--process <NAME>` | Attach to a running process by name for memory editing |
-| `--remote <sftp://user@host/path>` | Open an SFTP remote file target in builds with `remote-sftp` |
+| `--remote <URI>` | Open a remote file target such as `sftp://...`, `ssh://...`, or `ftp://...` when the matching remote feature is enabled |
 | `--inspector` | Open with the side panel visible on the inspector page |
 | `--run <path>` | Run a TOML macro file headlessly and exit; may be repeated |
 | `--script <path>` | Run a Rhai script file headlessly and exit; may be repeated in `scripting` builds |
@@ -114,18 +122,35 @@ when provided and otherwise apply to the whole file; `xor!` requires an explicit
 selection.
 
 Remote targets are mutually exclusive with positional `FILE`, `--pid`, and
-`--process`. The SFTP implementation accepts URI form only, such as
-`sftp://user@host:22/absolute/path.bin`; scp-like `host:path` syntax is not
-accepted. By default hxedit runs the system OpenSSH client as an SFTP
+`--process`. Remote implementations accept URI form only, such as
+`sftp://user@host:22/absolute/path.bin`, `ssh://host/absolute/path.bin`, or
+`ftp://user@host/absolute/path.bin`; scp-like `host:path` syntax is not
+accepted. By default `sftp://` runs the system OpenSSH client as an SFTP
 subsystem, so authentication, SSH config, host-key checking, public keys,
 agents, and GSSAPI login follow normal `ssh host` behavior. Setting
 `HXEDIT_SFTP_INSECURE=1` passes relaxed host-key options to OpenSSH. Set
 `HXEDIT_SFTP_BACKEND=ssh2` to force the older libssh2 backend, which supports
-agent/key authentication but not GSSAPI-only hosts. Remote sources use at least
-1 MiB page-cache reads to keep sequential scans from degenerating into many
-small network round trips; clean remote `hash`, `search`, and binary `export`
-use a larger streaming fast path and fall back to the normal logical walker as
-soon as the document has inserts, tombstones, or replacements.
+agent/key authentication but not GSSAPI-only hosts.
+
+`ssh://` is a fallback for SSH hosts without SFTP. It runs the system OpenSSH
+client in batch mode and executes small `python3` snippets on the remote host
+for stat/read/save. It honors SSH config, keys, agents, and GSSAPI through
+OpenSSH; `HXEDIT_SSH_INSECURE=1` passes relaxed host-key options. Because it
+opens a new SSH command for reads, SFTP remains the preferred high-throughput
+backend when the server supports it.
+
+`ftp://` uses plain passive binary FTP. A missing user logs in as anonymous;
+non-anonymous logins read the password from `HXEDIT_FTP_PASSWORD`, or the user
+from `HXEDIT_FTP_USER` when the URI omits it. FTP has weaker metadata and
+rename semantics than SFTP/SSH, so same-length remote changes may only be
+detected when the server updates `MDTM`, and save can fail if the server refuses
+to rename over an existing path.
+
+Remote sources use at least 1 MiB page-cache reads to keep sequential scans
+from degenerating into many small network round trips; clean remote `hash`,
+`search`, and binary `export` use a larger streaming fast path and fall back to
+the normal logical walker as soon as the document has inserts, tombstones, or
+replacements.
 Remote `:w` rewrites through a remote temporary file, checks that the remote
 fingerprint has not changed since open, then renames over the original. Remote
 `:w <path>` is rejected; use `:export <path>` for a local copy.

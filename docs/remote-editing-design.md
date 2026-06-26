@@ -3,12 +3,14 @@
 本文档规划 hxedit 的 remote 文件编辑能力。目标是支持远程大文件的 byte 级编辑，同时继续保护现有
 `Document` 数据模型、undo / save / search 语义和大文件性能。
 
-当前状态：已落地 `--remote sftp://...`（需 `remote-sftp` feature）、`FileView`
+当前状态：已落地 `--remote sftp://...`（需 `remote-sftp` feature）、`ssh://...`
+（需 `remote-ssh` feature）、`ftp://...`（需 `remote-ftp` feature）、`FileView`
 随机读 source 抽象、fake remote 测试后端、OpenSSH SFTP transport、可选 libssh2
-SFTP 后端、远程 rewrite-save、保存前后 fingerprint 冲突检测，以及 App / headless
-共享执行层接入。默认 OpenSSH transport 复用系统 SSH config、host-key 检查、公钥、
-agent 和 GSSAPI 登录；`HXEDIT_SFTP_BACKEND=ssh2` 可强制走旧 libssh2 后端。仍未做
-remote other-side `:diff`、远程 save-as、后台预取和更多协议。
+SFTP 后端、OpenSSH command fallback、passive binary FTP 后端、远程 rewrite-save、
+保存前后 fingerprint 冲突检测，以及 App / headless 共享执行层接入。默认 OpenSSH
+SFTP transport 复用系统 SSH config、host-key 检查、公钥、agent 和 GSSAPI 登录；
+`HXEDIT_SFTP_BACKEND=ssh2` 可强制走旧 libssh2 后端。仍未做 remote other-side
+`:diff`、远程 save-as、后台预取和更多协议。
 
 ---
 
@@ -39,6 +41,8 @@ remote other-side `:diff`、远程 save-as、后台预取和更多协议。
 
 ```bash
 hxedit --remote sftp://user@host:22/absolute/path/to/file.bin
+hxedit --remote ssh://host/absolute/path/to/file.bin
+hxedit --remote ftp://user@host/absolute/path/to/file.bin
 hxedit --readonly --remote sftp://host/var/log/blob.bin
 hxedit --remote sftp://host/tmp/sample.bin --command "s x/de ad be ef/" --command "w"
 ```
@@ -46,7 +50,7 @@ hxedit --remote sftp://host/tmp/sample.bin --command "s x/de ad be ef/" --comman
 约定：
 
 - `--remote <uri>` 与 positional `FILE`、`--pid`、`--process` 互斥。
-- 首版只接受 URI 形式，不接受 scp-like `host:path`。
+- 只接受 URI 形式，不接受 scp-like `host:path`。
 - `:w` 保存回同一个远程文件。
 - 远程文档上的 `:w <path>` 首版先拒绝，避免用户不清楚这是本地 save-as 还是远程 save-as。
   本地导出继续使用 `:export <path>`。
@@ -103,19 +107,28 @@ enum DocumentTarget {
 
 ### 3.3 Transport backend
 
-首版推荐只支持 SFTP 语义，因为它天然支持 offset read/write/stat/rename，符合 hxedit 的分页模型。
+SFTP 是首选语义，因为它天然支持 offset read/write/stat/rename，符合 hxedit 的分页模型。
+`ssh://` 作为无 SFTP 主机 fallback，使用 OpenSSH batch command + 远端 `python3`
+完成 offset read / stat / rewrite-save；它复用用户 SSH config / agent / GSSAPI，但每次
+read 会启动远端命令，不作为高吞吐首选。`ftp://` 使用明文 passive binary FTP，支持
+REST/RETR 分块读、STOR 临时文件、RNFR/RNTO rename；FTP metadata 和覆盖 rename 能力
+弱于 SFTP/SSH，必须在 capability 和错误信息中保持保守。
 
 需要在 prototype 阶段确认两件事：
 
 - 默认使用外部 OpenSSH SFTP subsystem；libssh2 crate backend 作为显式 fallback。
+- `remote-ssh` 使用本机 OpenSSH 和远端 `python3`，适合 SFTP 被禁用但 SSH 可执行命令的主机。
+- `remote-ftp` 只覆盖 `ftp://` 明文 passive binary FTP；FTPS/TLS 需要单独 capability。
 - remote feature 是否进入 default bundle。
 
 约束：
 
 - `core` build 不应被 remote 依赖拖入额外网络或 C 依赖。
 - OpenSSH transport 依赖运行时 `ssh` 可执行文件；错误信息要明确说明运行时依赖。
+- SSH command transport 的远端命令参数必须正确 quoting；FTP 命令参数必须拒绝 CR/LF。
 - crate backend 要同步 license / release notice，并评估 Windows / macOS / Linux 构建。
-- 所有命令执行必须用 argv 传参，禁止 shell 拼接远程路径。
+- 本地进程启动必须用 argv 传参；遇到 OpenSSH remote command 这类无法绕开远端
+  shell 的场景，path / 参数必须经过 quoting，禁止拼接未转义远程路径。
 
 ---
 
@@ -196,9 +209,9 @@ enum DocumentTarget {
 - 用 fake remote backend 跑 TUI/headless 打开、读取、readonly、save 冲突测试。
 - 不接真实网络。
 
-### Phase 3: 真实 SFTP 读取
+### Phase 3: 真实 transport 读取
 
-- 接入一个真实 SFTP backend。
+- 接入真实 SFTP backend，并补充 SSH command / FTP backend。
 - 支持 stat、len、readonly 检测、offset read。
 - 验证大文件打开不整文件下载；render/search/hash 仍走分块读。
 - 认证失败必须在进入 TUI raw mode 前报错。
@@ -238,10 +251,12 @@ enum DocumentTarget {
 - App: remote readonly status、`:w` 成功清 dirty、`:w <path>` 拒绝。
 - render: remote label redaction。
 
-真实 SFTP 集成测试只在显式环境变量下运行，例如：
+真实 transport 集成测试只在显式环境变量下运行，例如：
 
 ```bash
 HXEDIT_REMOTE_TEST_SFTP=sftp://user@host/tmp/hxedit-test.bin cargo test remote_sftp -- --ignored
+HXEDIT_REMOTE_TEST_SSH=ssh://host/tmp/hxedit-test.bin cargo test remote_ssh -- --ignored
+HXEDIT_REMOTE_TEST_FTP=ftp://user@host/tmp/hxedit-test.bin HXEDIT_FTP_PASSWORD=... cargo test remote_ftp -- --ignored
 ```
 
 性能观测放到 bench 或手工 profile，不给 `cargo test` 加 wall-clock 阈值。
@@ -250,9 +265,10 @@ HXEDIT_REMOTE_TEST_SFTP=sftp://user@host/tmp/hxedit-test.bin cargo test remote_s
 
 ## 9. 风险与待决策
 
-- Transport：默认 OpenSSH 兼容用户配置和 GSSAPI，但有运行时 `ssh` 依赖；crate backend
-  更易封装但有 C 依赖、license 和跨平台维护成本。
-- Rename 原子性：不同 SFTP server 能力不一致，必须显式建模 backend capability。
+- Transport：默认 SFTP OpenSSH 兼容用户配置和 GSSAPI，但有运行时 `ssh` 依赖；crate
+  backend 更易封装但有 C 依赖、license 和跨平台维护成本。`ssh://` 额外依赖远端
+  `python3`；`ftp://` 只覆盖明文 FTP。
+- Rename 原子性：不同 SFTP / FTP server 能力不一致，必须显式建模 backend capability。
 - 认证体验：不能让密码 prompt 出现在 TUI raw mode 中；OpenSSH transport 使用
   `BatchMode=yes`，crate backend 仍不支持 OpenSSH 的 GSSAPI-only 登录路径。
 - Save-as 语义：远程文档上的 `:w <path>` 容易误解，首版先拒绝。
