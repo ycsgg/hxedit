@@ -478,7 +478,7 @@ async fn authenticate(ssh: &mut client::Handle<ClientHandler>, username: &str) -
         Err(err) => failures.push(err),
     }
 
-    if let Some(password) = env::var("HXEDIT_SFTP_PASSWORD").ok() {
+    if let Ok(password) = env::var("HXEDIT_SFTP_PASSWORD") {
         match ssh
             .authenticate_password(username.to_owned(), password)
             .await

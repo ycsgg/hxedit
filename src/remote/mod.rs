@@ -51,7 +51,7 @@ enum RemoteBackend {
     #[cfg(test)]
     Fake(fake::FakeBackend),
     #[cfg(feature = "remote-sftp")]
-    RusshSftp(russh_sftp::RusshSftpBackend),
+    RusshSftp(Box<russh_sftp::RusshSftpBackend>),
     #[cfg(feature = "remote-ftp")]
     Ftp(ftp::FtpBackend),
     #[allow(dead_code)]
@@ -312,7 +312,7 @@ fn open_sftp(target: RemoteTarget, readonly: bool) -> HxResult<RemoteSource> {
     Ok(RemoteSource {
         target,
         stat,
-        backend: RemoteBackend::RusshSftp(backend),
+        backend: RemoteBackend::RusshSftp(Box::new(backend)),
     })
 }
 
