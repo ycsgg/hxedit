@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-29
+
+### Added
+
+- Remote file editing for `sftp://...` and `ssh://...` targets is now included in the default build through the Rust `russh` + `russh-sftp` stack.
+- Optional `remote-ftp` / `remote-all` feature builds add passive binary FTP support through `suppaftp`.
+- Remote save now rewrites through an exclusive remote temporary file, checks the open-time fingerprint before replacing the target, preserves dirty state on failure, and cleans up temporary files on aborted saves.
+
+### Changed
+
+- `ssh://` is now an alias for the SFTP subsystem transport instead of a remote shell command fallback.
+- The old OpenSSH command, OpenSSH SFTP wrapper, and libssh2 SFTP backends were removed in favor of a single `russh-sftp` backend.
+- Release builds now strip symbols to reduce binary size.
+- Remote documentation now describes the supported authentication paths and explicitly calls out unsupported OpenSSH config, ProxyJump, and GSSAPI behavior.
+
+### Fixed
+
+- FTP passive connections now use `suppaftp` instead of maintaining FTP control response and PASV parsing in hxedit.
+
+## [0.4.0] - 2026-06-18
+
+### Added
+
+- Headless macro execution through `--run` and TOML macro files.
+- Rhai scripting through `--script` and the `hx_` host API.
+- Shared execution layer for TUI commands, headless macros, and scripts.
+
+### Changed
+
+- Reworked README and user-guide documentation around feature bundles, automation, release artifacts, and redistribution notes.
+- Replaced the previous disassembly backend stack with pure Rust `iced-x86` and `yaxpeax-arm` decoders.
+- Optimized disassembly decode and render hot paths.
+
+### Fixed
+
+- Fixed clippy failures in script-enabled builds.
+
+## [0.3.3] - 2026-06-15
+
+### Added
+
+- Public large-file performance benchmark documentation and reproduction commands.
+
+### Changed
+
+- Bounded the disassembly cache and expanded performance benchmarks.
+- Optimized paste overwrite replacements and mixed replacement edits.
+
+### Fixed
+
+- Fixed clippy failures in no-default-feature builds.
+
 ## [0.3.2] - 2026-06-14
 
 ### Added
@@ -141,6 +193,9 @@ Initial release.
 - CI on Ubuntu and Windows (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --all-targets`)
 - Release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, published with `SHA256SUMS.txt`
 
+[0.5.0]: https://github.com/ycsgg/hxedit/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/ycsgg/hxedit/compare/v0.3.3...v0.4.0
+[0.3.3]: https://github.com/ycsgg/hxedit/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/ycsgg/hxedit/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/ycsgg/hxedit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ycsgg/hxedit/compare/v0.2.1...v0.3.0
