@@ -1,8 +1,11 @@
 use std::env;
 use std::fmt;
-use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::io::{self, Read, Write};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use suppaftp::types::{FileType, FtpError};
+use suppaftp::{FtpStream, Mode};
 
 use crate::error::{HxError, HxResult};
 
@@ -17,22 +20,17 @@ pub(crate) struct FtpBackend {
     client: FtpClient,
 }
 
-struct FtpSave {
+struct FtpSave<D: Read + Write + 'static> {
     target: RemoteTarget,
     expected: Option<RemoteFingerprint>,
     client: FtpClient,
-    data: Option<TcpStream>,
+    data: Option<D>,
     temp_path: String,
+    finished: bool,
 }
 
 struct FtpClient {
-    reader: BufReader<TcpStream>,
-}
-
-#[derive(Debug)]
-struct FtpResponse {
-    code: u16,
-    lines: Vec<String>,
+    stream: Box<FtpStream>,
 }
 
 impl fmt::Debug for FtpBackend {
@@ -44,7 +42,7 @@ impl fmt::Debug for FtpBackend {
     }
 }
 
-impl fmt::Debug for FtpSave {
+impl<D: Read + Write + 'static> fmt::Debug for FtpSave<D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FtpSave")
             .field("target", &self.target.label())
@@ -94,15 +92,17 @@ impl FtpBackend {
             client,
             data: Some(data),
             temp_path,
+            finished: false,
         }))
     }
 
     pub(crate) fn reload(&mut self) -> HxResult<RemoteStat> {
-        stat_with(&mut self.client, &self.target, self.readonly)
+        let stat = stat_with(&mut self.client, &self.target, self.readonly)?;
+        Ok(stat)
     }
 }
 
-impl Write for FtpSave {
+impl<D: Read + Write + 'static> Write for FtpSave<D> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let data = self
             .data
@@ -120,13 +120,19 @@ impl Write for FtpSave {
     }
 }
 
-impl RemoteSave for FtpSave {
+impl<D: Read + Write + 'static> RemoteSave for FtpSave<D> {
     fn finish(mut self: Box<Self>) -> HxResult<RemoteStat> {
         if let Some(mut data) = self.data.take() {
-            data.flush().map_err(remote_io)?;
-            drop(data);
+            if let Err(err) = data.flush() {
+                let _ = self.client.abort_transfer(data);
+                let _ = self.client.remove(&self.temp_path);
+                return Err(remote_io(err));
+            }
+            if let Err(err) = self.client.finish_store(data) {
+                let _ = self.client.remove(&self.temp_path);
+                return Err(err);
+            }
         }
-        self.client.expect_transfer_complete("store")?;
 
         let current = stat_with(&mut self.client, &self.target, false)?;
         if current.fingerprint != self.expected {
@@ -141,7 +147,20 @@ impl RemoteSave for FtpSave {
             .inspect_err(|_err| {
                 let _ = self.client.remove(&self.temp_path);
             })?;
+        self.finished = true;
         stat_with(&mut self.client, &self.target, false)
+    }
+}
+
+impl<D: Read + Write + 'static> Drop for FtpSave<D> {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        if let Some(data) = self.data.take() {
+            let _ = self.client.abort_transfer(data);
+        }
+        let _ = self.client.remove(&self.temp_path);
     }
 }
 
@@ -149,93 +168,78 @@ impl FtpClient {
     fn connect(target: &RemoteTarget) -> HxResult<Self> {
         let port = target.port().unwrap_or(21);
         let stream = connect_tcp(target.host(), port)?;
-        stream.set_read_timeout(Some(CONTROL_TIMEOUT)).ok();
-        stream.set_write_timeout(Some(CONTROL_TIMEOUT)).ok();
-        let mut client = Self {
-            reader: BufReader::new(stream),
-        };
-        let welcome = client.read_response()?;
-        expect_codes(&welcome, &[220], "connect")?;
+        let stream = FtpStream::connect_with_stream(stream).map_err(remote_ftp)?;
+        let mut stream = configure_passive_policy(stream)?;
 
         let (username, password) = ftp_credentials(target)?;
-        let user = client.command("USER", Some(&username))?;
-        match user.code {
-            230 => {}
-            331 | 332 => {
-                let pass = client.command("PASS", Some(&password))?;
-                expect_codes(&pass, &[230, 202], "login")?;
-            }
-            _ => return Err(response_error("login", &user)),
-        }
-
-        let typ = client.command("TYPE", Some("I"))?;
-        expect_codes(&typ, &[200], "set binary mode")?;
-        Ok(client)
+        stream.login(&username, &password).map_err(remote_ftp)?;
+        stream.transfer_type(FileType::Binary).map_err(remote_ftp)?;
+        Ok(Self {
+            stream: Box::new(stream),
+        })
     }
 
     fn read_at(&mut self, path: &str, offset: u64, len: usize) -> HxResult<Vec<u8>> {
-        let mut data = self.open_data_stream()?;
+        validate_ftp_arg(path)?;
         if offset > 0 {
-            let rest = self.command("REST", Some(&offset.to_string()))?;
-            expect_codes(&rest, &[350], "restart transfer")?;
+            let offset = usize::try_from(offset).map_err(|_| {
+                HxError::Remote("FTP REST offset exceeds platform usize".to_owned())
+            })?;
+            self.stream.resume_transfer(offset).map_err(remote_ftp)?;
         }
-        let retr = self.command("RETR", Some(path))?;
-        expect_preliminary(&retr, "retrieve")?;
 
+        let mut data = self.stream.retr_as_stream(path).map_err(remote_ftp)?;
         let mut out = Vec::with_capacity(len);
-        {
-            let mut limited = Read::by_ref(&mut data).take(len as u64);
-            limited.read_to_end(&mut out).map_err(remote_io)?;
+        let limit = len
+            .checked_add(1)
+            .ok_or_else(|| HxError::Remote("FTP read length exceeds platform usize".to_owned()))?;
+        let read_result = {
+            let mut limited = Read::by_ref(&mut data).take(limit as u64);
+            limited.read_to_end(&mut out)
+        };
+        if let Err(err) = read_result {
+            return Err(remote_io(err));
         }
-        drop(data);
-
-        let completion = self.read_response()?;
-        if completion.code == 226 || completion.code == 250 {
-            return Ok(out);
+        if out.len() > len {
+            out.truncate(len);
+            self.abort_transfer(data)?;
+        } else {
+            self.stream.finalize_retr_stream(data).map_err(remote_ftp)?;
         }
-        if completion.code == 426 && out.len() == len {
-            return Ok(out);
-        }
-        Err(response_error("retrieve", &completion))
+        Ok(out)
     }
 
-    fn begin_store(&mut self, path: &str) -> HxResult<TcpStream> {
-        let data = self.open_data_stream()?;
-        let stor = self.command("STOR", Some(path))?;
-        expect_preliminary(&stor, "store")?;
-        Ok(data)
+    fn begin_store(&mut self, path: &str) -> HxResult<impl Read + Write + 'static> {
+        validate_ftp_arg(path)?;
+        self.stream.put_with_stream(path).map_err(remote_ftp)
     }
 
-    fn expect_transfer_complete(&mut self, operation: &str) -> HxResult<()> {
-        let completion = self.read_response()?;
-        expect_codes(&completion, &[226, 250], operation)
+    fn finish_store(&mut self, data: impl Write) -> HxResult<()> {
+        self.stream.finalize_put_stream(data).map_err(remote_ftp)
+    }
+
+    fn abort_transfer(&mut self, data: impl Read + 'static) -> HxResult<()> {
+        self.stream.abort(data).map_err(remote_ftp)
     }
 
     fn stat_path(&mut self, path: &str, readonly: bool) -> HxResult<RemoteStat> {
-        let size = self.command("SIZE", Some(path))?;
-        expect_codes(&size, &[213], "size")?;
-        let len = response_arg(&size)
-            .parse::<u64>()
-            .map_err(|err| HxError::Remote(format!("invalid FTP SIZE response: {err}")))?;
+        validate_ftp_arg(path)?;
+        let len = self.stream.size(path).map_err(remote_ftp)?;
+        let len = u64::try_from(len)
+            .map_err(|_| HxError::Remote("FTP SIZE response exceeds u64".to_owned()))?;
 
-        let mdtm = match self.command("MDTM", Some(path)) {
-            Ok(response) if response.code == 213 => {
-                let value = response_arg(&response);
-                if value.is_empty() {
-                    None
-                } else {
-                    Some(value)
-                }
-            }
-            Ok(_) | Err(_) => None,
-        };
+        let mdtm = self
+            .stream
+            .mdtm(path)
+            .ok()
+            .map(|value| format!("mdtm:{value}"));
 
         Ok(RemoteStat {
             len,
             fingerprint: Some(RemoteFingerprint {
                 len,
                 mtime: None,
-                file_id: mdtm.map(|value| format!("mdtm:{value}")),
+                file_id: mdtm,
             }),
             readonly,
             permissions: None,
@@ -243,99 +247,36 @@ impl FtpClient {
     }
 
     fn rename(&mut self, old_path: &str, new_path: &str) -> HxResult<()> {
-        let rnfr = self.command("RNFR", Some(old_path))?;
-        expect_codes(&rnfr, &[350], "rename-from")?;
-        let rnto = self.command("RNTO", Some(new_path))?;
-        expect_codes(&rnto, &[250], "rename-to")
+        validate_ftp_arg(old_path)?;
+        validate_ftp_arg(new_path)?;
+        self.stream.rename(old_path, new_path).map_err(remote_ftp)
     }
 
     fn remove(&mut self, path: &str) -> HxResult<()> {
-        let response = self.command("DELE", Some(path))?;
-        expect_codes(&response, &[250], "delete")
-    }
-
-    fn open_data_stream(&mut self) -> HxResult<TcpStream> {
-        if let Ok(response) = self.command("EPSV", None) {
-            if response.code == 229 {
-                let port = parse_epsv_port(&response.message())?;
-                let peer = self.reader.get_ref().peer_addr().map_err(remote_io)?;
-                return connect_socket(SocketAddr::new(peer.ip(), port));
-            }
-        }
-
-        let response = self.command("PASV", None)?;
-        expect_codes(&response, &[227], "passive mode")?;
-        let (host, port) = parse_pasv_endpoint(&response.message())?;
-        connect_tcp(&host, port)
-    }
-
-    fn command(&mut self, command: &str, arg: Option<&str>) -> HxResult<FtpResponse> {
-        validate_ftp_arg(command)?;
-        if let Some(arg) = arg {
-            validate_ftp_arg(arg)?;
-        }
-        let stream = self.reader.get_mut();
-        stream.write_all(command.as_bytes()).map_err(remote_io)?;
-        if let Some(arg) = arg {
-            stream.write_all(b" ").map_err(remote_io)?;
-            stream.write_all(arg.as_bytes()).map_err(remote_io)?;
-        }
-        stream.write_all(b"\r\n").map_err(remote_io)?;
-        stream.flush().map_err(remote_io)?;
-        self.read_response()
-    }
-
-    fn read_response(&mut self) -> HxResult<FtpResponse> {
-        let mut line = String::new();
-        let read = self.reader.read_line(&mut line).map_err(remote_io)?;
-        if read == 0 {
-            return Err(HxError::Remote("FTP control connection closed".to_owned()));
-        }
-        trim_line_end(&mut line);
-        let code = parse_response_code(&line)?;
-        let multiline = line.as_bytes().get(3) == Some(&b'-');
-        let mut lines = vec![line];
-        if multiline {
-            loop {
-                let mut next = String::new();
-                let read = self.reader.read_line(&mut next).map_err(remote_io)?;
-                if read == 0 {
-                    return Err(HxError::Remote(
-                        "FTP control connection closed during multiline response".to_owned(),
-                    ));
-                }
-                trim_line_end(&mut next);
-                let done = next.starts_with(&format!("{code:03} "));
-                lines.push(next);
-                if done {
-                    break;
-                }
-            }
-        }
-        Ok(FtpResponse { code, lines })
+        validate_ftp_arg(path)?;
+        self.stream.rm(path).map_err(remote_ftp)
     }
 }
 
 impl Drop for FtpClient {
     fn drop(&mut self) {
-        let _ = self.command("QUIT", None);
+        let _ = self.stream.quit();
     }
 }
 
-impl FtpResponse {
-    fn message(&self) -> String {
-        self.lines
-            .iter()
-            .map(|line| {
-                if line.len() > 4 {
-                    &line[4..]
-                } else {
-                    line.as_str()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+fn configure_passive_policy(stream: FtpStream) -> HxResult<FtpStream> {
+    let peer = stream.get_ref().peer_addr().map_err(remote_io)?;
+    let peer_ip = peer.ip();
+    // Ignore PASV response hosts: a malicious server can otherwise make saves
+    // connect and upload data to an unrelated internal or localhost address.
+    let mut stream =
+        stream.passive_stream_builder(move |addr| connect_passive_socket(peer_ip, addr.port()));
+    if peer_ip.is_ipv6() {
+        stream.set_mode(Mode::ExtendedPassive);
+    } else {
+        stream.set_mode(Mode::Passive);
     }
+    Ok(stream)
 }
 
 fn stat_with(
@@ -389,106 +330,15 @@ fn connect_tcp(host: &str, port: u16) -> HxResult<TcpStream> {
     )))
 }
 
-fn connect_socket(addr: SocketAddr) -> HxResult<TcpStream> {
-    let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).map_err(remote_io)?;
+fn connect_socket(addr: SocketAddr) -> io::Result<TcpStream> {
+    let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)?;
     stream.set_read_timeout(Some(CONTROL_TIMEOUT)).ok();
     stream.set_write_timeout(Some(CONTROL_TIMEOUT)).ok();
     Ok(stream)
 }
 
-fn parse_response_code(line: &str) -> HxResult<u16> {
-    if line.len() < 3 || !line.as_bytes()[..3].iter().all(u8::is_ascii_digit) {
-        return Err(HxError::Remote(format!("invalid FTP response: {line}")));
-    }
-    line[..3]
-        .parse::<u16>()
-        .map_err(|err| HxError::Remote(format!("invalid FTP response code: {err}")))
-}
-
-fn response_arg(response: &FtpResponse) -> String {
-    response
-        .lines
-        .last()
-        .map(|line| {
-            if line.len() > 4 {
-                line[4..].trim().to_owned()
-            } else {
-                String::new()
-            }
-        })
-        .unwrap_or_default()
-}
-
-fn expect_preliminary(response: &FtpResponse, operation: &str) -> HxResult<()> {
-    if response.code / 100 == 1 {
-        Ok(())
-    } else {
-        Err(response_error(operation, response))
-    }
-}
-
-fn expect_codes(response: &FtpResponse, expected: &[u16], operation: &str) -> HxResult<()> {
-    if expected.contains(&response.code) {
-        Ok(())
-    } else {
-        Err(response_error(operation, response))
-    }
-}
-
-fn response_error(operation: &str, response: &FtpResponse) -> HxError {
-    HxError::Remote(format!(
-        "FTP {operation} failed with status {}: {}",
-        response.code,
-        response.message()
-    ))
-}
-
-fn parse_epsv_port(message: &str) -> HxResult<u16> {
-    let start = message
-        .find('(')
-        .ok_or_else(|| HxError::Remote(format!("invalid EPSV response: {message}")))?;
-    let end = message[start + 1..]
-        .find(')')
-        .ok_or_else(|| HxError::Remote(format!("invalid EPSV response: {message}")))?
-        + start
-        + 1;
-    let inner = &message[start + 1..end];
-    let delimiter = inner
-        .chars()
-        .next()
-        .ok_or_else(|| HxError::Remote(format!("invalid EPSV response: {message}")))?;
-    let fields: Vec<&str> = inner.split(delimiter).collect();
-    fields
-        .get(3)
-        .ok_or_else(|| HxError::Remote(format!("invalid EPSV response: {message}")))?
-        .parse::<u16>()
-        .map_err(|err| HxError::Remote(format!("invalid EPSV port: {err}")))
-}
-
-fn parse_pasv_endpoint(message: &str) -> HxResult<(String, u16)> {
-    let inner = match (message.find('('), message.rfind(')')) {
-        (Some(start), Some(end)) if end > start => &message[start + 1..end],
-        _ => message,
-    };
-    let numbers = inner
-        .split(|ch: char| !ch.is_ascii_digit())
-        .filter(|part| !part.is_empty())
-        .map(|part| part.parse::<u16>())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| HxError::Remote(format!("invalid PASV response: {err}")))?;
-    if numbers.len() < 6 {
-        return Err(HxError::Remote(format!("invalid PASV response: {message}")));
-    }
-    let numbers = &numbers[numbers.len() - 6..];
-    let host = format!(
-        "{}.{}.{}.{}",
-        numbers[0], numbers[1], numbers[2], numbers[3]
-    );
-    let port = numbers[4]
-        .checked_mul(256)
-        .and_then(|high| high.checked_add(numbers[5]))
-        .ok_or_else(|| HxError::Remote(format!("invalid PASV port: {message}")))?;
-    Ok((host, port))
+fn connect_passive_socket(peer_ip: IpAddr, port: u16) -> Result<TcpStream, FtpError> {
+    connect_socket(SocketAddr::new(peer_ip, port)).map_err(FtpError::ConnectionError)
 }
 
 fn temp_path_for(path: &str) -> String {
@@ -513,12 +363,104 @@ fn validate_ftp_arg(value: &str) -> HxResult<()> {
     Ok(())
 }
 
-fn trim_line_end(line: &mut String) {
-    while line.ends_with('\n') || line.ends_with('\r') {
-        line.pop();
-    }
+fn remote_ftp(err: FtpError) -> HxError {
+    HxError::Remote(format!("FTP error: {err}"))
 }
 
 fn remote_io(err: impl std::fmt::Display) -> HxError {
     HxError::Remote(err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    #[test]
+    fn pasv_data_connection_uses_control_peer_ip() {
+        let data = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        data.set_nonblocking(true).unwrap();
+        let data_port = data.local_addr().unwrap().port();
+        let data_thread = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                match data.accept() {
+                    Ok((mut stream, _addr)) => {
+                        stream.write_all(b"abcdef").unwrap();
+                        return;
+                    }
+                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "client did not connect to the expected PASV peer"
+                        );
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(err) => panic!("data accept failed: {err}"),
+                }
+            }
+        });
+
+        let control = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let control_port = control.local_addr().unwrap().port();
+        let control_thread = thread::spawn(move || {
+            let (stream, _addr) = control.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            serve_pasv_read(stream, data_port);
+        });
+
+        let target = RemoteTarget::parse(&format!("ftp://127.0.0.1:{control_port}/file")).unwrap();
+        let mut client = FtpClient::connect(&target).unwrap();
+        let bytes = client.read_at(target.path(), 0, 6).unwrap();
+        assert_eq!(bytes, b"abcdef");
+        drop(client);
+
+        data_thread.join().unwrap();
+        control_thread.join().unwrap();
+    }
+
+    fn serve_pasv_read(mut stream: TcpStream, data_port: u16) {
+        stream.write_all(b"220 fake ftp\r\n").unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let high = data_port / 256;
+        let low = data_port % 256;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap() == 0 {
+                return;
+            }
+            let command = line.trim_end_matches(['\r', '\n']);
+            if command.starts_with("USER ") {
+                stream.write_all(b"331 password needed\r\n").unwrap();
+            } else if command.starts_with("PASS ") {
+                stream.write_all(b"230 logged in\r\n").unwrap();
+            } else if command == "TYPE I" {
+                stream.write_all(b"200 binary\r\n").unwrap();
+            } else if command == "PASV" {
+                writeln!(
+                    stream,
+                    "227 Entering Passive Mode (127,0,0,2,{high},{low})\r"
+                )
+                .unwrap();
+            } else if command.starts_with("RETR ") {
+                stream.write_all(b"150 opening data\r\n").unwrap();
+                thread::sleep(Duration::from_millis(50));
+                stream.write_all(b"226 done\r\n").unwrap();
+            } else if command == "QUIT" {
+                stream.write_all(b"221 bye\r\n").ok();
+                return;
+            } else {
+                stream.write_all(b"502 unsupported\r\n").unwrap();
+            }
+        }
+    }
 }

@@ -9,7 +9,7 @@
 
 - [ ] **[P2] Remote 文件编辑后续增强**
   - 设计：见 `docs/remote-editing-design.md`
-  - 现状：已具备 `--remote sftp://...`（`remote-sftp` feature）、`ssh://...`（`remote-ssh` feature）、`ftp://...`（`remote-ftp` feature）、默认 OpenSSH SFTP transport、可选 libssh2 fallback、OpenSSH command fallback、passive binary FTP、page-cache 分块读取、clean remote hash/search/export streaming fast path、fake remote 测试后端、远程 rewrite-save、fingerprint 冲突检测；remote original bytes 仍走现有 `Document` piece table / tombstone / replacement 模型
+  - 现状：默认已具备 `--remote sftp://...` / `ssh://...`（`remote-sftp` feature）、可选具备 `ftp://...`（`remote-ftp` feature）、`russh-sftp` transport、passive binary FTP、page-cache 分块读取、clean remote hash/search/export streaming fast path、fake remote 测试后端、远程 rewrite-save、fingerprint 冲突检测；remote original bytes 仍走现有 `Document` piece table / tombstone / replacement 模型
   - 后续：remote other side for `:diff`、长操作进度、remote save-as 明确语义、更多协议 capability 分层与集成测试矩阵
 
 - [ ] **[P1] Inspector 缺少跨 struct 快速跳转**

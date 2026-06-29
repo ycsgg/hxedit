@@ -25,8 +25,8 @@ The project overview stays in [README.md](../README.md).
 - Read-only synchronized diff page against another file (`:diff`)
 - Process memory editing by PID or process name, with region browsing,
   freeze/thaw, and explicit commit commands
-- Optional remote file targets via `--remote sftp://...`, `ssh://...`, or
-  `ftp://...`
+- SFTP remote file targets via `--remote sftp://...` or `ssh://...`; optional
+  FTP targets via `remote-ftp`
 - Optional disassembly browsing, symbol search, Sagitta-backed analysis, and
   inline assemble patching
 
@@ -64,27 +64,27 @@ hxedit some.bin
 | Bundle | Build command | Includes |
 |---|---|---|
 | `core` | `cargo build --release --no-default-features` | Hex editor, inspector, search, diff, hash, copy/paste, export |
-| `default` | `cargo build --release` | `core` + process memory editing, disassembly view, instruction search, symbol panel, Rhai scripts |
+| `default` | `cargo build --release` | `core` + process memory editing, disassembly view, instruction search, symbol panel, Rhai scripts, SFTP remote files |
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone-backed inline assemble patching + Sagitta-backed `:ana` analysis |
 | `sagitta-analysis` add-on | `cargo build --release --features sagitta-analysis` | `default` + Sagitta-backed `:ana` analysis from crates.io `sagitta-rs` |
-| `remote-sftp` add-on | `cargo build --release --features remote-sftp` | `default` + `--remote sftp://...` targets over OpenSSH SFTP transport |
-| `remote-ssh` add-on | `cargo build --release --features remote-ssh` | `default` + `--remote ssh://...` targets over OpenSSH command transport |
+| `remote-sftp` feature | `cargo build --release --no-default-features --features remote-sftp` | `core` + `--remote sftp://...` / `ssh://...` targets over `russh-sftp` |
 | `remote-ftp` add-on | `cargo build --release --features remote-ftp` | `default` + `--remote ftp://...` targets over passive binary FTP |
 | `remote-all` add-on | `cargo build --release --features remote-all` | `default` + all remote protocol backends |
 
 Notes:
 
-- `default` is the normal build and includes process memory editing.
+- `default` is the normal build and includes process memory editing and SFTP
+  remote files.
 - `full` enables the optional `hexpatch-keystone` dependency under the local
   crate alias `keystone-engine` for inline assembly patching inside `:dis`, and
   includes Sagitta analysis.
 - `sagitta-analysis` enables optional `sagitta-rs` analysis for x86/x64 ELF/PE
   inputs; analysis runs on current logical bytes and does not participate in
   undo/save/search byte semantics.
-- `remote-sftp` enables SFTP remote file targets. It is not part of the default
-  bundle to avoid adding SSH/OpenSSL native dependency risk to normal builds.
-- `remote-ssh` enables an OpenSSH command-transport fallback for hosts without
-  SFTP. It depends on the local `ssh` executable and remote `python3`.
+- `remote-sftp` enables SFTP-over-SSH remote file targets through `russh` and
+  `russh-sftp`. It is included in the default bundle; use `--no-default-features`
+  only for core/custom builds. `ssh://` is accepted as an alias for the same
+  SFTP subsystem transport, not as a remote shell command transport.
 - `remote-ftp` enables plain passive binary FTP. It is separate from SFTP and
   does not provide FTPS/TLS.
 - There is no separate `:asm` command.
@@ -97,7 +97,7 @@ Notes:
 | `--offset <n\|0xhex>` | Start at a specific byte offset |
 | `--pid <PID>` | Attach to a running process by PID for memory editing |
 | `--process <NAME>` | Attach to a running process by name for memory editing |
-| `--remote <URI>` | Open a remote file target such as `sftp://...`, `ssh://...`, or `ftp://...` when the matching remote feature is enabled |
+| `--remote <URI>` | Open a remote file target such as `sftp://...` / `ssh://...` in default builds, or `ftp://...` when `remote-ftp` is enabled |
 | `--inspector` | Open with the side panel visible on the inspector page |
 | `--run <path>` | Run a TOML macro file headlessly and exit; may be repeated |
 | `--script <path>` | Run a Rhai script file headlessly and exit; may be repeated in `scripting` builds |
@@ -125,19 +125,13 @@ Remote targets are mutually exclusive with positional `FILE`, `--pid`, and
 `--process`. Remote implementations accept URI form only, such as
 `sftp://user@host:22/absolute/path.bin`, `ssh://host/absolute/path.bin`, or
 `ftp://user@host/absolute/path.bin`; scp-like `host:path` syntax is not
-accepted. By default `sftp://` runs the system OpenSSH client as an SFTP
-subsystem, so authentication, SSH config, host-key checking, public keys,
-agents, and GSSAPI login follow normal `ssh host` behavior. Setting
-`HXEDIT_SFTP_INSECURE=1` passes relaxed host-key options to OpenSSH. Set
-`HXEDIT_SFTP_BACKEND=ssh2` to force the older libssh2 backend, which supports
-agent/key authentication but not GSSAPI-only hosts.
-
-`ssh://` is a fallback for SSH hosts without SFTP. It runs the system OpenSSH
-client in batch mode and executes small `python3` snippets on the remote host
-for stat/read/save. It honors SSH config, keys, agents, and GSSAPI through
-OpenSSH; `HXEDIT_SSH_INSECURE=1` passes relaxed host-key options. Because it
-opens a new SSH command for reads, SFTP remains the preferred high-throughput
-backend when the server supports it.
+accepted. `sftp://` and `ssh://` both use the Rust `russh` + `russh-sftp`
+backend and require the remote SFTP subsystem; `ssh://` does not execute remote
+shell commands. The backend checks `~/.ssh/known_hosts` by default and can
+authenticate through Unix ssh-agent (`SSH_AUTH_SOCK`), unencrypted default keys
+in `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa`, or `HXEDIT_SFTP_PASSWORD`.
+`HXEDIT_SFTP_INSECURE=1` disables host-key checking. OpenSSH config, ProxyJump,
+and GSSAPI settings are not parsed by this backend.
 
 `ftp://` uses plain passive binary FTP. A missing user logs in as anonymous;
 non-anonymous logins read the password from `HXEDIT_FTP_PASSWORD`, or the user
@@ -152,7 +146,10 @@ from degenerating into many small network round trips; clean remote `hash`,
 the normal logical walker as soon as the document has inserts, tombstones, or
 replacements.
 Remote `:w` rewrites through a remote temporary file, checks that the remote
-fingerprint has not changed since open, then renames over the original. Remote
+fingerprint has not changed since open, fsyncs the temporary file when the
+backend can, then renames over the original. This is a conflict guard, not a
+remote compare-and-swap; SFTP/FTP servers with coarse metadata can still miss
+same-length changes that do not update their exposed fingerprint. Remote
 `:w <path>` is rejected; use `:export <path>` for a local copy.
 
 ## Configuration

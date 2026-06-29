@@ -30,6 +30,7 @@ default-bundle = [
     "disasm-iced-x86",
     "disasm-yaxpeax-arm",
     "memory",
+    "remote-sftp",
     "symbols",
     "scripting",
 ]
@@ -42,10 +43,9 @@ full = ["default-bundle", "asm", "sagitta-analysis"]
 sagitta-analysis = ["symbols", "disasm", "dep:sagitta-rs"]
 disasm-iced-x86 = ["disasm", "dep:iced-x86"]
 disasm-yaxpeax-arm = ["disasm", "dep:yaxpeax-arch", "dep:yaxpeax-arm"]
-remote-sftp = ["dep:ssh2"]
-remote-ssh = []
-remote-ftp = []
-remote-all = ["remote-sftp", "remote-ssh", "remote-ftp"]
+remote-sftp = ["dep:russh", "dep:russh-sftp", "dep:tokio"]
+remote-ftp = ["dep:suppaftp"]
+remote-all = ["remote-sftp", "remote-ftp"]
 
 [dependencies]
 anyhow = "1.0"
@@ -72,7 +72,10 @@ sagitta-rs = { version = "0.0.2", optional = true }
 iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "fast_fmt"], optional = true }
 yaxpeax-arch = { version = "0.3", default-features = false, features = ["std"], optional = true }
 yaxpeax-arm = { version = "0.4", default-features = false, features = ["std"], optional = true }
-ssh2 = { version = "0.9", optional = true }
+russh = { version = "0.61", default-features = false, features = ["ring", "rsa"], optional = true }
+russh-sftp = { version = "2.3", optional = true }
+suppaftp = { version = "9", default-features = false, optional = true }
+tokio = { version = "1.52", default-features = false, features = ["rt", "net", "time", "io-util"], optional = true }
 
 [dev-dependencies]
 libc = "0.2"
@@ -86,3 +89,4 @@ harness = false
 [profile.release]
 lto = true
 codegen-units = 1
+strip = "symbols"

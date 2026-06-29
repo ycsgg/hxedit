@@ -44,7 +44,7 @@ hxedit some.bin --script examples/simple_hash_patch.hxscript
 hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 ```
 
-启用可选 remote feature 的构建可以打开远程目标：
+默认构建可以打开 SFTP 远程目标；`remote-ftp` feature 会额外启用 FTP：
 
 ```bash
 hxedit --remote sftp://user@host/path/to/file.bin
@@ -52,11 +52,13 @@ hxedit --remote ssh://host/path/to/file.bin
 hxedit --remote ftp://user@host/path/to/file.bin
 ```
 
-默认 SFTP 后端会把系统 OpenSSH 客户端作为 SFTP subsystem 运行，因此 SSH config、
-host-key 检查、公钥、agent 和 GSSAPI 登录行为都与 `ssh host` 一致。设置
-`HXEDIT_SFTP_BACKEND=ssh2` 可强制使用旧的 libssh2 后端。`ssh://` 使用 OpenSSH
-命令执行，远端需要有 `python3`；`ftp://` 使用 passive binary FTP，非匿名 FTP 登录
-从 `HXEDIT_FTP_PASSWORD` 读取密码。
+SFTP 后端使用 Rust `russh` + `russh-sftp` 栈。默认检查 `~/.ssh/known_hosts`，
+可通过 Unix ssh-agent（`SSH_AUTH_SOCK`）、`~/.ssh/id_ed25519` / `id_ecdsa` /
+`id_rsa` 里的未加密默认私钥，或 `HXEDIT_SFTP_PASSWORD` 认证。
+`HXEDIT_SFTP_INSECURE=1` 会关闭 host-key 检查。
+它不解析 OpenSSH config、ProxyJump 或 GSSAPI 设置。`ssh://` 作为 SSH/SFTP 别名接受，
+仍要求远端 SFTP subsystem；它不会执行远端 shell 命令。`ftp://` 使用 passive binary
+FTP，非匿名 FTP 登录从 `HXEDIT_FTP_PASSWORD` 读取密码。
 
 也可以在 TUI 命令行里执行同类自动化：
 
@@ -114,7 +116,7 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 
 - 用 overwrite、insert、delete 打开和编辑大文件
 
-- 可选打开 SFTP、SSH 命令传输和 FTP 远程文件，并复用同一套编辑模型
+- 可选打开 SFTP-over-SSH 和 FTP 远程文件，并复用同一套编辑模型
 
 - 搜索文本、hex bytes、单字节值或 typed integer
 
@@ -154,10 +156,9 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 | 档位        | 命令                                                            | 适合场景                                              |
 | --------- | ------------------------------------------------------------- | ------------------------------------------------- |
 | `core`    | `cargo build --release --no-default-features`                 | 只需要编辑器、inspector、搜索、diff、hash、copy/paste 和 export |
-| `default` | `cargo build --release`                                       | 常规构建，包含进程内存编辑、反汇编、symbol 和 Rhai 脚本              |
+| `default` | `cargo build --release`                                       | 常规构建，包含进程内存编辑、反汇编、symbol、Rhai 脚本和 SFTP 远程文件 |
 | `full`    | `cargo build --release --no-default-features --features full` | 还需要 Keystone 内联汇编 patch 和 Sagitta 分析              |
-| `remote-sftp` 附加项 | `cargo build --release --features remote-sftp` | 还需要 `--remote sftp://...` 文件目标 |
-| `remote-ssh` 附加项 | `cargo build --release --features remote-ssh` | 还需要 `--remote ssh://...` 命令传输目标 |
+| `remote-sftp` feature | `cargo build --release --no-default-features --features remote-sftp` | 在自定义 / 最小构建里也需要 SFTP 远程文件 |
 | `remote-ftp` 附加项 | `cargo build --release --features remote-ftp` | 还需要 `--remote ftp://...` passive FTP 目标 |
 | `remote-all` 附加项 | `cargo build --release --features remote-all` | 需要全部远程协议后端 |
 

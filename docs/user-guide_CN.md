@@ -24,7 +24,8 @@
 - 只读同步滚动 diff 页面，可用 `:diff` 对比另一个文件
 - 进程内存编辑：通过 PID 或进程名附加到运行中的进程，浏览和编辑内存区域，
   冻结/解冻目标进程，并显式提交写回
-- 可选通过 `--remote sftp://...`、`ssh://...` 或 `ftp://...` 打开远程文件目标
+- 默认可通过 `--remote sftp://...` 或 `ssh://...` 打开 SFTP 远程文件目标；
+  启用 `remote-ftp` 后支持 FTP
 - 可选的反汇编浏览、symbol 搜索、Sagitta 后台分析、内联汇编 patch
 
 ## 性能表现
@@ -60,26 +61,24 @@ hxedit some.bin
 | 档位 | 构建命令 | 包含内容 |
 |---|---|---|
 | `core` | `cargo build --release --no-default-features` | Hex editor、inspector、search、diff、hash、copy/paste、export |
-| `default` | `cargo build --release` | `core` + 进程内存编辑、反汇编视图、指令搜索、symbol panel、Rhai 脚本 |
+| `default` | `cargo build --release` | `core` + 进程内存编辑、反汇编视图、指令搜索、symbol panel、Rhai 脚本、SFTP 远程文件 |
 | `full` | `cargo build --release --no-default-features --features full` | `default` + Keystone 驱动的内联汇编 patch + Sagitta `:ana` 分析 |
 | `sagitta-analysis` 附加项 | `cargo build --release --features sagitta-analysis` | `default` + 基于 crates.io `sagitta-rs` 的 `:ana` 分析 |
-| `remote-sftp` 附加项 | `cargo build --release --features remote-sftp` | `default` + 通过 OpenSSH SFTP transport 打开的 `--remote sftp://...` 目标 |
-| `remote-ssh` 附加项 | `cargo build --release --features remote-ssh` | `default` + 通过 OpenSSH 命令 transport 打开的 `--remote ssh://...` 目标 |
+| `remote-sftp` feature | `cargo build --release --no-default-features --features remote-sftp` | `core` + 通过 `russh-sftp` 打开的 `--remote sftp://...` / `ssh://...` 目标 |
 | `remote-ftp` 附加项 | `cargo build --release --features remote-ftp` | `default` + 通过 passive binary FTP 打开的 `--remote ftp://...` 目标 |
 | `remote-all` 附加项 | `cargo build --release --features remote-all` | `default` + 全部远程协议后端 |
 
 说明：
 
-- `default` 是常规构建档位，并包含进程内存编辑。
+- `default` 是常规构建档位，并包含进程内存编辑和 SFTP 远程文件。
 - `full` 会启用可选的 `hexpatch-keystone` 依赖（在本仓库里仍使用
   `keystone-engine` 这个本地依赖别名），开启 `:dis` 内的 inline assembly
   patch，并包含 Sagitta 分析。
 - `sagitta-analysis` 启用可选的 `sagitta-rs` 分析，面向 x86/x64 ELF/PE；
   分析输入是当前 logical bytes，不参与 undo / save / search 的核心 byte 语义。
-- `remote-sftp` 启用 SFTP 远程文件目标。它不包含在默认 bundle 中，避免普通构建
-  额外承担 SSH/OpenSSL native 依赖风险。
-- `remote-ssh` 启用无 SFTP 主机的 OpenSSH 命令传输 fallback；依赖本机 `ssh`
-  可执行文件和远端 `python3`。
+- `remote-sftp` 通过 `russh` 和 `russh-sftp` 启用 SFTP-over-SSH 远程文件目标。它已经包含在
+  default bundle 中；`--no-default-features` 只用于 core / 自定义构建。`ssh://`
+  只是同一 SFTP subsystem transport 的别名，不是远端 shell 命令传输。
 - `remote-ftp` 启用明文 passive binary FTP；它和 SFTP 分开，不提供 FTPS/TLS。
 - 当前没有单独的 `:asm` 命令。
 
@@ -91,7 +90,7 @@ hxedit some.bin
 | `--offset <n\|0xhex>` | 从指定偏移开始 |
 | `--pid <PID>` | 通过 PID 附加到运行中的进程进行内存编辑 |
 | `--process <NAME>` | 通过进程名附加到运行中的进程进行内存编辑 |
-| `--remote <URI>` | 在启用对应 remote feature 的构建中打开 `sftp://...`、`ssh://...` 或 `ftp://...` 远程文件目标 |
+| `--remote <URI>` | 在默认构建中打开 `sftp://...` / `ssh://...`，启用 `remote-ftp` 后也可打开 `ftp://...` |
 | `--inspector` | 启动时显示 side panel 的 inspector 页 |
 | `--run <path>` | headless 执行 TOML 宏文件并退出；可重复 |
 | `--script <path>` | headless 执行 Rhai 脚本并退出；在 `scripting` 构建中可用，可重复 |
@@ -114,17 +113,13 @@ headless `--command` 下，`hash`、binary `export`、`replace` 有 `--select` �
 
 远程目标与位置参数 `FILE`、`--pid`、`--process` 互斥。远程实现只接受 URI 形式，
 例如 `sftp://user@host:22/absolute/path.bin`、`ssh://host/absolute/path.bin` 或
-`ftp://user@host/absolute/path.bin`；不接受 scp-like 的 `host:path` 写法。默认
-`sftp://` 后端会把系统 OpenSSH 客户端作为 SFTP subsystem 运行，因此认证、SSH config、
-host-key 检查、公钥、agent 和 GSSAPI 登录都沿用普通 `ssh host` 行为。设置
-`HXEDIT_SFTP_INSECURE=1` 会向 OpenSSH 传入放宽 host-key 检查的选项。设置
-`HXEDIT_SFTP_BACKEND=ssh2` 可强制使用旧 libssh2 后端；该后端支持 agent/key 认证，
-但不支持只开放 GSSAPI 的主机。
-
-`ssh://` 是无 SFTP 主机的 fallback。它用 batch mode 运行系统 OpenSSH 客户端，并在远端
-执行小段 `python3` 代码完成 stat/read/save。认证、SSH config、公钥、agent 和 GSSAPI
-仍由 OpenSSH 负责；`HXEDIT_SSH_INSECURE=1` 会向 OpenSSH 传入放宽 host-key 检查的选项。
-由于读取会为请求启动新的 SSH 命令，服务器支持 SFTP 时仍优先使用 SFTP 作为高吞吐后端。
+`ftp://user@host/absolute/path.bin`；不接受 scp-like 的 `host:path` 写法。`sftp://`
+和 `ssh://` 都使用 Rust `russh` + `russh-sftp` 后端，并要求远端 SFTP subsystem；
+`ssh://` 不会执行远端 shell 命令。该后端默认检查 `~/.ssh/known_hosts`，可通过
+Unix ssh-agent（`SSH_AUTH_SOCK`）、`~/.ssh/id_ed25519` / `id_ecdsa` / `id_rsa`
+里的未加密默认私钥，或 `HXEDIT_SFTP_PASSWORD` 认证。`HXEDIT_SFTP_INSECURE=1`
+会关闭 host-key 检查。
+该后端不解析 OpenSSH config、ProxyJump 或 GSSAPI 设置。
 
 `ftp://` 使用明文 passive binary FTP。URI 不带 user 时默认匿名登录；非匿名登录从
 `HXEDIT_FTP_PASSWORD` 读取密码，URI 也不带 user 时可用 `HXEDIT_FTP_USER` 提供用户名。
@@ -134,8 +129,10 @@ FTP 的元数据和 rename 语义弱于 SFTP/SSH，因此同长度远端变化�
 远程 source 至少使用 1 MiB page-cache 读取，避免顺序扫描退化成大量小网络往返；clean
 remote 的 `hash`、`search` 和 binary `export` 会使用更大的 streaming fast path，一旦
 文档存在 insert、tombstone 或 replacement 就回到普通 logical walker。远程 `:w` 会写入
-远程临时文件，确认远端 fingerprint 自打开后没有变化，再 rename 覆盖原文件。远程
-`:w <path>` 会被拒绝；如需本地副本请用 `:export <path>`。
+远程临时文件，确认远端 fingerprint 自打开后没有变化，在 backend 支持时 fsync 临时文件，
+再 rename 覆盖原文件。这是冲突防护，不是远端 compare-and-swap；如果 SFTP/FTP 服务端
+metadata 粒度较粗，同长度且未更新可见 fingerprint 的并发修改仍可能漏检。远程 `:w <path>`
+会被拒绝；如需本地副本请用 `:export <path>`。
 
 ## 配置文件
 

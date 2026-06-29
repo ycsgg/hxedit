@@ -58,31 +58,62 @@ artifact.
 
 ## SFTP support in `remote-sftp` builds
 
-The optional `remote-sftp` feature enables SFTP remote file targets through the
-`ssh2` Rust crate and its low-level bindings.
+The optional `remote-sftp` feature enables SFTP-over-SSH remote file targets
+through the Rust `russh` and `russh-sftp` crates. It does not use the system
+OpenSSH client.
 
-- Package: `ssh2`
-- Version: `0.9.5`
+- Package: `russh`
+- Version: `0.61.2`
+- License: Apache-2.0
+- Repository: https://github.com/warp-tech/russh
+
+- Package: `russh-sftp`
+- Version: `2.3.0`
+- License: Apache-2.0
+- Repository: https://github.com/AspectUnk/russh-sftp
+
+Direct and key transitive crates enabled by this feature include:
+
+- Package: `tokio`
+- Version: `1.52.3`
+- License: MIT
+- Repository: https://github.com/tokio-rs/tokio
+
+- Package: `ring`
+- Version: `0.17.14`
+- License: Apache-2.0 AND ISC
+- Repository: https://github.com/briansmith/ring
+
+`remote-sftp` is not part of the default bundle. Redistributed artifacts that
+enable it should keep this notice with the artifact.
+
+## FTP support in `remote-ftp` builds
+
+The optional `remote-ftp` feature enables FTP remote file targets through the
+`suppaftp` Rust crate. `hxedit` uses the plain FTP mode only; FTPS/TLS support
+is not enabled by this feature.
+
+- Package: `suppaftp`
+- Version: `9.0.0`
 - License: MIT OR Apache-2.0
-- Repository: https://github.com/alexcrichton/ssh2-rs
+- Repository: https://github.com/veeso/suppaftp
 
 Transitive crates enabled by this feature include:
 
-- Package: `libssh2-sys`
-- Version: `0.3.1`
+- Package: `chrono`
+- Version: `0.4.45`
 - License: MIT OR Apache-2.0
-- Repository: https://github.com/alexcrichton/ssh2-rs
+- Repository: https://github.com/chronotope/chrono
 
-- Package: `openssl-sys`
-- Version: `0.9.117`
+- Package: `lazy-regex`
+- Version: `3.6.0`
 - License: MIT
-- Repository: https://github.com/rust-openssl/rust-openssl
+- Repository: https://github.com/Canop/lazy-regex
 
-- Package: `libz-sys`
-- Version: `1.1.29`
+- Package: `log`
+- Version: `0.4.32`
 - License: MIT OR Apache-2.0
-- Repository: https://github.com/rust-lang/libz-sys
+- Repository: https://github.com/rust-lang/log
 
-`remote-sftp` is not part of the default bundle. Redistributed artifacts that
-enable it should keep this notice with the artifact, and should account for any
-system or vendored native libraries used by the target build environment.
+`remote-ftp` is not part of the default bundle. Redistributed artifacts that
+enable it should keep this notice with the artifact.

@@ -18,16 +18,15 @@
 ## `src/remote/*`
 
 - Remote backend 必须提供 offset read，供 `FileView` page cache 使用；不要默认整文件下载
-- 默认 SFTP transport 通过系统 OpenSSH 客户端运行 SFTP subsystem；命令必须保持 argv
-  传参，不要 shell 拼接 host / path
-- `HXEDIT_SFTP_BACKEND=ssh2` 保留旧 libssh2 后端用于对照和 fallback，但它不覆盖
-  GSSAPI-only 等 OpenSSH 专属认证路径
-- `ssh://` 是无 SFTP 主机的 fallback，依赖系统 OpenSSH 和远端 `python3`；它的 remote
-  command 参数必须经过 shell quoting，不能拼接未转义 path
-- `ftp://` 使用明文 passive binary FTP；FTP 缺少强 metadata / 原子覆盖保证，保存失败时必须
-  保留本地 dirty 状态并尽量清理临时文件，不能删除原文件来强行覆盖
-- 远程保存必须走远程临时文件 + fingerprint 冲突检测 + rename，失败时不得清空
-  dirty / undo / replacement / tombstone 状态
+- SFTP transport 通过 `russh` + `russh-sftp` 访问远端 SFTP subsystem；不要重新维护
+  SFTP framing / request id / status packet 解析，也不要新增系统 `ssh`、远端 shell 或
+  Python fallback
+- `ssh://` 只是 SFTP-over-SSH 的别名入口；不要新增远端 shell command 文件协议
+- `ftp://` 使用 `suppaftp` 的明文 passive binary FTP；不要在仓库内重新维护 FTP
+  控制响应 / PASV 解析。FTP 缺少强 metadata / 原子覆盖保证，保存失败时必须保留本地
+  dirty 状态并尽量清理临时文件，不能删除原文件来强行覆盖
+- 远程保存必须走 exclusive 远程临时文件 + fingerprint 冲突检测 + fsync best-effort
+  + rename，失败时不得清空 dirty / undo / replacement / tombstone 状态
 - 认证失败必须在进入 TUI raw mode 前返回错误；不要在 TUI 内做密码 prompt
 - 不要把 URI 中的密码作为支持面；当前明确拒绝 `user:password@host`
 - 新增协议必须先建模 capability，不满足 random read / rewrite-save 的协议默认只读或拒绝保存

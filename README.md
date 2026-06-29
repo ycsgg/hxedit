@@ -46,7 +46,7 @@ hxedit some.bin --script examples/simple_hash_patch.hxscript
 hxedit some.bin --command "goto 0x100" --command "fill 90 16" --command "w"
 ```
 
-Builds with optional remote features can open remote targets:
+Default builds can open SFTP remote targets; the `remote-ftp` feature adds FTP:
 
 ```bash
 hxedit --remote sftp://user@host/path/to/file.bin
@@ -54,12 +54,15 @@ hxedit --remote ssh://host/path/to/file.bin
 hxedit --remote ftp://user@host/path/to/file.bin
 ```
 
-The default SFTP backend runs the system OpenSSH client as an SFTP subsystem,
-so normal SSH config, host-key checking, public keys, agents, and GSSAPI login
-work the same way as `ssh host`. Set `HXEDIT_SFTP_BACKEND=ssh2` to force the
-older libssh2 backend. `ssh://` uses OpenSSH command execution with `python3`
-on the remote host. `ftp://` uses passive binary FTP; non-anonymous FTP logins
-read the password from `HXEDIT_FTP_PASSWORD`.
+The SFTP backend uses the Rust `russh` + `russh-sftp` stack. It checks
+`~/.ssh/known_hosts` by default, can authenticate through Unix ssh-agent
+(`SSH_AUTH_SOCK`), default unencrypted keys in `~/.ssh/id_ed25519`, `id_ecdsa`,
+or `id_rsa`, or `HXEDIT_SFTP_PASSWORD`. `HXEDIT_SFTP_INSECURE=1` disables
+host-key checking. It does not parse OpenSSH config, ProxyJump, or GSSAPI
+settings. `ssh://` is accepted as an SSH/SFTP alias and still requires the
+remote SFTP subsystem; it does not execute remote shell commands. `ftp://` uses
+passive binary FTP; non-anonymous FTP logins read the password from
+`HXEDIT_FTP_PASSWORD`.
 
 Run the same automation from the TUI command line:
 
@@ -119,8 +122,7 @@ and Sagitta analysis, see the [user guide](docs/user-guide.md).
 ## What You Can Do
 
 - Open and edit large files with overwrite, insert, and delete
-- Optionally open SFTP, SSH command-transport, and FTP remote files with the
-  same editing model
+- Optionally open SFTP-over-SSH and FTP remote files with the same editing model
 - Search text, hex bytes, single-byte values, or typed integers
 - Copy, export, hash, view stats, fill, zero, XOR, or replace selected bytes
 - Run TOML macro files and Rhai scripts through the same execution layer as manual edits
@@ -156,10 +158,9 @@ scenarios, hardware, and reproduction commands are in
 | Variant | Command | Use when |
 |---|---|---|
 | `core` | `cargo build --release --no-default-features` | You want the editor, inspector, search, diff, hash, copy/paste, and export only |
-| `default` | `cargo build --release` | You want the normal build with process memory editing, disassembly, symbols, and Rhai scripts |
+| `default` | `cargo build --release` | You want the normal build with process memory editing, disassembly, symbols, Rhai scripts, and SFTP remote files |
 | `full` | `cargo build --release --no-default-features --features full` | You also want Keystone-backed inline assembly patching and Sagitta analysis |
-| `remote-sftp` add-on | `cargo build --release --features remote-sftp` | You also want `--remote sftp://...` file targets |
-| `remote-ssh` add-on | `cargo build --release --features remote-ssh` | You also want `--remote ssh://...` command-transport targets |
+| `remote-sftp` feature | `cargo build --release --no-default-features --features remote-sftp` | You want SFTP remote files in a custom/minimal build |
 | `remote-ftp` add-on | `cargo build --release --features remote-ftp` | You also want `--remote ftp://...` passive FTP targets |
 | `remote-all` add-on | `cargo build --release --features remote-all` | You want all remote protocol backends |
 

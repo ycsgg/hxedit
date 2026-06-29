@@ -8,11 +8,7 @@ mod fake;
 #[cfg(feature = "remote-ftp")]
 mod ftp;
 #[cfg(feature = "remote-sftp")]
-mod openssh;
-#[cfg(feature = "remote-sftp")]
-mod sftp;
-#[cfg(feature = "remote-ssh")]
-mod ssh;
+mod russh_sftp;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RemoteTarget {
@@ -55,11 +51,7 @@ enum RemoteBackend {
     #[cfg(test)]
     Fake(fake::FakeBackend),
     #[cfg(feature = "remote-sftp")]
-    OpenSshSftp(openssh::OpenSshSftpBackend),
-    #[cfg(feature = "remote-sftp")]
-    Sftp(sftp::SftpBackend),
-    #[cfg(feature = "remote-ssh")]
-    Ssh(ssh::OpenSshBackend),
+    RusshSftp(russh_sftp::RusshSftpBackend),
     #[cfg(feature = "remote-ftp")]
     Ftp(ftp::FtpBackend),
     #[allow(dead_code)]
@@ -92,7 +84,7 @@ impl RemoteTarget {
             Some((userinfo, host_port)) => {
                 if userinfo.contains(':') {
                     return Err(HxError::Remote(
-                        "passwords in remote URIs are not supported; use ssh-agent or SSH config"
+                        "passwords in remote URIs are not supported; use Unix ssh-agent, SSH keys, or HXEDIT_SFTP_PASSWORD"
                             .to_owned(),
                     ));
                 }
@@ -173,7 +165,7 @@ impl RemoteSource {
                 })
             }
             "sftp" => open_sftp(target, readonly),
-            "ssh" => open_ssh(target, readonly),
+            "ssh" => open_sftp(target, readonly),
             "ftp" => open_ftp(target, readonly),
             other => Err(HxError::Remote(format!(
                 "unsupported remote scheme {other}; known schemes: sftp, ssh, ftp"
@@ -198,12 +190,7 @@ impl RemoteSource {
     }
 
     pub fn read_at(&mut self, offset: u64, len: usize) -> HxResult<Vec<u8>> {
-        #[cfg(not(any(
-            test,
-            feature = "remote-sftp",
-            feature = "remote-ssh",
-            feature = "remote-ftp"
-        )))]
+        #[cfg(not(any(test, feature = "remote-sftp", feature = "remote-ftp")))]
         {
             let _ = (offset, len);
             Err(HxError::Remote(
@@ -211,21 +198,12 @@ impl RemoteSource {
             ))
         }
 
-        #[cfg(any(
-            test,
-            feature = "remote-sftp",
-            feature = "remote-ssh",
-            feature = "remote-ftp"
-        ))]
+        #[cfg(any(test, feature = "remote-sftp", feature = "remote-ftp"))]
         match &mut self.backend {
             #[cfg(test)]
             RemoteBackend::Fake(backend) => backend.read_at(offset, len),
             #[cfg(feature = "remote-sftp")]
-            RemoteBackend::OpenSshSftp(backend) => backend.read_at(offset, len),
-            #[cfg(feature = "remote-sftp")]
-            RemoteBackend::Sftp(backend) => backend.read_at(offset, len),
-            #[cfg(feature = "remote-ssh")]
-            RemoteBackend::Ssh(backend) => backend.read_at(offset, len),
+            RemoteBackend::RusshSftp(backend) => backend.read_at(offset, len),
             #[cfg(feature = "remote-ftp")]
             RemoteBackend::Ftp(backend) => backend.read_at(offset, len),
             RemoteBackend::Unavailable => Err(HxError::Remote(
@@ -238,35 +216,19 @@ impl RemoteSource {
         if self.stat.readonly {
             return Err(HxError::ReadOnly);
         }
-        #[cfg(not(any(
-            test,
-            feature = "remote-sftp",
-            feature = "remote-ssh",
-            feature = "remote-ftp"
-        )))]
+        #[cfg(not(any(test, feature = "remote-sftp", feature = "remote-ftp")))]
         {
             Err(HxError::Remote(
                 "remote backend unavailable in this build".to_owned(),
             ))
         }
 
-        #[cfg(any(
-            test,
-            feature = "remote-sftp",
-            feature = "remote-ssh",
-            feature = "remote-ftp"
-        ))]
+        #[cfg(any(test, feature = "remote-sftp", feature = "remote-ftp"))]
         match &self.backend {
             #[cfg(test)]
             RemoteBackend::Fake(backend) => backend.begin_save(self.stat.fingerprint.clone()),
             #[cfg(feature = "remote-sftp")]
-            RemoteBackend::OpenSshSftp(backend) => {
-                backend.begin_save(self.stat.fingerprint.clone())
-            }
-            #[cfg(feature = "remote-sftp")]
-            RemoteBackend::Sftp(backend) => backend.begin_save(self.stat.fingerprint.clone()),
-            #[cfg(feature = "remote-ssh")]
-            RemoteBackend::Ssh(backend) => backend.begin_save(self.stat.fingerprint.clone()),
+            RemoteBackend::RusshSftp(backend) => backend.begin_save(self.stat.fingerprint.clone()),
             #[cfg(feature = "remote-ftp")]
             RemoteBackend::Ftp(backend) => backend.begin_save(self.stat.fingerprint.clone()),
             RemoteBackend::Unavailable => Err(HxError::Remote(
@@ -280,34 +242,20 @@ impl RemoteSource {
     }
 
     pub fn reload(&mut self) -> HxResult<RemoteStat> {
-        #[cfg(not(any(
-            test,
-            feature = "remote-sftp",
-            feature = "remote-ssh",
-            feature = "remote-ftp"
-        )))]
+        #[cfg(not(any(test, feature = "remote-sftp", feature = "remote-ftp")))]
         {
             Err(HxError::Remote(
                 "remote backend unavailable in this build".to_owned(),
             ))
         }
 
-        #[cfg(any(
-            test,
-            feature = "remote-sftp",
-            feature = "remote-ssh",
-            feature = "remote-ftp"
-        ))]
+        #[cfg(any(test, feature = "remote-sftp", feature = "remote-ftp"))]
         {
             let stat: RemoteStat = match &mut self.backend {
                 #[cfg(test)]
                 RemoteBackend::Fake(backend) => backend.reload()?,
                 #[cfg(feature = "remote-sftp")]
-                RemoteBackend::OpenSshSftp(backend) => backend.reload()?,
-                #[cfg(feature = "remote-sftp")]
-                RemoteBackend::Sftp(backend) => backend.reload()?,
-                #[cfg(feature = "remote-ssh")]
-                RemoteBackend::Ssh(backend) => backend.reload()?,
+                RemoteBackend::RusshSftp(backend) => backend.reload()?,
                 #[cfg(feature = "remote-ftp")]
                 RemoteBackend::Ftp(backend) => backend.reload()?,
                 RemoteBackend::Unavailable => {
@@ -359,37 +307,12 @@ fn parse_port(input: &str) -> HxResult<u16> {
 
 #[cfg(feature = "remote-sftp")]
 fn open_sftp(target: RemoteTarget, readonly: bool) -> HxResult<RemoteSource> {
-    match std::env::var("HXEDIT_SFTP_BACKEND").as_deref() {
-        Ok("ssh2") | Ok("libssh2") => open_ssh2_sftp(target, readonly),
-        Ok("openssh") | Err(std::env::VarError::NotPresent) => open_openssh_sftp(target, readonly),
-        Ok(other) => Err(HxError::Remote(format!(
-            "unsupported HXEDIT_SFTP_BACKEND={other}; expected openssh or ssh2"
-        ))),
-        Err(err) => Err(HxError::Remote(format!(
-            "invalid HXEDIT_SFTP_BACKEND: {err}"
-        ))),
-    }
-}
-
-#[cfg(feature = "remote-sftp")]
-fn open_openssh_sftp(target: RemoteTarget, readonly: bool) -> HxResult<RemoteSource> {
-    let mut backend = openssh::OpenSshSftpBackend::open(target.clone(), readonly)?;
+    let mut backend = russh_sftp::RusshSftpBackend::open(target.clone(), readonly)?;
     let stat = backend.reload()?;
     Ok(RemoteSource {
         target,
         stat,
-        backend: RemoteBackend::OpenSshSftp(backend),
-    })
-}
-
-#[cfg(feature = "remote-sftp")]
-fn open_ssh2_sftp(target: RemoteTarget, readonly: bool) -> HxResult<RemoteSource> {
-    let mut backend = sftp::SftpBackend::open(target.clone(), readonly)?;
-    let stat = backend.reload()?;
-    Ok(RemoteSource {
-        target,
-        stat,
-        backend: RemoteBackend::Sftp(backend),
+        backend: RemoteBackend::RusshSftp(backend),
     })
 }
 
@@ -397,26 +320,7 @@ fn open_ssh2_sftp(target: RemoteTarget, readonly: bool) -> HxResult<RemoteSource
 fn open_sftp(target: RemoteTarget, _readonly: bool) -> HxResult<RemoteSource> {
     let _ = target;
     Err(HxError::Remote(
-        "sftp remote support requires building with --features remote-sftp".to_owned(),
-    ))
-}
-
-#[cfg(feature = "remote-ssh")]
-fn open_ssh(target: RemoteTarget, readonly: bool) -> HxResult<RemoteSource> {
-    let mut backend = ssh::OpenSshBackend::open(target.clone(), readonly)?;
-    let stat = backend.reload()?;
-    Ok(RemoteSource {
-        target,
-        stat,
-        backend: RemoteBackend::Ssh(backend),
-    })
-}
-
-#[cfg(not(feature = "remote-ssh"))]
-fn open_ssh(target: RemoteTarget, _readonly: bool) -> HxResult<RemoteSource> {
-    let _ = target;
-    Err(HxError::Remote(
-        "ssh remote support requires building with --features remote-ssh".to_owned(),
+        "sftp/ssh remote support requires building with --features remote-sftp".to_owned(),
     ))
 }
 
@@ -458,6 +362,14 @@ mod tests {
             target.label(),
             "sftp://alice@example.com:2222/var/tmp/blob.bin"
         );
+    }
+
+    #[test]
+    fn parses_ssh_alias_target() {
+        let target = RemoteTarget::parse("ssh://example.com/var/tmp/blob.bin").unwrap();
+        assert_eq!(target.scheme(), "ssh");
+        assert_eq!(target.host(), "example.com");
+        assert_eq!(target.path(), "/var/tmp/blob.bin");
     }
 
     #[test]
