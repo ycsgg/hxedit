@@ -1142,6 +1142,37 @@ fn replace_command_variants() {
 }
 
 #[test]
+fn replace_bang_same_size_uses_replacement_semantics() {
+    let mut app = app_with_bytes(b"abab");
+    app.execute_command(Command::Replace {
+        needle: b"ab".to_vec(),
+        replacement: b"xy".to_vec(),
+        allow_resize: true,
+        force: false,
+    })
+    .unwrap();
+
+    assert_eq!(app.document.len(), 4);
+    assert_eq!(app.document.logical_bytes(0, 3).unwrap(), b"xyxy");
+    assert!(app.status_message.contains("total 4 bytes"));
+    assert!(!app.status_message.contains("4→4"));
+
+    let step = app.undo_stack.last().expect("replace should push undo");
+    assert!(step
+        .ops
+        .iter()
+        .all(|op| !matches!(op, EditOp::Insert { .. } | EditOp::RealDelete { .. })));
+    assert!(step
+        .ops
+        .iter()
+        .any(|op| matches!(op, EditOp::ReplaceBulk { .. } | EditOp::ReplacePatch { .. })));
+
+    app.undo(1, true).unwrap();
+    assert_eq!(app.document.len(), 4);
+    assert_eq!(app.document.logical_bytes(0, 3).unwrap(), b"abab");
+}
+
+#[test]
 fn replace_same_size_dirty_range_uses_mixed_patch_undo() {
     let mut app = app_with_bytes(b"abcabc");
     app.document
@@ -1217,6 +1248,26 @@ fn replace_same_size_over_match_limit_requires_force() {
         forced.document.byte_at(65_535).unwrap(),
         ByteSlot::Present(0)
     );
+}
+
+#[test]
+fn replace_resize_over_match_limit_requires_force() {
+    let bytes = vec![0_u8; 65_536];
+    let mut app = app_with_bytes(&bytes);
+
+    app.execute_command(Command::Replace {
+        needle: vec![0],
+        replacement: vec![1, 2],
+        allow_resize: true,
+        force: false,
+    })
+    .unwrap();
+
+    assert!(app.undo_stack.is_empty());
+    assert!(app.status_message.contains("more than 65535 matches"));
+    assert_eq!(app.document.len(), 65_536);
+    assert_eq!(app.document.byte_at(0).unwrap(), ByteSlot::Present(0));
+    assert_eq!(app.document.byte_at(65_535).unwrap(), ByteSlot::Present(0));
 }
 
 #[test]

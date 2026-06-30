@@ -505,7 +505,7 @@ fn execute_one(
                 }
             };
             state.cursor = clamp_cursor(document, outcome.first_match);
-            if *allow_resize {
+            if outcome.stats.before_bytes != outcome.stats.after_bytes {
                 state.selection = None;
             }
             let mut exec_outcome = ExecOutcome::new(

@@ -56,7 +56,7 @@ pub fn hint_for(input: &str) -> CommandHint {
         name if is_alias(name, REPLACE_ALIASES) => CommandHint {
             syntax: format!("{name} [--force] [mode]<delim><needle><delim><replacement><delim>"),
             details: if name.ends_with('!') {
-                "replace all non-overlapping matches in the active selection (visual or selected inspector field) or entire file; ! allows length changes via real delete/insert"
+                "replace all non-overlapping matches in the active selection (visual or selected inspector field) or entire file; ! allows length changes via real delete/insert, while equal-length input remains replacement-only; --force applies when more than 65535 matches are found"
                     .to_owned()
             } else {
                 "replace all non-overlapping matches with equal-length data; modes match :s (/text/, x/hex/, b/byte/, u32/u64 and signed variants); --force applies when more than 65535 matches are found"

@@ -259,7 +259,10 @@ impl App {
         allow_resize: bool,
         force: bool,
     ) -> HxResult<()> {
-        if matches!(self.main_view, crate::app::MainView::Disassembly(_)) && allow_resize {
+        if matches!(self.main_view, crate::app::MainView::Disassembly(_))
+            && allow_resize
+            && needle.len() != replacement.len()
+        {
             return Err(HxError::DisassemblyUnavailable(
                 "view is overwrite-only; use :re without ! for equal-length replace".to_owned(),
             ));
@@ -328,7 +331,7 @@ impl App {
                 "replace matched {} spans; bytes unchanged",
                 outcome.stats.match_count
             ));
-        } else if allow_resize {
+        } else if outcome.stats.before_bytes != outcome.stats.after_bytes {
             self.set_info_status(format!(
                 "replaced {} matches; total {}→{} bytes",
                 outcome.stats.match_count, outcome.stats.before_bytes, outcome.stats.after_bytes

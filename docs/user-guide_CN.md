@@ -178,7 +178,7 @@ cache_pages = 128                  # 页缓存容量
 | `:export <path>` / `:export c` / `:export py` | 导出 logical bytes |
 | `:xor <key>` / `:xor! <key>` | 当前选区 XOR 后复制 / 原地 XOR 替换。`key` 可用十进制 `0..255` 或十六进制 `0x00..0xff` |
 | `:fill <pattern> <len>` / `:zero <len>` | overwrite 批量写入 |
-| `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | 使用与 `:s` 相同的模式替换。`:re` 是等长 replacement，命中超过 65535 处时需要加 `--force` 确认；`:re!` 允许长度变化。旧的 `hex/ascii <needle> -> <replacement>` 仍兼容 |
+| `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | 使用与 `:s` 相同的模式替换。`:re` 是等长 replacement，命中超过 65535 处时需要加 `--force` 确认；`:re!` 允许长度变化并使用同样的 `--force` 保护，等长 `:re!` 仍保持 replacement-only。旧的 `hex/ascii <needle> -> <replacement>` 仍兼容 |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | 哈希当前选区或整文件；TUI 中大范围 hash 会显示进度，Esc 可取消 |
 | `:stats [all\|selection\|refresh\|off]` | 查看当前选区或整文件的字节频率、可逐批展开的 Top bytes、byte range 分布和 Shannon entropy；大范围会显示进度，Esc 可取消 |
 | `:source <path>` | 执行 TOML 宏文件。宏使用显式执行层 step，可继承当前 Visual / inspector 选区，默认合并成一个 undo |
@@ -369,7 +369,7 @@ macro / script / command 列表执行完后退出。除非某个 step 或后续�
 
 `hx_export_*` 和 `hx_save_as()` 的相对路径从脚本文件所在目录解析。
 `allow_resize = false` 保持 replacement-only 替换；`allow_resize = true` 允许 real
-delete / insert，并会清空选区。
+delete / insert，但只在变长替换时使用并清空选区；等长替换仍保持 replacement-only。
 
 默认脚本预算为 `2,000,000` 次 Rhai operation、`100,000` 次执行层调用、`512 MiB`
 脚本读取总量、`64 MiB` 单次读取、`64 MiB` 单个 bytes blob。hash/search/export

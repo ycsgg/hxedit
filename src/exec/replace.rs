@@ -134,16 +134,42 @@ pub(crate) fn replace_range(
         return Ok(ReplaceResult::NoMatches);
     }
 
-    if allow_resize {
-        let matches = collect_replace_matches(document, start, end_inclusive, needle)?;
+    if needle.len() == replacement.len() {
+        return apply_replace_same_size_streaming(
+            document,
+            start,
+            end_inclusive,
+            needle,
+            replacement,
+            force,
+        );
+    }
+
+    if !force {
+        let (matches, _) = collect_replace_match_batch(
+            document,
+            start,
+            end_inclusive,
+            needle,
+            REPLACE_CONFIRM_LIMIT + 1,
+        )?;
         if matches.is_empty() {
             return Ok(ReplaceResult::NoMatches);
+        }
+        if matches.len() > REPLACE_CONFIRM_LIMIT {
+            return Ok(ReplaceResult::TooManyMatches {
+                limit: REPLACE_CONFIRM_LIMIT,
+            });
         }
         return apply_replace_resizing(document, &matches, needle, replacement)
             .map(ReplaceResult::Applied);
     }
 
-    apply_replace_same_size_streaming(document, start, end_inclusive, needle, replacement, force)
+    let matches = collect_replace_matches(document, start, end_inclusive, needle)?;
+    if matches.is_empty() {
+        return Ok(ReplaceResult::NoMatches);
+    }
+    apply_replace_resizing(document, &matches, needle, replacement).map(ReplaceResult::Applied)
 }
 
 fn collect_replace_matches(

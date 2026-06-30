@@ -105,8 +105,8 @@
   - 建议：active region commit 先改为 streaming span visitor，避免提交时一次性物化；region switch / stashed region 需要单独设计 snapshot 语义，不能简单保存 XOR/pattern overlay 后再基于之后的 live bytes 重算
 
 - [ ] **[P1] `:re!` 仍需要批量 match job，避免一次性收集全量匹配**
-  - 现状：等长 `:re` 的 OOM 止血已落地并归档；但变长 `:re!` 仍会先收集全部 match offset，低熵大文件上小 needle 仍可能产生海量 match，提前 OOM，且无进度/取消
-  - 建议：`:re!` 需要基于替换前快照搜索并用 delta 映射到 live document，避免新插入内容影响后续匹配语义；实现形态应是 job/stepper 或受预算的批处理，带进度与取消
+  - 现状：等长 `:re` / 等长 `:re!` 的 OOM 止血已落地并走 replacement-only streaming 路径；真正变长的 `:re!` 默认也会先用 65535 match 上限要求 `--force` 确认；但 `--force` 后仍会先收集全部 match offset，低熵大文件上小 needle 仍可能产生海量 match，提前 OOM，且无进度/取消
+  - 建议：真正变长的 `:re! --force` 需要基于替换前快照搜索并用 delta 映射到 live document，避免新插入内容影响后续匹配语义；实现形态应是 job/stepper 或受预算的批处理，带进度与取消
 
 - [ ] **[P2] 格式检测 / Inspector 单字段扫描缺少预算**
   - 现状：entry cap 只限制结构数量；GZIP FNAME/FCOMMENT、JPEG scan data、GIF sub-block 等单字段仍可能在畸形大文件中同步扫到 EOF，导致 UI 长时间无响应

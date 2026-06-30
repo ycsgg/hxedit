@@ -198,7 +198,7 @@ cache_pages = 128                  # page-cache capacity
 | `:export <path>` / `:export c` / `:export py` | Export logical bytes |
 | `:xor <key>` / `:xor! <key>` | XOR active selection to clipboard / XOR in place. `key` can be decimal `0..255` or hex `0x00..0xff` |
 | `:fill <pattern> <len>` / `:zero <len>` | Overwrite transforms |
-| `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | Replace using the same modes as `:s`. `:re` is equal-length and asks for `--force` when more than 65535 matches are found; `:re!` allows length changes. Legacy `hex/ascii <needle> -> <replacement>` remains accepted |
+| `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | Replace using the same modes as `:s`. `:re` is equal-length and asks for `--force` when more than 65535 matches are found; `:re!` allows length changes and uses the same `--force` guard, while equal-length `:re!` stays replacement-only. Legacy `hex/ascii <needle> -> <replacement>` remains accepted |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | Hash the active selection or whole file; large TUI hashes report progress and Esc cancels |
 | `:stats [all\|selection\|refresh\|off]` | Show byte frequency, expandable top bytes, byte-range distribution, and Shannon entropy for the active selection or whole file; large ranges report progress and Esc cancels |
 | `:source <path>` | Run a TOML macro file. The macro uses explicit execution-layer steps, can inherit the current Visual / inspector selection, and defaults to grouped undo |
@@ -397,7 +397,8 @@ prefixed with `hx_`:
 Relative paths passed to `hx_export_*` and `hx_save_as()` are resolved from the
 script file directory. `allow_resize = false` keeps replace operations
 replacement-only; `allow_resize = true` permits real delete / insert behavior
-and clears the selection.
+only for length-changing replacements, which clear the selection. Equal-length
+replacements remain replacement-only.
 
 Default script budgets are `2,000,000` Rhai operations, `100,000` exec calls,
 `512 MiB` total bytes returned to the script by reads, `64 MiB` per read, and
