@@ -48,11 +48,14 @@ impl App {
             crate::app::MainView::Disassembly(_) => layout::MainPaneKind::Disassembly,
         };
         let gutter_width = match &self.main_view {
-            crate::app::MainView::Hex => offset_width(
-                self.memory_base_va()
-                    .and_then(|base| base.checked_add(self.document.len().saturating_sub(1)))
-                    .unwrap_or_else(|| self.document.len()),
-            ) as u16,
+            crate::app::MainView::Hex => {
+                offset_width(
+                    self.memory_base_va()
+                        .and_then(|base| base.checked_add(self.document.len().saturating_sub(1)))
+                        .unwrap_or_else(|| self.document.len()),
+                ) as u16
+                    + 2
+            }
             crate::app::MainView::Disassembly(state) => {
                 let max_name = state
                     .info
@@ -87,6 +90,9 @@ impl App {
             layout::MainPaneKind::Hex => columns.gutter.height.saturating_sub(1).max(1) as usize,
             layout::MainPaneKind::Disassembly => columns.gutter.height.max(1) as usize,
         };
+        if self.show_side_panel && self.active_side_panel == SidePanelKind::Bookmarks {
+            self.ensure_bookmark_selection_visible();
+        }
         stats.rows = self.view_rows;
 
         let line_build_start = profiling.then(Instant::now);
@@ -231,6 +237,7 @@ impl App {
         let selection = self.selection_range();
         let inspector_highlight = self.inspector_highlight_range();
         let search_matches = self.visible_search_matches(visible_rows);
+        let bookmarks = self.visible_bookmark_ranges(visible_rows);
         let diff_page = self.visible_diff_page(visible_rows).unwrap_or_else(|err| {
             self.report_render_error(format!("diff render failed: {err}"));
             VisibleDiffPage::default()
@@ -242,6 +249,7 @@ impl App {
         } else {
             &visible_rows.offsets
         };
+        let gutter_bookmarks = self.visible_bookmark_gutter_markers(gutter_offsets);
         let gutter_display_offsets;
         let (gutter_offsets, gutter_width_value) = if let Some(base_va) = self.memory_base_va() {
             gutter_display_offsets = gutter_offsets
@@ -253,12 +261,23 @@ impl App {
         } else {
             (gutter_offsets.as_slice(), offset_width(self.document.len()))
         };
-        let gutter_lines = gutter::build(gutter_offsets, gutter_width_value, &self.palette);
+        let gutter_lines = gutter::build_with_bookmarks(
+            gutter_offsets,
+            gutter_width_value,
+            &gutter_bookmarks,
+            &self.palette,
+        );
+        let ascii_bookmarks = bookmarks.clone();
+        let ascii_overlays = ascii_grid::AsciiGridOverlays {
+            selection,
+            bookmarks: &ascii_bookmarks,
+        };
         let overlays = hex_grid::HexGridOverlays {
             diff_spans: diff_page.overlay_spans.clone(),
             selection,
             inspector_highlight,
             search_matches,
+            bookmarks,
         };
         let (hex, ascii) = if projected {
             (
@@ -276,7 +295,7 @@ impl App {
                     self.mode,
                     &self.palette,
                     self.config.bytes_per_line,
-                    selection,
+                    ascii_overlays,
                 ),
             )
         } else {
@@ -297,7 +316,7 @@ impl App {
                     self.mode,
                     &self.palette,
                     self.config.bytes_per_line,
-                    selection,
+                    ascii_overlays,
                 ),
             )
         };
@@ -500,6 +519,60 @@ impl App {
             }
         }
         matches
+    }
+
+    pub(super) fn visible_bookmark_ranges(
+        &self,
+        visible_rows: &VisibleRows,
+    ) -> Vec<hex_grid::BookmarkOverlay> {
+        let Some(first) = visible_rows.offsets.first().copied() else {
+            return Vec::new();
+        };
+        let rows = visible_rows.offsets.len() as u64;
+        let last = first
+            .saturating_add(rows.saturating_mul(self.config.bytes_per_line as u64))
+            .saturating_sub(1);
+        self.bookmark_state
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let start = entry.start.max(first);
+                let end = entry.end().min(last);
+                (start <= end).then_some(hex_grid::BookmarkOverlay {
+                    start,
+                    end,
+                    color_index: entry.color.palette_index(),
+                })
+            })
+            .collect()
+    }
+
+    pub(super) fn visible_bookmark_gutter_markers(
+        &self,
+        row_offsets: &[u64],
+    ) -> Vec<gutter::BookmarkGutterMarker> {
+        let row_size = self.config.bytes_per_line as u64;
+        row_offsets
+            .iter()
+            .map(|row_start| {
+                let row_end = row_start.saturating_add(row_size.saturating_sub(1));
+                let mut marker = gutter::BookmarkGutterMarker::None;
+                for entry in &self.bookmark_state.entries {
+                    if entry.start <= row_end && entry.end() >= *row_start {
+                        let color = entry.color.palette_index();
+                        marker = if entry.note.is_some() {
+                            gutter::BookmarkGutterMarker::Note(color)
+                        } else {
+                            gutter::BookmarkGutterMarker::Bookmark(color)
+                        };
+                        if entry.note.is_some() {
+                            break;
+                        }
+                    }
+                }
+                marker
+            })
+            .collect()
     }
 
     fn render_main_grids(

@@ -77,6 +77,7 @@
 - 文件搜索统一走 `:s [mode]<delim><pattern><delim>` / `:s! ...`；默认 `/text/` 是 UTF-8 bytes，`x/hex/` 是原始 hex bytes，`b` / `u32` / `u64` / `i32` / `i64` typed-value 都在同一入口解析；`:S` 只作为 deprecated hex-search 别名保留，命中时必须提示改用 `:s x/.../`
 - `save` / `logical_bytes()` / `read_logical_range()` / `hash_logical_bytes()` / `for_each_logical_chunk()` / diff current-source / `transform_visible_range_in_place()` 都必须复用 `src/core/document/walk.rs`；不要在调用方重新手写 Original/Add + tombstone + replacement 分支
 - active selection 不再只等于 Visual；command 从 inspector 进入时，当前字段范围也可作为 copy / export / replace / hash 的选区来源
+- `:mark` / `:marks` 只操作 App 层 `BookmarkState`：range 明确使用 display offset，默认范围优先取 active Visual / inspector selection，再退回 cursor byte；不得写入 `Document` 或污染 undo / save / export / hash / diff。当前只用 revision 提示 stale，不要把它描述成可随 real insert/delete 自动移动的 anchor；memory region 切换通过 `MemoryRuntime.region_bookmarks` 分区 stash/restore，不能把一个 region 的 display offset 直接显示到另一个 region
 - 搜索结果使用 "display 0x{:x}" 明确标注为 display offset
 - 文件 `search_forward` / `search_backward` 按文档脏净分流：clean 文档（无 tombstone / replacement）走 `search_clean_forward` / `_backward` 的 SIMD `memchr::memmem::find` / `rfind`，按 chunk + `pattern.len()-1` overlap 续接跨边界匹配。dirty 文档走 `walk_visible_cells` / `walk_visible_cells_reverse`：walker 仍逐 chunk 判定脏净，clean chunk 走 `scan_clean_chunk_forward` / `_backward`（memmem + 首尾 `P-1` 字节 KMP 衔接），只有真正含 tombstone / replacement 的 chunk 才逐 cell KMP（维持 tombstone gap 与 replacement 覆盖语义）。跨 piece / 跨 chunk 边界续接靠跨 chunk 共享的 `KmpMatcher`，clean-chunk helper 必须保持"等价于逐字节 feed 整块"语义并在结尾 feed 末尾 `P-1` 字节为下个 chunk 续接。clean 文档快路径单次读用 `read_logical_range`，chunk 取 `min(SEARCH_CHUNK, max_contiguous_read_len())`，别退回整段读或纯 KMP
 - `:g` 成功反馈当前使用 `moved ±0x... → 0x...`，别退回成只显示目标 offset
@@ -118,6 +119,7 @@
 - 改动时不要把 display span 和 logical byte count 混成一个数字
 - wrap-around search 当前使用 notice 类状态，不要退回普通 info 提示
 - 搜索“同屏所有命中”高亮当前走 render overlay，改动时保持与 cursor / visual selection / inspector highlight 可叠加
+- Bookmark marker 的自定义颜色必须同步作用于 gutter、hex 与 ASCII；memory 视图只在最终显示 gutter 文本时叠加 VA，bookmark 命中仍按 document display offset 判断
 - 当前 disassembly view 已替换左侧主视图；继续改 render 时，保持 search / selection / cursor overlay 仍按 byte 语义工作
 - diff overlay 顺序要低于 inspector / search / visual selection / cursor；cursor 与 visual selection 仍保持最高优先级
 - hex 主视图顶部固定显示 byte 列头（默认 `00 01 02 ... 0F`）；改 render / mouse / viewport 行数时保持列头不滚动且不被当作数据行命中

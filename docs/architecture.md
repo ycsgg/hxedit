@@ -22,12 +22,13 @@
 - 搜索：统一 `:s [mode]<delim><pattern><delim>` / `:s! ...` 入口覆盖 UTF-8 bytes、hex bytes、单字节与整数 typed-value，支持前后向、自动 wrap-around、同屏命中高亮；`:S` 过渡期仅作为 deprecated hex-search 别名保留。底层 `search_forward` / `search_backward` 用 SIMD `memchr::memmem` 加速：clean 文档全程 memmem；dirty 文档（tombstone / replacement）仍逐 chunk 判脏净，**clean chunk 也走 memmem**（`scan_clean_chunk_forward` / `_backward`，首尾 `P-1` 字节用共享 `KmpMatcher` 衔接跨 chunk/piece 边界），只有含编辑的 chunk 才逐字节 KMP。实测 256MB worst-case：clean ~53ms、dirty(单 tombstone) ~38ms（旧版全 KMP ~330ms，约 8× 提升）。`default` / `full` 额外支持进程内存搜索、指令文本与 symbol 搜索；`memory` feature 下 `:ms` / `:ms!` 跨 region 搜索用同类 mode 前缀语法与 `memchr::memmem`，命中后 `gn` / `gN` 重放（独立于文件 `n` / `p`）
 - 主 hex 视图顶部固定显示 byte 列头（默认 `00 01 02 ... 0F`），列头不随 viewport 滚动；鼠标命中与 `view_rows` 只计算列头下方的数据行
 - 选区：Visual 选区，或 inspector 当前字段范围作为 active selection
-- 命令：`:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:source`、`:script`、`:diff`、`:insp more`、`:dis`、`:sym`、`:data`；`default` / `full` 内置 `memory` feature，支持 `:mem freeze` / `:mem thaw` 暂停与恢复目标进程，`:mem commit` / `:mem commit-all` 写回 replacement（后者按 VA 升序遍历所有 dirty region），`:w` 等价 `:mem commit` 且 `:w <path>` 被拒绝（改用 `:export`）；`MemorySession` 按 region 持久化未提交 replacement / undo / redo，切换 region 不丢失编辑，`:q` 在任意 region dirty 时拒绝并汇总；`sagitta-analysis` feature 下额外支持 `:ana` / `:ana status` / `:ana off`，对当前 logical bytes 后台运行 crates.io `sagitta-rs` 并用 ready snapshot 覆盖 symbol panel 数据源
+- 命令：`:g`、`:hash`、`:xor` / `:xor!`、`:re` / `:re!`、`:fill`、`:zero`、`:export`、`:source`、`:script`、`:diff`、`:mark` / `:marks`、`:insp more`、`:dis`、`:sym`、`:data`；`default` / `full` 内置 `memory` feature，支持 `:mem freeze` / `:mem thaw` 暂停与恢复目标进程，`:mem commit` / `:mem commit-all` 写回 replacement（后者按 VA 升序遍历所有 dirty region），`:w` 等价 `:mem commit` 且 `:w <path>` 被拒绝（改用 `:export`）；`MemorySession` 按 region 持久化未提交 replacement / undo / redo，切换 region 不丢失编辑，`:q` 在任意 region dirty 时拒绝并汇总；`sagitta-analysis` feature 下额外支持 `:ana` / `:ana status` / `:ana off`，对当前 logical bytes 后台运行 crates.io `sagitta-rs` 并用 ready snapshot 覆盖 symbol panel 数据源
 - Inspector / side panel：
   - Inspector：ELF、PE/COFF、Mach-O、PNG、ZIP（central directory / EOCD / ZIP64 / data descriptor 感知）、SQLite（database header / b-tree page header / cell pointer array，不深入 record payload）、PCAP / PCAPNG（capture/header/block/packet data range，不深入链路层 payload）、GZIP、GIF、BMP、WAV、TAR、JPEG
   - 格式自定义可读编辑字段：classic PCAP UTC packet timestamp（同步写回 `ts_sec` + `ts_usec` / `ts_nsec`）、GZIP / PE Unix timestamp、ZIP DOS `modified_at`、TAR octal `mode` / `size` / `mtime`、GIF frame delay
   - Symbol panel：可执行文件 symbol / import 列表与跳转；`sagitta-analysis` ready 后使用 Sagitta recovered functions 覆盖 native entries
   - Data panel：cursor-relative primitive decode
+  - Bookmark panel：session-local display-range bookmark/comment 列表、详情、跳转和删除；gutter 与 hex/ASCII 视图按 bookmark color 标注
 - Disassembly：
   - `default`：纯 Rust backend 驱动的只读反汇编浏览（x86/x86_64 用 iced-x86，aarch64 用 yaxpeax-arm）
   - `full`：在 `default` 基础上开放 Keystone inline assemble patch
@@ -47,6 +48,7 @@
 ### 当前明确的行为边界
 
 - Tab 是 side panel 可见性开关：panel 隐藏时打开并进入 panel；panel 已显示时关闭并回到 Normal，不作为 Normal 与 panel 的焦点循环键
+- Bookmark 是 App/UI 层 session annotation：anchor 使用当前 display offset/range，不写入 `Document`，不参与 undo / save / export / hash / diff。编辑后仅按 `document_revision` 标成 `possibly stale`，不假装已经具备 range tracking；memory 模式按 region 隔离并在切换回来时恢复，避免相同 display offset 串到别的 region；跨 session 持久化和 logical anchor 仍属于后续能力
 - overwrite paste / `:fill` / `:zero` 越过 EOF 会截断，不会自动 append
 - `:xor` 只读取 active selection 的 logical bytes，XOR 后以 hex 文本复制到剪贴板；`:xor!` 是 replacement 语义的原地覆盖，不改变 piece 布局；key 不带 `0x` 时按十进制解析，带 `0x` 时按 hex 解析
 - insert paste 会真实插入并右移后续 display offset

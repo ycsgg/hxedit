@@ -25,8 +25,9 @@
 - [ ] **[P2] 命令历史尚未持久化**
   - 建议：按 XDG 路径持久化，限制条数，避免无限增长
 
-- [ ] **[P2] 书签 / mark 仍缺失**
-  - 目标：支持类似 vim 的 `ma` / `'a`，方便在大文件中往返跳转
+- [ ] **[P2] 书签 / mark 后续增强**
+  - 现状：已支持 session-local `:mark add [name] [--at <offset>] [--len <len>] [--color <color>] [--note <text...>]` / `:mark note` / `:mark goto` / `:mark next` / `:mark prev` / `:mark del` / `:mark clear` / `:marks`，可从 cursor、Visual 选区或 inspector 当前字段创建 display-range bookmark/comment，并在 side panel 浏览/跳转；bookmark 是 UI annotation，不参与 save/export/hash/diff/undo，暂不持久化
+  - 后续：支持类似 vim 的 `ma` / `'a` 快捷键、XDG/sidecar 持久化、编辑后的更强 range tracking、可选 logical anchor
 
 - [ ] **[P2] 原始 binary clipboard 写仍未落地**
   - 现状：copy 以文本表示为主；base64 已可用，但仍不等于真实 raw bytes clipboard

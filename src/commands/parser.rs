@@ -3,11 +3,12 @@ use std::path::PathBuf;
 #[cfg(feature = "sagitta-analysis")]
 use super::ANALYSIS_ALIASES;
 use super::{
-    is_alias, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES, FILL_ALIASES,
-    FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES, LEGACY_HEX_SEARCH_ALIASES,
-    PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES, QUIT_FORCE_ALIASES, REDO_ALIASES,
-    REPLACE_ALIASES, SCRIPT_ALIASES, SEARCH_ALIASES, SOURCE_ALIASES, STATS_ALIASES, UNDO_ALIASES,
-    WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES, ZERO_ALIASES,
+    is_alias, BOOKMARK_ALIASES, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES,
+    FILL_ALIASES, FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES,
+    LEGACY_HEX_SEARCH_ALIASES, PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES,
+    QUIT_FORCE_ALIASES, REDO_ALIASES, REPLACE_ALIASES, SCRIPT_ALIASES, SEARCH_ALIASES,
+    SOURCE_ALIASES, STATS_ALIASES, UNDO_ALIASES, WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES,
+    ZERO_ALIASES,
 };
 #[cfg(feature = "disasm")]
 use super::{DISASSEMBLE_ALIASES, DISASSEMBLE_FORCE_ALIASES, INSTRUCTION_SEARCH_ALIASES};
@@ -17,7 +18,10 @@ use super::{MEMORY_ALIASES, MEMORY_SEARCH_ALIASES};
 use super::{SYMBOL_PANEL_ALIASES, SYMBOL_SEARCH_ALIASES};
 use crate::commands::{
     split_command,
-    types::{Command, DiffCommand, ExportFormat, GotoTarget, HashAlgorithm, StatsCommand},
+    types::{
+        BookmarkColorArg, BookmarkCommand, Command, DiffCommand, ExportFormat, GotoTarget,
+        HashAlgorithm, StatsCommand,
+    },
 };
 use crate::copy::{CopyDisplay, CopyFormat};
 use crate::error::{HxError, HxResult};
@@ -138,6 +142,7 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
             Ok(Command::Hash { algorithm: algo })
         }
         name if is_alias(name, STATS_ALIASES) => parse_stats(rest),
+        name if is_alias(name, BOOKMARK_ALIASES) => parse_bookmark(name, rest),
         name if is_alias(name, DIFF_ALIASES) => parse_diff(rest),
         #[cfg(feature = "sagitta-analysis")]
         name if is_alias(name, ANALYSIS_ALIASES) => parse_analysis(rest),
@@ -178,6 +183,169 @@ pub fn parse_command(input: &str) -> HxResult<Command> {
         },
         other => Err(HxError::UnknownCommand(other.to_owned())),
     }
+}
+
+fn parse_bookmark(name: &str, rest: Option<&str>) -> HxResult<Command> {
+    if name == "marks" {
+        if rest.is_some_and(|rest| !rest.trim().is_empty()) {
+            return Err(HxError::CommandError(
+                ":marks does not accept arguments".to_owned(),
+            ));
+        }
+        return Ok(Command::Bookmark(BookmarkCommand::Panel));
+    }
+    let Some(rest) = rest.map(str::trim).filter(|rest| !rest.is_empty()) else {
+        return Ok(Command::Bookmark(BookmarkCommand::Panel));
+    };
+    let (subcommand, tail) = split_command(rest);
+    let command = match subcommand {
+        "add" => parse_bookmark_add(tail)?,
+        "note" => {
+            let tail = tail.ok_or(HxError::MissingArgument("bookmark selector"))?;
+            let (selector, note) = split_command(tail);
+            BookmarkCommand::Note {
+                selector: selector.to_owned(),
+                note: note
+                    .map(str::trim)
+                    .filter(|note| !note.is_empty())
+                    .map(str::to_owned),
+            }
+        }
+        "del" => BookmarkCommand::Delete {
+            selector: parse_bookmark_selector(tail)?,
+        },
+        "clear" => {
+            reject_bookmark_tail("clear", tail)?;
+            BookmarkCommand::Clear
+        }
+        "goto" => BookmarkCommand::Goto {
+            selector: parse_bookmark_selector(tail)?,
+        },
+        "next" => {
+            reject_bookmark_tail("next", tail)?;
+            BookmarkCommand::Next
+        }
+        "prev" => {
+            reject_bookmark_tail("prev", tail)?;
+            BookmarkCommand::Prev
+        }
+        other => return Err(HxError::UnknownCommand(format!("mark {other}"))),
+    };
+    Ok(Command::Bookmark(command))
+}
+
+fn parse_bookmark_add(rest: Option<&str>) -> HxResult<BookmarkCommand> {
+    let parts = rest
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    let mut name = None;
+    let mut start = None;
+    let mut len = None;
+    let mut color = BookmarkColorArg::Default;
+    let mut has_color = false;
+    let mut note = None;
+    let mut index = 0;
+    while index < parts.len() {
+        match parts[index] {
+            "--at" => {
+                if start.is_some() {
+                    return Err(HxError::CommandError(
+                        "duplicate bookmark option: --at".to_owned(),
+                    ));
+                }
+                let value = parts
+                    .get(index + 1)
+                    .ok_or(HxError::MissingArgument("bookmark offset"))?;
+                start = Some(parse_offset(value)?);
+                index += 2;
+            }
+            "--len" => {
+                if len.is_some() {
+                    return Err(HxError::CommandError(
+                        "duplicate bookmark option: --len".to_owned(),
+                    ));
+                }
+                let value = parts
+                    .get(index + 1)
+                    .ok_or(HxError::MissingArgument("bookmark length"))?;
+                len = Some(parse_offset(value)?);
+                index += 2;
+            }
+            "--color" => {
+                if has_color {
+                    return Err(HxError::CommandError(
+                        "duplicate bookmark option: --color".to_owned(),
+                    ));
+                }
+                let value = parts
+                    .get(index + 1)
+                    .ok_or(HxError::MissingArgument("bookmark color"))?;
+                color = BookmarkColorArg::parse(value).ok_or_else(|| {
+                    HxError::CommandError(format!("invalid bookmark color: {value}"))
+                })?;
+                has_color = true;
+                index += 2;
+            }
+            "--note" => {
+                let value = parts[index + 1..].join(" ");
+                if value.is_empty() {
+                    return Err(HxError::MissingArgument("bookmark note"));
+                }
+                note = Some(value);
+                break;
+            }
+            option if option.starts_with("--") => {
+                return Err(HxError::CommandError(format!(
+                    "unknown bookmark option: {option}"
+                )));
+            }
+            value => {
+                if name.is_some() {
+                    return Err(HxError::CommandError(format!(
+                        "unexpected bookmark argument: {value}; use --note for comments"
+                    )));
+                }
+                name = Some(value.to_owned());
+                index += 1;
+            }
+        }
+    }
+    if len.is_some() && start.is_none() {
+        return Err(HxError::CommandError(
+            "bookmark --len requires --at".to_owned(),
+        ));
+    }
+    Ok(BookmarkCommand::Add {
+        name,
+        start,
+        len,
+        color,
+        note,
+    })
+}
+
+fn parse_bookmark_selector(tail: Option<&str>) -> HxResult<String> {
+    let tail = tail
+        .map(str::trim)
+        .filter(|selector| !selector.is_empty())
+        .ok_or(HxError::MissingArgument("bookmark selector"))?;
+    let (selector, extra) = split_command(tail);
+    if extra.is_some_and(|extra| !extra.is_empty()) {
+        return Err(HxError::CommandError(
+            "bookmark selector must be a name or #id".to_owned(),
+        ));
+    }
+    Ok(selector.to_owned())
+}
+
+fn reject_bookmark_tail(subcommand: &str, tail: Option<&str>) -> HxResult<()> {
+    if tail.is_some_and(|tail| !tail.trim().is_empty()) {
+        return Err(HxError::CommandError(format!(
+            "mark {subcommand} does not accept arguments"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_stats(rest: Option<&str>) -> HxResult<Command> {
@@ -722,6 +890,73 @@ mod tests {
     fn data_command_parses() {
         assert_eq!(parse_command("data").unwrap(), Command::Data);
         assert_eq!(parse_command("data off").unwrap(), Command::DataOff);
+    }
+
+    #[test]
+    fn bookmark_commands_parse() {
+        assert_eq!(
+            parse_command("marks").unwrap(),
+            Command::Bookmark(BookmarkCommand::Panel)
+        );
+        assert_eq!(
+            parse_command("mark add payload --at 0x100 --len 0x20").unwrap(),
+            Command::Bookmark(BookmarkCommand::Add {
+                name: Some("payload".to_owned()),
+                start: Some(0x100),
+                len: Some(0x20),
+                color: BookmarkColorArg::Default,
+                note: None,
+            })
+        );
+        assert_eq!(
+            parse_command("mark add --color green --at 0x10 --len 4 --note payload start").unwrap(),
+            Command::Bookmark(BookmarkCommand::Add {
+                name: None,
+                start: Some(0x10),
+                len: Some(4),
+                color: BookmarkColorArg::Green,
+                note: Some("payload start".to_owned()),
+            })
+        );
+        assert_eq!(
+            parse_command("mark add payload --note compressed stream").unwrap(),
+            Command::Bookmark(BookmarkCommand::Add {
+                name: Some("payload".to_owned()),
+                start: None,
+                len: None,
+                color: BookmarkColorArg::Default,
+                note: Some("compressed stream".to_owned()),
+            })
+        );
+        assert_eq!(
+            parse_command("mark note payload compressed stream").unwrap(),
+            Command::Bookmark(BookmarkCommand::Note {
+                selector: "payload".to_owned(),
+                note: Some("compressed stream".to_owned()),
+            })
+        );
+        assert_eq!(
+            parse_command("mark goto #7").unwrap(),
+            Command::Bookmark(BookmarkCommand::Goto {
+                selector: "#7".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn bookmark_parser_rejects_ambiguous_or_invalid_arguments() {
+        for input in [
+            "m add old-alias",
+            "marks extra",
+            "mark add payload 0x100",
+            "mark add payload --at nope",
+            "mark add payload --len 4",
+            "mark add --color default --color red",
+            "mark next extra",
+            "mark goto one two",
+        ] {
+            assert!(parse_command(input).is_err(), "{input} should fail");
+        }
     }
 
     #[cfg(feature = "memory")]

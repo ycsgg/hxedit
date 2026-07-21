@@ -36,6 +36,7 @@ fn app_with_fake_memory(bytes: Vec<u8>) -> (App, crate::memory::FakeMemoryBacken
             opened_region: 0,
             base_va: region.start,
             region_edits: std::collections::HashMap::new(),
+            region_bookmarks: std::collections::HashMap::new(),
         },
         "attached to fake memory".to_owned(),
     );
@@ -155,6 +156,8 @@ fn memory_goto_absolute_accepts_virtual_address() {
 #[cfg(feature = "memory")]
 #[test]
 fn memory_search_opens_hit_region_and_reports_virtual_address() {
+    use crate::commands::types::{BookmarkColorArg, BookmarkCommand};
+
     let control = crate::memory::FakeMemoryBackend::new();
     let first = control.add_region(
         0x1000,
@@ -179,9 +182,18 @@ fn memory_search_opens_hit_region_and_reports_virtual_address() {
             opened_region: 0,
             base_va: first.start,
             region_edits: std::collections::HashMap::new(),
+            region_bookmarks: std::collections::HashMap::new(),
         },
         "attached to fake memory".to_owned(),
     );
+    app.execute_command(Command::Bookmark(BookmarkCommand::Add {
+        name: Some("first-region".to_owned()),
+        start: Some(1),
+        len: Some(1),
+        color: BookmarkColorArg::Red,
+        note: None,
+    }))
+    .unwrap();
 
     app.execute_command(Command::MemorySearch {
         query: crate::memory::MemorySearchQuery::parse("/needle/").unwrap(),
@@ -197,6 +209,20 @@ fn memory_search_opens_hit_region_and_reports_virtual_address() {
         .to_string_lossy()
         .contains("0x2000-0x2008"));
     assert!(app.status_message.contains("VA 0x2002"));
+    assert!(app.bookmark_state().entries.is_empty());
+
+    app.execute_command(Command::MemorySearch {
+        query: crate::memory::MemorySearchQuery::parse("/aaaa/").unwrap(),
+        backward: true,
+    })
+    .unwrap();
+    assert_eq!(app.cursor, 0);
+    assert_eq!(app.bookmark_state().entries.len(), 1);
+    assert_eq!(app.bookmark_state().entries[0].name, "first-region");
+    assert_eq!(
+        app.bookmark_state().entries[0].created_revision,
+        app.document_revision
+    );
 }
 
 #[cfg(feature = "memory")]
@@ -227,6 +253,7 @@ fn memory_panel_selection_does_not_change_active_document_base_va() {
             opened_region: 0,
             base_va: first.start,
             region_edits: std::collections::HashMap::new(),
+            region_bookmarks: std::collections::HashMap::new(),
         },
         "attached to fake memory".to_owned(),
     );
@@ -271,6 +298,7 @@ fn app_with_two_fake_regions() -> (App, crate::memory::FakeMemoryBackend) {
             opened_region: 0,
             base_va: 0x1000,
             region_edits: std::collections::HashMap::new(),
+            region_bookmarks: std::collections::HashMap::new(),
         },
         "attached to fake memory".to_owned(),
     );
@@ -379,6 +407,7 @@ fn mem_commit_all_stops_on_non_writable_region_and_keeps_dirty() {
             opened_region: 0,
             base_va: 0x1000,
             region_edits: std::collections::HashMap::new(),
+            region_bookmarks: std::collections::HashMap::new(),
         },
         "attached to fake memory".to_owned(),
     );
@@ -496,6 +525,7 @@ fn mem_search_repeat_with_gn_advances_to_next_hit() {
             opened_region: 0,
             base_va: 0x1000,
             region_edits: std::collections::HashMap::new(),
+            region_bookmarks: std::collections::HashMap::new(),
         },
         "attached to fake memory".to_owned(),
     );

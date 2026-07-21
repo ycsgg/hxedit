@@ -1,6 +1,6 @@
-#[cfg(feature = "memory")]
-use crate::app::UndoStep;
 use crate::app::{App, SidePanelKind, StatusLevel};
+#[cfg(feature = "memory")]
+use crate::app::{BookmarkState, UndoStep};
 use crate::mode::Mode;
 
 /// `(region_index, replacement spans)` pairs queued for `:mem commit-all`.
@@ -41,6 +41,9 @@ pub(crate) struct MemoryRuntime {
     /// document. Lets undo/redo stacks and pending replacements survive region
     /// switches so `:mem commit-all` and cross-region recovery work.
     pub(crate) region_edits: std::collections::HashMap<usize, RegionEditState>,
+    /// Session bookmarks are display-relative to one memory-region document.
+    /// Keep each region's annotations separate when the active document changes.
+    pub(crate) region_bookmarks: std::collections::HashMap<usize, RegionBookmarkState>,
 }
 
 /// Editing state captured for a region while it is not the opened document.
@@ -51,6 +54,13 @@ pub(crate) struct RegionEditState {
     pub(crate) undo: Vec<UndoStep>,
     pub(crate) redo: Vec<UndoStep>,
     pub(crate) cursor: u64,
+}
+
+#[cfg(feature = "memory")]
+#[derive(Debug, Clone)]
+pub(crate) struct RegionBookmarkState {
+    pub(crate) state: BookmarkState,
+    pub(crate) revision_at_stash: u64,
 }
 
 #[cfg(feature = "memory")]
@@ -239,6 +249,7 @@ impl App {
         self.mouse_selection_anchor = None;
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.bookmark_state = Default::default();
         self.document_revision = self.document_revision.saturating_add(1);
         self.invalidate_disassembly_cache();
         self.refresh_inspector();
@@ -600,13 +611,31 @@ impl App {
             .and_then(|runtime| runtime.region_edits.remove(&region_index));
         let document = {
             let runtime = self.memory_runtime.as_mut().expect("checked above");
-            let document = runtime.session.document_for_region(region_index, &config)?;
+            runtime.session.document_for_region(region_index, &config)?
+        };
+        self.stash_opened_region_bookmarks();
+        let restored_revision = self.document_revision.saturating_add(1);
+        let bookmarks = {
+            let runtime = self.memory_runtime.as_mut().expect("checked above");
             runtime.selected_region = region_index;
             runtime.opened_region = region_index;
             runtime.base_va = region.start;
-            document
+            runtime
+                .region_bookmarks
+                .remove(&region_index)
+                .map(|saved| {
+                    let mut state = saved.state;
+                    for entry in &mut state.entries {
+                        if entry.created_revision == saved.revision_at_stash {
+                            entry.created_revision = restored_revision;
+                        }
+                    }
+                    state
+                })
+                .unwrap_or_default()
         };
         self.document = document;
+        self.bookmark_state = bookmarks;
         self.undo_stack.clear();
         self.redo_stack.clear();
         let restored_cursor = if let Some(saved) = saved {
@@ -662,6 +691,28 @@ impl App {
                         undo,
                         redo,
                         cursor,
+                    },
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "memory")]
+    fn stash_opened_region_bookmarks(&mut self) {
+        let Some(opened) = self.memory_runtime.as_ref().map(|r| r.opened_region) else {
+            return;
+        };
+        let revision_at_stash = self.document_revision;
+        let bookmarks = std::mem::take(&mut self.bookmark_state);
+        if let Some(runtime) = self.memory_runtime.as_mut() {
+            if bookmarks.entries.is_empty() {
+                runtime.region_bookmarks.remove(&opened);
+            } else {
+                runtime.region_bookmarks.insert(
+                    opened,
+                    RegionBookmarkState {
+                        state: bookmarks,
+                        revision_at_stash,
                     },
                 );
             }

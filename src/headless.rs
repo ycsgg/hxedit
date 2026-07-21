@@ -212,6 +212,7 @@ fn map_command(command: Command, state: &ExecState) -> HxResult<HeadlessAction> 
         Command::Format { .. } => return unsupported("format"),
         Command::Diff(_) => return unsupported("diff"),
         Command::Stats(_) => return unsupported("stats"),
+        Command::Bookmark(_) => return unsupported("mark"),
         #[cfg(feature = "sagitta-analysis")]
         Command::Analysis(_) => return unsupported("analysis"),
         #[cfg(feature = "memory")]
@@ -367,5 +368,17 @@ mod tests {
         run(remote_cli(target.label())).unwrap();
 
         assert_eq!(fake_bytes(&target), b"aZcd");
+    }
+
+    #[test]
+    fn bookmark_commands_are_explicitly_ui_only() {
+        let command = parse_command("marks").unwrap();
+        let state = ExecState::new(0, None);
+        let err = match map_command(command, &state) {
+            Ok(_) => panic!("bookmark command should not map to the headless executor"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("does not support :mark"));
     }
 }

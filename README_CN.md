@@ -104,6 +104,7 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 | `:export <path>`                  | 导出当前编辑后的字节            |
 | `:hash sha256`                    | 对选区或整个文件求哈希；TUI 大文件会显示进度 |
 | `:stats`                          | 查看选区或整个文件的字节频率和熵统计 |
+| `:mark add [name] [--at N] [--len N] [--note text...]` / `:marks` | 添加 session 书签/注释并打开书签面板 |
 | `:source <path>`                  | 执行 TOML 宏文件             |
 | `:script <path>`                  | 执行 Rhai 脚本文件            |
 | `:diff <path>`                    | 对比另一个文件               |
@@ -121,6 +122,8 @@ search / read / hash 结果的场景。两条路径都复用与手动编辑相�
 - 搜索文本、hex bytes、单字节值或 typed integer
 
 - 对选区执行 copy、export、hash、stats、fill、zero、XOR 或 replace
+
+- 为 offset、选区或 inspector 字段添加 session 书签和注释
 
 - 通过与手动编辑相同的执行层运行 TOML 宏文件和 Rhai 脚本
 

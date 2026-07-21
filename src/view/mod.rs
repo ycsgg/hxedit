@@ -1,4 +1,5 @@
 pub mod ascii_grid;
+pub mod bookmark_panel;
 pub mod byte_style;
 pub mod command_line;
 pub mod data_panel;

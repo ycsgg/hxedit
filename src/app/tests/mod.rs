@@ -602,6 +602,7 @@ fn build_paginated_elf64(section_count: usize) -> Vec<u8> {
 }
 
 mod app_core;
+mod bookmarks;
 mod diff;
 mod disasm;
 mod edit_commands;

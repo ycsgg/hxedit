@@ -74,7 +74,71 @@ impl App {
             SidePanelKind::Stats => {
                 self.render_stats_panel(frame, side_panel_area);
             }
+            SidePanelKind::Bookmarks => {
+                self.render_bookmark_panel(frame, side_panel_area);
+            }
         }
+    }
+
+    fn render_bookmark_panel(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let state = self.bookmark_state();
+        let header_area = top_header_area(area);
+        if header_area.height > 0 {
+            frame.render_widget(
+                Paragraph::new(bookmark_panel::header_line(area.width, &self.palette)),
+                header_area,
+            );
+        }
+        let body = scrolled_body_area(area);
+        if state.entries.is_empty() {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::styled("Bookmarks", self.palette.inspector_header),
+                    Line::raw("No bookmarks. Run :mark add [name]."),
+                ])
+                .wrap(Wrap { trim: false }),
+                body,
+            );
+            return;
+        }
+
+        let list_height = bookmark_panel::list_height(body.height);
+        let list_area = Rect {
+            height: list_height.min(body.height as usize) as u16,
+            ..body
+        };
+        let list_start = state.scroll_offset.min(state.entries.len());
+        let list_end = (list_start + list_area.height as usize).min(state.entries.len());
+        let list_lines = bookmark_panel::build_visible_lines(
+            state,
+            state.selected_row,
+            list_start,
+            list_end,
+            area.width,
+            &self.palette,
+        );
+        frame.render_widget(Paragraph::new(list_lines), list_area);
+
+        let detail_y = list_area.y.saturating_add(list_area.height + 1);
+        if detail_y >= body.y.saturating_add(body.height) {
+            return;
+        }
+        let detail_area = Rect {
+            y: detail_y,
+            height: body.y.saturating_add(body.height).saturating_sub(detail_y),
+            ..body
+        };
+        let detail_lines =
+            bookmark_panel::detail_lines(state, area.width, self.document_revision, &self.palette);
+        let max_start = detail_lines
+            .len()
+            .saturating_sub(detail_area.height as usize);
+        let start = state.detail_scroll_offset.min(max_start);
+        let end = (start + detail_area.height as usize).min(detail_lines.len());
+        frame.render_widget(
+            Paragraph::new(detail_lines[start..end].to_vec()),
+            detail_area,
+        );
     }
 
     fn render_stats_panel(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {

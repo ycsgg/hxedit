@@ -40,6 +40,7 @@ pub(crate) const HASH_ALIASES: &[&str] = &["hash"];
 pub(crate) const DIFF_ALIASES: &[&str] = &["diff"];
 pub(crate) const DATA_ALIASES: &[&str] = &["data"];
 pub(crate) const STATS_ALIASES: &[&str] = &["stats", "stat"];
+pub(crate) const BOOKMARK_ALIASES: &[&str] = &["mark", "marks"];
 
 #[cfg(feature = "memory")]
 pub(crate) const MEMORY_ALIASES: &[&str] = &["mem"];
@@ -95,6 +96,7 @@ const COMMON_ALIAS_GROUPS: &[&[&str]] = &[
     DIFF_ALIASES,
     DATA_ALIASES,
     STATS_ALIASES,
+    BOOKMARK_ALIASES,
 ];
 
 pub(crate) fn is_alias(name: &str, aliases: &[&str]) -> bool {

@@ -13,6 +13,14 @@ pub struct HexGridOverlays {
     pub selection: Option<(u64, u64)>,
     pub inspector_highlight: Option<(u64, u64)>,
     pub search_matches: Vec<(u64, u64)>,
+    pub bookmarks: Vec<BookmarkOverlay>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BookmarkOverlay {
+    pub start: u64,
+    pub end: u64,
+    pub color_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +136,9 @@ pub fn build_projected(
                     base = palette.diff_active.patch(base);
                 }
                 if let Some(offset) = cell.display_offset {
+                    if let Some(color) = bookmark_at(&overlays.bookmarks, offset) {
+                        base = palette.bookmark_highlight(color).patch(base);
+                    }
                     if highlighted(overlays.inspector_highlight, offset) {
                         base = palette.inspector_highlight.patch(base);
                     }
@@ -192,6 +203,13 @@ fn highlighted_any(highlights: &[(u64, u64)], offset: u64) -> bool {
         .any(|(start, end)| offset >= *start && offset <= *end)
 }
 
+fn bookmark_at(bookmarks: &[BookmarkOverlay], offset: u64) -> Option<usize> {
+    bookmarks
+        .iter()
+        .find(|bookmark| offset >= bookmark.start && offset <= bookmark.end)
+        .map(|bookmark| bookmark.color_index)
+}
+
 fn diff_overlay_at(overlays: &[DiffOverlaySpan], offset: u64) -> Option<DiffOverlaySpan> {
     overlays
         .iter()
@@ -230,10 +248,36 @@ fn style_for_nibble(
 mod tests {
     use ratatui::style::{Color, Modifier};
 
-    use super::{build, DiffOverlayKind, DiffOverlaySpan, HexGridOverlays};
+    use super::{build, BookmarkOverlay, DiffOverlayKind, DiffOverlaySpan, HexGridOverlays};
     use crate::core::document::ByteSlot;
     use crate::mode::Mode;
     use crate::view::palette::{ColorLevel, Palette};
+
+    #[test]
+    fn bookmark_overlay_uses_requested_underline_color() {
+        let lines = build(
+            &[vec![ByteSlot::Present(0x41)]],
+            &[0],
+            99,
+            Mode::Normal,
+            &Palette::new(ColorLevel::Basic),
+            1,
+            HexGridOverlays {
+                bookmarks: vec![BookmarkOverlay {
+                    start: 0,
+                    end: 0,
+                    color_index: 1,
+                }],
+                ..HexGridOverlays::default()
+            },
+        );
+
+        assert_eq!(lines[0].spans[0].style.underline_color, Some(Color::Red));
+        assert!(lines[0].spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+    }
 
     #[test]
     fn inspector_highlight_underlines_selected_field_bytes() {
@@ -249,6 +293,7 @@ mod tests {
                 selection: None,
                 inspector_highlight: Some((1, 1)),
                 search_matches: Vec::new(),
+                bookmarks: Vec::new(),
             },
         );
 
@@ -277,6 +322,7 @@ mod tests {
                 selection: None,
                 inspector_highlight: Some((0, 0)),
                 search_matches: Vec::new(),
+                bookmarks: Vec::new(),
             },
         );
 
@@ -309,6 +355,7 @@ mod tests {
                 selection: None,
                 inspector_highlight: None,
                 search_matches: vec![(1, 2)],
+                bookmarks: Vec::new(),
             },
         );
 
@@ -345,6 +392,7 @@ mod tests {
                 selection: None,
                 inspector_highlight: None,
                 search_matches: vec![(0, 0)],
+                bookmarks: Vec::new(),
             },
         );
 
@@ -378,6 +426,7 @@ mod tests {
                 selection: None,
                 inspector_highlight: None,
                 search_matches: Vec::new(),
+                bookmarks: Vec::new(),
             },
         );
 
@@ -405,6 +454,7 @@ mod tests {
                 selection: None,
                 inspector_highlight: None,
                 search_matches: Vec::new(),
+                bookmarks: Vec::new(),
             },
         );
 
@@ -433,6 +483,7 @@ mod tests {
                 selection: None,
                 inspector_highlight: None,
                 search_matches: Vec::new(),
+                bookmarks: Vec::new(),
             },
         );
 

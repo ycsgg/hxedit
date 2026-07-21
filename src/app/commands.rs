@@ -101,6 +101,7 @@ impl App {
                 self.close_diff_projection_for_side_panel_switch();
                 self.execute_stats_command(command)
             }
+            Command::Bookmark(command) => self.execute_bookmark_command(command),
             #[cfg(feature = "sagitta-analysis")]
             Command::Analysis(command) => self.execute_analysis_command(command),
             #[cfg(feature = "memory")]
@@ -200,6 +201,7 @@ impl App {
 #[cfg(feature = "sagitta-analysis")]
 mod analysis;
 mod automation;
+mod bookmarks;
 mod file_nav;
 mod hash_diff;
 mod inspector;

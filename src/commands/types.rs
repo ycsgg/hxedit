@@ -69,6 +69,57 @@ pub enum StatsCommand {
     Off,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BookmarkColorArg {
+    Default,
+    Red,
+    Yellow,
+    Green,
+    Blue,
+    Magenta,
+    Cyan,
+}
+
+impl BookmarkColorArg {
+    pub fn parse(input: &str) -> Option<Self> {
+        match input {
+            "default" => Some(Self::Default),
+            "red" => Some(Self::Red),
+            "yellow" => Some(Self::Yellow),
+            "green" => Some(Self::Green),
+            "blue" => Some(Self::Blue),
+            "magenta" => Some(Self::Magenta),
+            "cyan" => Some(Self::Cyan),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BookmarkCommand {
+    Panel,
+    Add {
+        name: Option<String>,
+        start: Option<u64>,
+        len: Option<u64>,
+        color: BookmarkColorArg,
+        note: Option<String>,
+    },
+    Note {
+        selector: String,
+        note: Option<String>,
+    },
+    Delete {
+        selector: String,
+    },
+    Clear,
+    Goto {
+        selector: String,
+    },
+    Next,
+    Prev,
+}
+
 #[cfg(feature = "memory")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemoryCommand {
@@ -188,6 +239,7 @@ pub enum Command {
     },
     Diff(DiffCommand),
     Stats(StatsCommand),
+    Bookmark(BookmarkCommand),
     #[cfg(feature = "sagitta-analysis")]
     Analysis(AnalysisCommand),
     #[cfg(feature = "memory")]

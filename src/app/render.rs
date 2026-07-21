@@ -14,8 +14,8 @@ use crate::mode::Mode;
 use crate::profile::{FrameStats, RenderMainStats};
 use crate::util::format::offset_width;
 use crate::view::{
-    ascii_grid, command_line, data_panel, diff_panel, disasm_grid, gutter, hex_grid,
-    inspector as inspector_view, layout, stats_panel, status, symbol_panel,
+    ascii_grid, bookmark_panel, command_line, data_panel, diff_panel, disasm_grid, gutter,
+    hex_grid, inspector as inspector_view, layout, stats_panel, status, symbol_panel,
 };
 
 struct VisibleRows {

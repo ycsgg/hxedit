@@ -7,7 +7,7 @@ use tempfile::tempdir;
 
 use super::App;
 use crate::cli::Cli;
-use crate::commands::types::Command;
+use crate::commands::types::{BookmarkColorArg, BookmarkCommand, Command};
 
 pub(super) fn app_with_bytes(bytes: &[u8]) -> App {
     let dir = tempdir().unwrap();
@@ -89,6 +89,32 @@ fn visible_search_matches_collects_all_hits_on_screen() {
         app.visible_search_matches(&visible_rows),
         vec![(0, 2), (7, 9)]
     );
+}
+
+#[test]
+fn bookmark_marker_renders_in_gutter() {
+    let mut app = app_with_bytes(b"0123456789abcdef0123456789abcdef");
+    app.execute_command(Command::Bookmark(BookmarkCommand::Add {
+        name: Some("payload".to_owned()),
+        start: Some(0x10),
+        len: Some(4),
+        color: BookmarkColorArg::Magenta,
+        note: None,
+    }))
+    .unwrap();
+    app.viewport_top = 0;
+
+    let markers = app.visible_bookmark_gutter_markers(&[0, 0x10]);
+
+    assert_eq!(markers[0], crate::view::gutter::BookmarkGutterMarker::None);
+    assert_eq!(
+        markers[1],
+        crate::view::gutter::BookmarkGutterMarker::Bookmark(5)
+    );
+    let visible = app.collect_visible_rows(2);
+    let ranges = app.visible_bookmark_ranges(&visible);
+    assert_eq!(ranges.len(), 1);
+    assert_eq!(ranges[0].color_index, 5);
 }
 
 #[test]

@@ -275,6 +275,9 @@ impl App {
                     self.active_side_panel = SidePanelKind::Stats;
                     self.mode = Mode::SidePanel;
                 }
+                SidePanelKind::Bookmarks => {
+                    self.focus_bookmark_panel();
+                }
                 _ => {
                     self.ensure_inspector_page_state(true);
                     self.focus_inspector_page_or_warn_with_toggle(false);

@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 #[cfg(feature = "sagitta-analysis")]
 mod analysis_state;
+mod bookmark_state;
 mod clipboard_ops;
 mod command_input;
 mod commands;
@@ -53,6 +54,7 @@ use crate::view::layout::MainPaneKind;
 use crate::view::{layout, palette::Palette};
 #[cfg(feature = "sagitta-analysis")]
 pub(crate) use analysis_state::{BackgroundJobResult, SagittaAnalysisState};
+pub(crate) use bookmark_state::{BookmarkColor, BookmarkEntry, BookmarkState};
 pub(crate) use diff_state::DiffState;
 use navigation::align_offset;
 
@@ -74,6 +76,7 @@ pub(crate) enum SidePanelKind {
     Diff,
     Memory,
     Stats,
+    Bookmarks,
 }
 
 /// Data inspector state for cursor-relative primitive decoding.
@@ -195,6 +198,8 @@ pub struct App {
     diff_state: Option<DiffState>,
     /// Cached byte statistics side panel state.
     stats_state: Option<StatsState>,
+    /// Session-local bookmarks and comments.
+    bookmark_state: BookmarkState,
     /// Pending chunked hash operation for large ranges.
     pending_hash_scan: Option<hash_state::HashProgressScan>,
     /// Pending chunked byte statistics operation for large ranges.
@@ -497,6 +502,7 @@ impl App {
                 opened_region: selected_region,
                 base_va: region.start,
                 region_edits: std::collections::HashMap::new(),
+                region_bookmarks: std::collections::HashMap::new(),
             },
             message,
         })
@@ -621,6 +627,7 @@ impl App {
             data_state: None,
             diff_state: None,
             stats_state: None,
+            bookmark_state: BookmarkState::default(),
             pending_hash_scan: None,
             pending_stats_scan: None,
             #[cfg(feature = "sagitta-analysis")]

@@ -111,6 +111,7 @@ return to normal mode.
 | `:export <path>` | Export the edited bytes |
 | `:hash sha256` | Hash the selection or whole file; large TUI hashes show progress |
 | `:stats` | Show byte frequency and entropy for the selection or whole file |
+| `:mark add [name] [--at N] [--len N] [--note text...]` / `:marks` | Add a session bookmark/comment and open the bookmark panel |
 | `:source <path>` | Run a TOML macro file |
 | `:script <path>` | Run a Rhai script file |
 | `:diff <path>` | Compare against another file |
@@ -125,6 +126,7 @@ and Sagitta analysis, see the [user guide](docs/user-guide.md).
 - Optionally open SFTP-over-SSH and FTP remote files with the same editing model
 - Search text, hex bytes, single-byte values, or typed integers
 - Copy, export, hash, view stats, fill, zero, XOR, or replace selected bytes
+- Add session bookmarks/comments for offsets, selections, or inspector fields
 - Run TOML macro files and Rhai scripts through the same execution layer as manual edits
 - Run macro files, Rhai scripts, or compatible commands headlessly from the CLI
 - Inspect ELF, PE/COFF, Mach-O, PNG, ZIP, SQLite, PCAP, GZIP, GIF, BMP, WAV,

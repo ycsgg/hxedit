@@ -69,6 +69,10 @@ impl App {
                     && self.active_side_panel == SidePanelKind::Stats
                 {
                     self.scroll_stats_panel(-(self.side_panel_visible_rows() as i64));
+                } else if self.mode.is_side_panel()
+                    && self.active_side_panel == SidePanelKind::Bookmarks
+                {
+                    self.move_bookmark_selection(-(self.bookmark_list_visible_rows() as i64));
                 } else {
                     self.move_vertical(-(self.view_rows as i64));
                 }
@@ -87,6 +91,10 @@ impl App {
                     && self.active_side_panel == SidePanelKind::Stats
                 {
                     self.scroll_stats_panel(self.side_panel_visible_rows() as i64);
+                } else if self.mode.is_side_panel()
+                    && self.active_side_panel == SidePanelKind::Bookmarks
+                {
+                    self.move_bookmark_selection(self.bookmark_list_visible_rows() as i64);
                 } else {
                     self.move_vertical(self.view_rows as i64);
                 }
@@ -246,6 +254,7 @@ impl App {
                     SidePanelKind::Diff => self.move_diff_selection(-1),
                     SidePanelKind::Memory => self.move_memory_selection(-1),
                     SidePanelKind::Stats => self.scroll_stats_panel(-1),
+                    SidePanelKind::Bookmarks => self.move_bookmark_selection(-1),
                 }
                 Ok(true)
             }
@@ -257,6 +266,7 @@ impl App {
                     SidePanelKind::Diff => self.move_diff_selection(1),
                     SidePanelKind::Memory => self.move_memory_selection(1),
                     SidePanelKind::Stats => self.scroll_stats_panel(1),
+                    SidePanelKind::Bookmarks => self.move_bookmark_selection(1),
                 }
                 Ok(true)
             }
@@ -268,6 +278,7 @@ impl App {
                     SidePanelKind::Diff => self.navigate_to_selected_diff_hunk()?,
                     SidePanelKind::Memory => self.handle_memory_panel_enter()?,
                     SidePanelKind::Stats => self.expand_stats_top_bytes(),
+                    SidePanelKind::Bookmarks => self.navigate_to_selected_bookmark()?,
                 }
                 Ok(true)
             }
@@ -286,6 +297,7 @@ impl App {
                         }
                     }
                     SidePanelKind::Stats => self.expand_stats_top_bytes(),
+                    SidePanelKind::Bookmarks => {}
                     _ => {}
                 }
                 Ok(true)
@@ -307,30 +319,40 @@ impl App {
             Action::SidePanelLeft => {
                 if self.active_side_panel == SidePanelKind::Inspector {
                     self.move_inspector_cursor(true);
+                } else if self.active_side_panel == SidePanelKind::Bookmarks {
+                    self.scroll_bookmark_detail(-1);
                 }
                 Ok(true)
             }
             Action::SidePanelRight => {
                 if self.active_side_panel == SidePanelKind::Inspector {
                     self.move_inspector_cursor(false);
+                } else if self.active_side_panel == SidePanelKind::Bookmarks {
+                    self.scroll_bookmark_detail(1);
                 }
                 Ok(true)
             }
             Action::SidePanelHome => {
                 if self.active_side_panel == SidePanelKind::Inspector {
                     self.set_inspector_cursor(true);
+                } else if self.active_side_panel == SidePanelKind::Bookmarks {
+                    self.move_bookmark_selection_to_edge(false);
                 }
                 Ok(true)
             }
             Action::SidePanelEnd => {
                 if self.active_side_panel == SidePanelKind::Inspector {
                     self.set_inspector_cursor(false);
+                } else if self.active_side_panel == SidePanelKind::Bookmarks {
+                    self.move_bookmark_selection_to_edge(true);
                 }
                 Ok(true)
             }
             Action::SidePanelDelete => {
                 if self.active_side_panel == SidePanelKind::Inspector {
                     self.delete_inspector_char();
+                } else if self.active_side_panel == SidePanelKind::Bookmarks {
+                    self.delete_selected_bookmark()?;
                 }
                 Ok(true)
             }

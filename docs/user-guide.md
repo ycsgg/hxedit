@@ -22,6 +22,7 @@ The project overview stays in [README.md](../README.md).
   times, TAR octal mode/size/mtime, and GIF frame delays
 - Hashing for MD5, SHA1, SHA256, SHA512, and CRC32
 - Clipboard copy/paste, export, fill/zero/xor/replace transforms
+- Session bookmarks/comments for cursor positions, selections, and inspector fields
 - Read-only synchronized diff page against another file (`:diff`)
 - Process memory editing by PID or process name, with region browsing,
   freeze/thaw, and explicit commit commands
@@ -116,7 +117,7 @@ summaries, and exits without creating the TUI. All `--run` files execute first, 
 `--script` files, then all `--command` strings; each group preserves its own
 order. Edits are written to disk only if the macro, script, or command list
 includes `save`, `hx_save()`, `w`, or `wq`; UI-only commands such as `:diff`,
-`:stats`, `:insp`, `:copy`, and clipboard paste are rejected.
+`:stats`, `:marks`, `:insp`, `:copy`, and clipboard paste are rejected.
 For headless `--command`, `hash`, binary `export`, and `replace` use `--select`
 when provided and otherwise apply to the whole file; `xor!` requires an explicit
 selection.
@@ -201,6 +202,7 @@ cache_pages = 128                  # page-cache capacity
 | `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | Replace using the same modes as `:s`. `:re` is equal-length and asks for `--force` when more than 65535 matches are found; `:re!` allows length changes and uses the same `--force` guard, while equal-length `:re!` stays replacement-only. Legacy `hex/ascii <needle> -> <replacement>` remains accepted |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | Hash the active selection or whole file; large TUI hashes report progress and Esc cancels |
 | `:stats [all\|selection\|refresh\|off]` | Show byte frequency, expandable top bytes, byte-range distribution, and Shannon entropy for the active selection or whole file; large ranges report progress and Esc cancels |
+| `:mark add [name] [--at <offset>] [--len <len>] [--color default\|red\|yellow\|green\|blue\|magenta\|cyan] [--note <text...>]` / `:mark note <name\|#id> [text]` / `:mark goto\|del <name\|#id>` / `:mark next\|prev\|clear` / `:marks` | Manage session-local display-range bookmarks/comments. Without `--at`, `add` marks the active Visual selection, selected inspector field, or cursor byte; `--len` requires `--at`. The panel supports arrows/`j`/`k`, Home/End, Enter to jump, Delete to remove, Left/Right to scroll wrapped details, and mouse selection. Bookmarks are UI annotations only: they do not participate in save/export/hash/diff/undo and are not persisted yet |
 | `:source <path>` | Run a TOML macro file. The macro uses explicit execution-layer steps, can inherit the current Visual / inspector selection, and defaults to grouped undo |
 | `:script <path>` | Run a Rhai script file. The script uses the `hx_` host API, inherits the current Visual / inspector selection, and is undoable as one command unless it saves |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | Show a synchronized page comparing current logical bytes with another file. Visible pages realign inserted/deleted bytes within `N`; equal right-side bytes are gray, changed bytes are yellow on both sides, and missing bytes render as red `__`. `next` / `prev` scan in large progress-reporting steps, block other input while scanning, and Esc cancels |

@@ -1,8 +1,8 @@
 #[cfg(feature = "sagitta-analysis")]
 use super::ANALYSIS_ALIASES;
 use super::{
-    is_alias, known_command_aliases, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES, EXPORT_ALIASES,
-    FILL_ALIASES, FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES,
+    is_alias, known_command_aliases, BOOKMARK_ALIASES, COPY_ALIASES, DATA_ALIASES, DIFF_ALIASES,
+    EXPORT_ALIASES, FILL_ALIASES, FORMAT_ALIASES, GOTO_ALIASES, HASH_ALIASES, INSPECTOR_ALIASES,
     LEGACY_HEX_SEARCH_ALIASES, PASTE_ALIASES, PASTE_INSERT_ALIASES, QUIT_ALIASES,
     QUIT_FORCE_ALIASES, REDO_ALIASES, REPLACE_ALIASES, SCRIPT_ALIASES, SEARCH_ALIASES,
     SOURCE_ALIASES, STATS_ALIASES, UNDO_ALIASES, WRITE_ALIASES, WRITE_QUIT_ALIASES, XOR_ALIASES,
@@ -180,6 +180,12 @@ pub fn hint_for(input: &str) -> CommandHint {
             syntax: "stats [all|selection|refresh|off]".to_owned(),
             details: "show byte frequency, expandable top bytes, byte-range distribution, and entropy for the active selection, or whole file if no selection is active; large ranges report progress and Esc cancels"
                 .to_owned(),
+        },
+        name if is_alias(name, BOOKMARK_ALIASES) => CommandHint {
+            syntax: "mark add [name] [--at <offset>] [--len <len>] [--color <color>] [--note <text...>] | mark note <name|#id> [text] | mark goto|del <name|#id> | mark next|prev|clear | marks".to_owned(),
+            details:
+                "create session-local display-range bookmarks from the cursor, active selection, inspector field, or --at/--len; :marks opens the panel, where Enter jumps and Delete removes"
+                    .to_owned(),
         },
         name if is_alias(name, DIFF_ALIASES) => {
             let syntax = match rest.map(str::trim) {
@@ -453,6 +459,9 @@ mod tests {
         let commands = known_commands();
         assert!(commands.contains(&"quit!"));
         assert!(commands.contains(&"paste-insert?!"));
+        assert!(commands.contains(&"mark"));
+        assert!(commands.contains(&"marks"));
+        assert!(!commands.contains(&"m"));
         #[cfg(feature = "symbols")]
         {
             assert!(commands.contains(&"search-symbol"));
@@ -509,6 +518,14 @@ mod tests {
         let hint = hint_for("stats");
         assert!(hint.syntax.contains("refresh"));
         assert!(hint.details.contains("entropy"));
+    }
+
+    #[test]
+    fn bookmark_hint_documents_unambiguous_range_and_panel_actions() {
+        let hint = hint_for("mark");
+        assert!(hint.syntax.contains("--at <offset>"));
+        assert!(hint.syntax.contains("<name|#id>"));
+        assert!(hint.details.contains("Delete removes"));
     }
 
     #[test]

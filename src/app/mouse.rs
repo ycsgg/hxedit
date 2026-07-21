@@ -52,6 +52,8 @@ impl App {
                         self.scroll_memory_panel(-3);
                     } else if self.active_side_panel == SidePanelKind::Stats {
                         self.scroll_stats_panel(-3);
+                    } else if self.active_side_panel == SidePanelKind::Bookmarks {
+                        self.move_bookmark_selection(-3);
                     } else {
                         self.scroll_inspector(-3);
                     }
@@ -90,6 +92,8 @@ impl App {
                         self.scroll_memory_panel(3);
                     } else if self.active_side_panel == SidePanelKind::Stats {
                         self.scroll_stats_panel(3);
+                    } else if self.active_side_panel == SidePanelKind::Bookmarks {
+                        self.move_bookmark_selection(3);
                     } else {
                         self.scroll_inspector(3);
                     }
@@ -111,6 +115,17 @@ impl App {
                         self.leave_mode();
                     }
                     self.mode = Mode::SidePanel;
+                    if self.show_side_panel && self.active_side_panel == SidePanelKind::Bookmarks {
+                        if let Some(area) = columns.side_panel {
+                            let Some(visible_row) =
+                                mouse_event.row.checked_sub(area.y.saturating_add(1))
+                            else {
+                                return;
+                            };
+                            self.handle_bookmark_panel_click(visible_row as usize);
+                        }
+                        return;
+                    }
                     if self.show_side_panel && self.active_side_panel == SidePanelKind::Diff {
                         if let Some(area) = columns.side_panel {
                             let Some(visible_row) =
@@ -193,6 +208,12 @@ impl App {
                             return;
                         }
                         if self.show_side_panel && self.active_side_panel == SidePanelKind::Stats {
+                            return;
+                        }
+                        if self.show_side_panel
+                            && self.active_side_panel == SidePanelKind::Bookmarks
+                        {
+                            self.handle_bookmark_panel_click(visible_row);
                             return;
                         }
                         if self.show_side_panel

@@ -21,6 +21,7 @@
   mode/size/mtime、GIF frame delay
 - 哈希：MD5、SHA1、SHA256、SHA512、CRC32
 - 剪贴板复制 / 粘贴、导出、fill / zero / xor / replace
+- 面向光标、Visual 选区或 inspector 字段的 session 书签 / 注释
 - 只读同步滚动 diff 页面，可用 `:diff` 对比另一个文件
 - 进程内存编辑：通过 PID 或进程名附加到运行中的进程，浏览和编辑内存区域，
   冻结/解冻目标进程，并显式提交写回
@@ -107,7 +108,7 @@ hxedit some.bin
 执行自动化、输出人类可读的 summary，然后直接退出，不创建 TUI。所有 `--run` 文件先执行，然后执行所有
 `--script` 文件，最后执行所有 `--command` 字符串；三个组内各自保持传入顺序。修改只有在
 宏、脚本或命令列表包含 `save`、`hx_save()`、`w` 或 `wq` 时才会写入磁盘；`:diff`、
-`:stats`、`:insp`、`:copy`、剪贴板 paste 等 UI-only 命令会被拒绝。
+`:stats`、`:marks`、`:insp`、`:copy`、剪贴板 paste 等 UI-only 命令会被拒绝。
 headless `--command` 下，`hash`、binary `export`、`replace` 有 `--select` 时作用于该
 选区，否则作用于全文件；`xor!` 必须显式提供选区。
 
@@ -181,6 +182,7 @@ cache_pages = 128                  # 页缓存容量
 | `:re [--force] [mode]<delim><needle><delim><replacement><delim>` / `:re! ...` | 使用与 `:s` 相同的模式替换。`:re` 是等长 replacement，命中超过 65535 处时需要加 `--force` 确认；`:re!` 允许长度变化并使用同样的 `--force` 保护，等长 `:re!` 仍保持 replacement-only。旧的 `hex/ascii <needle> -> <replacement>` 仍兼容 |
 | `:hash md5\|sha1\|sha256\|sha512\|crc32` | 哈希当前选区或整文件；TUI 中大范围 hash 会显示进度，Esc 可取消 |
 | `:stats [all\|selection\|refresh\|off]` | 查看当前选区或整文件的字节频率、可逐批展开的 Top bytes、byte range 分布和 Shannon entropy；大范围会显示进度，Esc 可取消 |
+| `:mark add [name] [--at <offset>] [--len <len>] [--color default\|red\|yellow\|green\|blue\|magenta\|cyan] [--note <text...>]` / `:mark note <name\|#id> [text]` / `:mark goto\|del <name\|#id>` / `:mark next\|prev\|clear` / `:marks` | 管理 session-local display-range 书签 / 注释。不传 `--at` 时，`add` 使用当前 Visual 选区、inspector 字段或光标字节；`--len` 必须和 `--at` 同用。面板支持方向键/`j`/`k`、Home/End、Enter 跳转、Delete 删除、Left/Right 滚动换行详情及鼠标选择。书签只是 UI annotation，不参与 save/export/hash/diff/undo，当前也不持久化 |
 | `:source <path>` | 执行 TOML 宏文件。宏使用显式执行层 step，可继承当前 Visual / inspector 选区，默认合并成一个 undo |
 | `:script <path>` | 执行 Rhai 脚本文件。脚本使用 `hx_` host API，可继承当前 Visual / inspector 选区；除非脚本保存，否则作为一个命令入 undo |
 | `:diff <path>` / `:diff -n <N> <path>` / `:diff refresh\|next\|prev\|off` | 同步滚动显示 current logical bytes 与另一个文件；可见页会在 `N` 范围内重对齐插入/删除字节，右侧相同字节为灰色，不同字节左右亮黄，缺失字节以红色 `__` 占位；`next` / `prev` 会大块分步扫描并汇报进度，扫描中阻止其它输入，Esc 取消 |

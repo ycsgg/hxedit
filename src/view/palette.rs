@@ -69,6 +69,8 @@ pub struct Palette {
     pub inspector_active: Style,
     pub inspector_edit: Style,
     pub inspector_highlight: Style,
+    bookmark_markers: [Style; 7],
+    bookmark_highlights: [Style; 7],
     pub diff_only_current: Style,
     pub diff_only_other: Style,
     pub diff_replace: Style,
@@ -96,7 +98,30 @@ impl Palette {
         }
     }
 
+    pub(crate) fn bookmark_marker(&self, color_index: usize) -> Style {
+        self.bookmark_markers
+            .get(color_index)
+            .copied()
+            .unwrap_or(self.bookmark_markers[0])
+    }
+
+    pub(crate) fn bookmark_highlight(&self, color_index: usize) -> Style {
+        self.bookmark_highlights
+            .get(color_index)
+            .copied()
+            .unwrap_or(self.bookmark_highlights[0])
+    }
+
     fn truecolor() -> Self {
+        let (bookmark_markers, bookmark_highlights) = bookmark_styles([
+            Color::Rgb(244, 194, 96),
+            Color::Rgb(239, 112, 112),
+            Color::Rgb(244, 194, 96),
+            Color::Rgb(128, 210, 170),
+            Color::Rgb(120, 170, 255),
+            Color::Rgb(220, 140, 240),
+            Color::Rgb(100, 210, 225),
+        ]);
         Self {
             gutter: Style::default().fg(Color::Rgb(80, 80, 80)),
             separator: Style::default().fg(Color::Rgb(80, 80, 80)),
@@ -160,6 +185,8 @@ impl Palette {
                 .bg(Color::Rgb(80, 80, 80))
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
+            bookmark_markers,
+            bookmark_highlights,
             diff_only_current: Style::default()
                 .bg(Color::Rgb(200, 50, 50))
                 .fg(Color::Rgb(255, 255, 255))
@@ -199,6 +226,15 @@ impl Palette {
     }
 
     fn extended() -> Self {
+        let (bookmark_markers, bookmark_highlights) = bookmark_styles([
+            Color::Indexed(222),
+            Color::Indexed(210),
+            Color::Indexed(222),
+            Color::Indexed(114),
+            Color::Indexed(111),
+            Color::Indexed(183),
+            Color::Indexed(117),
+        ]);
         Self {
             gutter: Style::default().fg(Color::Indexed(245)),
             separator: Style::default().fg(Color::Indexed(245)),
@@ -259,6 +295,8 @@ impl Palette {
                 .fg(Color::Indexed(222))
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
+            bookmark_markers,
+            bookmark_highlights,
             diff_only_current: Style::default()
                 .bg(Color::Indexed(160))
                 .fg(Color::Indexed(231))
@@ -298,6 +336,15 @@ impl Palette {
     }
 
     fn basic() -> Self {
+        let (bookmark_markers, bookmark_highlights) = bookmark_styles([
+            Color::Yellow,
+            Color::Red,
+            Color::Yellow,
+            Color::Green,
+            Color::Blue,
+            Color::Magenta,
+            Color::Cyan,
+        ]);
         Self {
             gutter: Style::default().fg(Color::DarkGray),
             separator: Style::default().fg(Color::DarkGray),
@@ -356,6 +403,8 @@ impl Palette {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::UNDERLINED)
                 .add_modifier(Modifier::BOLD),
+            bookmark_markers,
+            bookmark_highlights,
             diff_only_current: Style::default()
                 .bg(Color::Red)
                 .fg(Color::White)
@@ -396,6 +445,8 @@ impl Palette {
 
     fn no_color() -> Self {
         let base = Style::default();
+        let bookmark_markers = [base.add_modifier(Modifier::BOLD); 7];
+        let bookmark_highlights = [base.add_modifier(Modifier::UNDERLINED); 7];
         Self {
             gutter: base,
             separator: base,
@@ -432,6 +483,8 @@ impl Palette {
             inspector_highlight: base
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::UNDERLINED),
+            bookmark_markers,
+            bookmark_highlights,
             diff_only_current: base
                 .add_modifier(Modifier::REVERSED)
                 .add_modifier(Modifier::BOLD),
@@ -459,6 +512,17 @@ impl Palette {
             disasm_virtual: base,
         }
     }
+}
+
+fn bookmark_styles(colors: [Color; 7]) -> ([Style; 7], [Style; 7]) {
+    let markers = colors.map(|color| Style::default().fg(color).add_modifier(Modifier::BOLD));
+    let highlights = colors.map(|color| {
+        Style::default()
+            .fg(color)
+            .underline_color(color)
+            .add_modifier(Modifier::UNDERLINED)
+    });
+    (markers, highlights)
 }
 
 #[cfg(test)]
@@ -521,12 +585,24 @@ mod tests {
     }
 
     #[test]
+    fn bookmark_palette_uses_requested_marker_and_underline_color() {
+        let palette = Palette::new(ColorLevel::Basic);
+        assert_eq!(palette.bookmark_marker(1).fg, Some(Color::Red));
+        assert_eq!(
+            palette.bookmark_highlight(6).underline_color,
+            Some(Color::Cyan)
+        );
+    }
+
+    #[test]
     fn no_color_palette_has_no_fg_bg() {
         let palette = Palette::new(ColorLevel::NoColor);
         assert!(palette.gutter.fg.is_none());
         assert!(palette.gutter.bg.is_none());
         assert!(palette.printable.fg.is_none());
         assert!(palette.printable.bg.is_none());
+        assert!(palette.bookmark_marker(1).fg.is_none());
+        assert!(palette.bookmark_highlight(6).underline_color.is_none());
         assert!(palette
             .disasm_symbol
             .add_modifier
