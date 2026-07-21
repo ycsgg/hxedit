@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-07-21
+
+### Added
+
+- Session-local bookmarks and comments for offsets, ranges, selections, and inspector fields, with optional names, colors, and notes.
+- A bookmark side panel with keyboard and mouse navigation, plus bookmark markers across the gutter, hex grid, and ASCII grid.
+
+### Changed
+
+- Process-memory bookmarks are isolated per region and restored only while the region revision remains current.
+
+### Fixed
+
+- Equal-length `:re!` operations now retain in-place replacement semantics, including in overwrite-only views.
+- Resizing replacements now apply the large-match confirmation guard before collecting the full match set.
+
 ## [0.5.0] - 2026-06-29
 
 ### Added
@@ -193,6 +209,7 @@ Initial release.
 - CI on Ubuntu and Windows (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --all-targets`)
 - Release archives for Linux x86_64, Linux aarch64, macOS arm64, and Windows x86_64, published with `SHA256SUMS.txt`
 
+[0.5.1]: https://github.com/ycsgg/hxedit/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ycsgg/hxedit/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ycsgg/hxedit/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/ycsgg/hxedit/compare/v0.3.2...v0.3.3
